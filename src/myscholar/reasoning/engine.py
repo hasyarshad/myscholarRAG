@@ -64,7 +64,9 @@ class Engine:
         elapsed_ms = int((time.monotonic() - started) * 1000)
 
         trace = (
-            TraceEvent(stage=Stage.GENERATING, detail=self._generator.model_id),
+            TraceEvent(
+                stage=Stage.GENERATING, detail=self._generator.model_id, elapsed_ms=elapsed_ms
+            ),
             TraceEvent(stage=Stage.DONE, elapsed_ms=elapsed_ms),
         )
         return Answer(text=text, trace=trace)

@@ -56,6 +56,7 @@ def _build_chat(settings: Settings, *, model: str) -> ChatModel:
                 base_url=settings.llm.base_url,
                 temperature=settings.llm.temperature,
                 timeout_seconds=settings.llm.timeout_seconds,
+                suppress_reasoning=settings.llm.suppress_reasoning,
             )
 
         case LLMProvider.GROQ:

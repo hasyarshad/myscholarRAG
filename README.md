@@ -24,8 +24,11 @@ each one:
 Written as the project is built, in [`docs/learning/`](docs/learning/):
 
 - [00 — Architecture, ports, and why abstraction is the deployment story](docs/learning/00-architecture-and-ports.md)
+- [00b — Running services without root](docs/learning/00b-running-services-without-root.md)
 
 ## Quick start
+
+Nothing below needs root, Docker, or a GPU.
 
 ```bash
 make setup          # install dependencies (uv)
@@ -34,8 +37,20 @@ uv run myscholar config          # show resolved configuration
 uv run myscholar ask "hello"     # walking skeleton, fake components
 ```
 
-Copy `.env.example` to `.env` to change providers. The default configuration
-uses fakes and needs no models.
+The default configuration uses fakes, so this works on any machine. Copy
+`.env.example` to `.env` to switch to real models.
+
+### Local services
+
+Postgres and Ollama both run as ordinary user processes — see
+[00b](docs/learning/00b-running-services-without-root.md) for why, and how.
+
+```bash
+make db-setup       # once: create the cluster, enable pgvector (conda-provided)
+make ollama-setup   # once: install Ollama to ~/.local, pull qwen3:14b + qwen3:4b
+make up             # start both
+make down           # stop both
+```
 
 ## Architecture
 

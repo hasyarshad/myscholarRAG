@@ -42,10 +42,30 @@ class LLMSettings(BaseModel):
     provider: LLMProvider = LLMProvider.FAKE
 
     generator_model: str = "qwen3:14b"
-    """Model for final answer synthesis. Larger, slower, called once or twice."""
+    """Model for final answer synthesis. Larger, slower, called once or twice.
 
-    utility_model: str = "qwen3:4b"
-    """Model for classification and grading. Smaller, called many times per query."""
+    A reasoning model. Ollama separates its reasoning trace into a distinct
+    field, so the answer text stays clean, but the trace still consumes the
+    token budget and adds latency.
+    """
+
+    utility_model: str = "qwen3:4b-instruct"
+    """Model for classification and grading. Called many times per question.
+
+    Deliberately the *instruct* variant, not plain ``qwen3:4b``. The latter is
+    reasoning-only: it spends its whole token budget thinking before emitting
+    anything, so a short grading call returns empty content. Measured on a live
+    server — ``qwen3:4b`` used 16 tokens producing nothing, the instruct variant
+    answered in 2.
+    """
+
+    suppress_reasoning: bool = True
+    """Append Qwen3's ``/no_think`` directive to shorten reasoning traces.
+
+    Harmless for instruct models and measurably cheaper for reasoning ones.
+    Note this is *not* Ollama's ``think`` parameter, which was measured to make
+    matters worse — see the Ollama adapter.
+    """
 
     base_url: str = "http://localhost:11434"
     api_key: SecretStr | None = None

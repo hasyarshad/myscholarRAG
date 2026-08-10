@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help setup dev fmt lint typecheck test test-all db-up db-down db-logs clean
+.PHONY: help setup dev fmt lint typecheck test test-all db-up db-down clean
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -33,17 +33,38 @@ test-all:  ## Run every test, including integration
 check: lint typecheck test  ## Everything CI runs
 .PHONY: check
 
-db-up:  ## Start Postgres with pgvector
-	docker compose -f docker/compose.yaml up -d
-	@echo "waiting for postgres..."
-	@until docker compose -f docker/compose.yaml exec -T db pg_isready -U myscholar -q; do sleep 1; done
-	@echo "ready on localhost:5433"
+## --- Local services -------------------------------------------------------
+## Postgres and Ollama both run as ordinary user processes. The workstation is
+## a shared lab machine with no root, so Docker is not available here; the
+## Compose file under docker/ is a packaging artifact for other people.
+
+db-setup:  ## Create the Postgres cluster and enable pgvector (run once)
+	./scripts/db.sh setup
+
+db-up:  ## Start Postgres
+	./scripts/db.sh start
 
 db-down:  ## Stop Postgres
-	docker compose -f docker/compose.yaml down
+	./scripts/db.sh stop
 
-db-logs:  ## Tail Postgres logs
-	docker compose -f docker/compose.yaml logs -f db
+db-shell:  ## Open a psql session
+	./scripts/db.sh psql
+
+ollama-setup:  ## Install Ollama into ~/.local and pull the models (run once)
+	./scripts/ollama.sh install
+	./scripts/ollama.sh models
+
+ollama-up:  ## Start the Ollama server
+	./scripts/ollama.sh start
+
+ollama-down:  ## Stop the Ollama server
+	./scripts/ollama.sh stop
+
+up: db-up ollama-up  ## Start every local service
+	@echo "services up"
+
+down: db-down ollama-down  ## Stop every local service
+.PHONY: db-setup db-shell ollama-setup ollama-up ollama-down up down
 
 clean:  ## Remove caches and build artifacts
 	rm -rf .pytest_cache .ruff_cache .mypy_cache dist build

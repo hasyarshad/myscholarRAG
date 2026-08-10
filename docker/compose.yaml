@@ -1,3 +1,13 @@
+# Packaging artifact only.
+#
+# The development workstation is a shared lab machine with no root access and
+# no docker group membership, so this file cannot be exercised there — local
+# Postgres runs via scripts/db.sh against a conda-provided binary instead.
+#
+# This exists so that someone else, on a machine where Docker is available, can
+# bring the system up without reproducing the userspace setup. It is verified
+# in Phase 7A, not before; until then treat it as untested.
+
 name: myscholar
 
 services:

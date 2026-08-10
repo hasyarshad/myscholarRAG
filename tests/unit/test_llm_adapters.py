@@ -14,7 +14,11 @@ import pytest
 from pydantic import BaseModel
 
 from myscholar.adapters.llm.groq import GroqChatModel, GroqError, GroqRateLimitError
-from myscholar.adapters.llm.ollama import OllamaChatModel, OllamaError
+from myscholar.adapters.llm.ollama import (
+    NO_THINK_DIRECTIVE,
+    OllamaChatModel,
+    OllamaError,
+)
 from myscholar.ports.llm import Message, Role
 
 QUESTION = [Message(role=Role.USER, content="what is FCS-MPCC?")]
@@ -70,8 +74,14 @@ class TestOllama:
         assert options["temperature"] == 0.0
         assert options["seed"] == 42
 
-    async def test_thinking_is_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Reasoning traces cost latency and invite drift away from the context."""
+    async def test_reasoning_is_suppressed_by_prompt_directive(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Reasoning traces cost latency and invite drift away from the context.
+
+        Suppression happens through a prompt directive appended to the final
+        message, not through Ollama's ``think`` parameter — see the next test.
+        """
         captured: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -81,7 +91,45 @@ class TestOllama:
         _patch_transport(monkeypatch, httpx.MockTransport(handler))
         await OllamaChatModel("qwen3:14b").complete(QUESTION)
 
-        assert captured["think"] is False
+        messages = captured["messages"]
+        assert isinstance(messages, list)
+        assert messages[-1]["content"].endswith(NO_THINK_DIRECTIVE)
+
+    async def test_think_parameter_is_never_sent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Regression guard for a real defect found against a live server.
+
+        Sending ``think: false`` stops Ollama separating the reasoning trace
+        into its own field, but the model still produces one — so it lands in
+        ``message.content`` and corrupts the answer. Omitting the parameter
+        keeps ``content`` clean.
+        """
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.update(json.loads(request.content))
+            return httpx.Response(200, json={"message": {"content": "x"}})
+
+        _patch_transport(monkeypatch, httpx.MockTransport(handler))
+        await OllamaChatModel("qwen3:14b").complete(QUESTION)
+
+        assert "think" not in captured
+
+    async def test_reasoning_suppression_can_be_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """So the effect on answer quality can be measured in Phase 5."""
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.update(json.loads(request.content))
+            return httpx.Response(200, json={"message": {"content": "x"}})
+
+        _patch_transport(monkeypatch, httpx.MockTransport(handler))
+        await OllamaChatModel("qwen3:14b", suppress_reasoning=False).complete(QUESTION)
+
+        messages = captured["messages"]
+        assert isinstance(messages, list)
+        assert messages[-1]["content"] == "what is FCS-MPCC?"
 
     async def test_weights_are_kept_resident(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Otherwise every question after an idle gap pays a model reload."""
@@ -94,7 +142,9 @@ class TestOllama:
         _patch_transport(monkeypatch, httpx.MockTransport(handler))
         await OllamaChatModel("qwen3:14b").complete(QUESTION)
 
-        assert captured["keep_alive"] == "-1"
+        # A number, not the string "-1" — Ollama rejects that with
+        # 'missing unit in duration'. Found against a live server.
+        assert captured["keep_alive"] == -1
 
     async def test_structured_sends_the_schema(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Decoding is constrained to the schema rather than parsed hopefully."""

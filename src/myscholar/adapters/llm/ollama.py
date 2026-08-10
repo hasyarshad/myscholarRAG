@@ -25,6 +25,15 @@ class OllamaError(RuntimeError):
     """Ollama was unreachable or returned something unusable."""
 
 
+#: Qwen3 suppresses its own reasoning when this appears in the prompt.
+#: Measured on qwen3:4b: 51 completion tokens with it, 191 without, for the
+#: same single-word answer.
+#:
+#: Note this is *not* the same as Ollama's ``think: false`` parameter, which was
+#: measured to make things worse — see ``_payload`` below.
+NO_THINK_DIRECTIVE = "/no_think"
+
+
 class OllamaChatModel(ChatModel):
     def __init__(
         self,
@@ -33,16 +42,22 @@ class OllamaChatModel(ChatModel):
         base_url: str = "http://localhost:11434",
         temperature: float = 0.0,
         timeout_seconds: float = 120.0,
-        keep_alive: str = "-1",
+        keep_alive: int | str = -1,
+        suppress_reasoning: bool = True,
     ) -> None:
         self._model = model
         self._base_url = base_url.rstrip("/")
         self._temperature = temperature
         self._timeout = timeout_seconds
-        # "-1" keeps weights resident indefinitely. Without it Ollama evicts the
+        # -1 keeps weights resident indefinitely. Without it Ollama evicts the
         # model after five idle minutes, and the next question pays a
-        # multi-second reload — which looks like a slow pipeline, not a cold model.
+        # multi-second reload — which looks like a slow pipeline, not a cold
+        # model. Must be a number or a duration string like "10m"; the string
+        # "-1" is rejected with 'missing unit in duration'.
         self._keep_alive = keep_alive
+        # Reasoning traces cost latency and, on a grounded-extraction task, let
+        # the model argue itself away from the retrieved context.
+        self._suppress_reasoning = suppress_reasoning
 
     @property
     def model_id(self) -> str:
@@ -65,16 +80,23 @@ class OllamaChatModel(ChatModel):
         if max_tokens is not None:
             options["num_predict"] = max_tokens
 
+        wire = [{"role": m.role.value, "content": m.content} for m in messages]
+        if self._suppress_reasoning and wire:
+            wire[-1]["content"] += f" {NO_THINK_DIRECTIVE}"
+
+        # Ollama's `think: false` parameter is deliberately NOT sent here.
+        # Measured against qwen3 on Ollama 0.32.6: passing it stops Ollama
+        # separating the reasoning trace into its own `thinking` field, but the
+        # model still generates one — so the reasoning ends up inside
+        # `message.content` and contaminates the answer. Omitting it keeps
+        # `content` clean; the prompt directive above is what actually shortens
+        # the reasoning.
         return {
             "model": self._model,
-            "messages": [{"role": m.role.value, "content": m.content} for m in messages],
+            "messages": wire,
             "stream": stream,
             "keep_alive": self._keep_alive,
             "options": options,
-            # Qwen3 and similar models interleave reasoning traces by default.
-            # For grounded extraction that is latency without benefit, and it is
-            # a hallucination risk — the model reasons its way past the context.
-            "think": False,
         }
 
     async def complete(
