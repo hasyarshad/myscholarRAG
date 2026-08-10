@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -80,7 +80,7 @@ class PostgresStore(VectorStore):
         self._session = async_sessionmaker(engine, expire_on_commit=False)
 
     @contextlib.asynccontextmanager
-    async def session(self) -> AsyncIterator[AsyncSession]:
+    async def session(self) -> AsyncGenerator[AsyncSession]:
         async with self._session() as session:
             yield session
 

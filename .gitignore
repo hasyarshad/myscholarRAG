@@ -2,6 +2,9 @@
 papers/
 data/
 !data/.gitkeep
+# Curated bibliographic metadata is hand-corrected human work, not a build
+# artifact, and re-deriving it would mean redoing the review. Keep it.
+!data/metadata.yaml
 
 # Secrets
 .env
