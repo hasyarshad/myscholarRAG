@@ -14,6 +14,12 @@ dependencies = [
     "rich>=13.9",
     "structlog>=25.1",
     "httpx>=0.28",
+    "pyyaml>=6.0",
+    # Persistence is used by both ingestion and serving, so it belongs in the
+    # core dependencies rather than in either extra.
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.30",
+    "pgvector>=0.3",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +28,7 @@ local = [
     "ollama>=0.4",
     "sentence-transformers>=3.3",
     "torch>=2.5",
+    "torchvision>=0.20",
     "docling>=2.15",
 ]
 # Production runtime: CPU-only ONNX inference plus a hosted LLM.
@@ -30,9 +37,6 @@ serve = [
     "uvicorn[standard]>=0.34",
     "onnxruntime>=1.20",
     "tokenizers>=0.21",
-    "sqlalchemy[asyncio]>=2.0",
-    "asyncpg>=0.30",
-    "pgvector>=0.3",
 ]
 
 [dependency-groups]
@@ -43,6 +47,7 @@ dev = [
     "hypothesis>=6.123",
     "ruff>=0.9",
     "mypy>=1.14",
+    "types-pyyaml>=6.0",
 ]
 
 [project.scripts]
@@ -51,6 +56,23 @@ myscholar = "myscholar.cli:app"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# PyPI's default torch wheel is built against CUDA 13.0, but this machine's
+# driver reports 12.8, so that wheel silently falls back to CPU. The RTX 5090
+# is Blackwell (sm_120) and needs cu128 specifically — earlier builds don't
+# support the architecture, later ones outrun the driver.
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+# torchvision must come from the same index as torch. A mismatched pair
+# installs cleanly and then fails at import with
+# "operator torchvision::nms does not exist", because the compiled operators
+# are registered against a different torch build.
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/myscholar"]
@@ -78,6 +100,7 @@ select = [
     "PTH",      # prefer pathlib
     "RET",      # return consistency
     "SLF",      # private member access — flags reaching past an interface
+    "BLE",      # blind except — each one must be justified with a noqa
 ]
 ignore = [
     "ANN401",   # allow typing.Any where genuinely needed

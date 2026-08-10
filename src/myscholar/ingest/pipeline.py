@@ -1,0 +1,239 @@
+"""The ingestion pipeline: PDFs in, indexed chunks out."""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from uuid import uuid4
+
+from myscholar.adapters.persistence.orm import Chunk as ChunkRow
+from myscholar.adapters.persistence.orm import Document as DocumentRow
+from myscholar.adapters.persistence.orm import Section as SectionRow
+from myscholar.adapters.persistence.repository import PostgresStore
+from myscholar.domain.documents import PaperMetadata
+from myscholar.domain.enums import NON_INDEXED_SECTIONS, ChunkKind, DocumentKind, SectionKind
+from myscholar.ingest.chunker import (
+    ChunkingPolicy,
+    build_context_header,
+    chunk_section,
+    strip_mathematics,
+)
+from myscholar.ingest.metadata import MetadataExtractor, MetadataProposal, slugify
+from myscholar.ingest.sectionizer import Sectionizer
+from myscholar.ports.embedding import Embedder
+from myscholar.ports.extractor import DocumentExtractor, ExtractedBlock, ExtractionError
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class IngestReport:
+    documents: int = 0
+    sections: int = 0
+    chunks: int = 0
+    skipped: list[str] = field(default_factory=list)
+    failed: list[tuple[str, str]] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    section_stats: dict[str, int] = field(default_factory=dict)
+    proposals: list[MetadataProposal] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingSection:
+    kind: SectionKind
+    heading: str
+    blocks: list[ExtractedBlock]
+
+    @property
+    def pages(self) -> tuple[int, int]:
+        pages = [b.page for b in self.blocks if b.page > 0]
+        return (min(pages), max(pages)) if pages else (0, 0)
+
+
+class IngestionPipeline:
+    def __init__(
+        self,
+        *,
+        extractor: DocumentExtractor,
+        embedder: Embedder,
+        store: PostgresStore,
+        sectionizer: Sectionizer,
+        metadata_extractor: MetadataExtractor,
+        policy: ChunkingPolicy | None = None,
+    ) -> None:
+        self._extractor = extractor
+        self._embedder = embedder
+        self._store = store
+        self._sectionizer = sectionizer
+        self._metadata = metadata_extractor
+        self._policy = policy or ChunkingPolicy()
+
+    async def run(
+        self,
+        paths: Sequence[Path],
+        *,
+        kind: DocumentKind = DocumentKind.PAPER,
+        known_metadata: dict[str, PaperMetadata] | None = None,
+        force: bool = False,
+    ) -> IngestReport:
+        report = IngestReport()
+        known_metadata = known_metadata or {}
+
+        for path in paths:
+            try:
+                await self._ingest_one(path, kind, known_metadata, force, report)
+            except ExtractionError as exc:
+                report.failed.append((path.name, str(exc)))
+                logger.warning("extraction failed for %s: %s", path.name, exc)
+            except Exception as exc:
+                report.failed.append((path.name, f"{type(exc).__name__}: {exc}"))
+                logger.exception("ingestion failed for %s", path.name)
+
+        report.section_stats = dict(self._sectionizer.stats)
+        return report
+
+    async def _ingest_one(
+        self,
+        path: Path,
+        kind: DocumentKind,
+        known_metadata: dict[str, PaperMetadata],
+        force: bool,
+        report: IngestReport,
+    ) -> None:
+        extracted = self._extractor.extract(path)
+
+        # Content-hash skip: extraction costs ~40s per paper, and a chunker
+        # change should not pay that again for unchanged files.
+        if not force and await self._store.document_exists(extracted.content_sha256):
+            report.skipped.append(f"{path.name} (unchanged)")
+            return
+
+        if reviewed := known_metadata.get(path.name):
+            metadata = reviewed
+        else:
+            proposal = await self._metadata.propose(
+                first_page=extracted.first_page_text, source_path=path
+            )
+            metadata = proposal.metadata
+            report.proposals.append(proposal)
+
+        sections = await self._assign_sections(extracted.blocks, kind=kind, title=metadata.title)
+        indexed = [s for s in sections if s.kind not in NON_INDEXED_SECTIONS]
+        if dropped := len(sections) - len(indexed):
+            report.warnings.append(f"{path.name}: {dropped} section(s) excluded from the index")
+
+        if force:
+            await self._store.delete_document(slugify(metadata.title, path.stem))
+
+        document = DocumentRow(
+            id=uuid4(),
+            slug=slugify(metadata.title, path.stem),
+            kind=kind.value,
+            title=metadata.title,
+            authors=list(metadata.authors),
+            year=metadata.year,
+            venue=metadata.venue,
+            doi=metadata.doi,
+            metadata_verified=metadata.verified,
+            source_path=str(path),
+            content_sha256=extracted.content_sha256,
+            page_count=extracted.page_count,
+        )
+
+        payload: list[tuple[SectionRow, list[tuple[ChunkRow, list[float]]]]] = []
+        for ordinal, pending in enumerate(indexed):
+            page_start, page_end = pending.pages
+            section_row = SectionRow(
+                id=uuid4(),
+                document_id=document.id,
+                ordinal=ordinal,
+                kind=pending.kind.value,
+                heading=pending.heading,
+                page_start=page_start,
+                page_end=page_end,
+            )
+
+            chunks = chunk_section([(b.kind, b.text, b.page) for b in pending.blocks], self._policy)
+            if not chunks:
+                continue
+
+            header = build_context_header(
+                title=metadata.title,
+                year=metadata.year,
+                venue=metadata.venue,
+                section_heading=pending.heading,
+                section_kind=pending.kind.value,
+            )
+
+            # LaTeX is stripped for embedding only. The stored text stays
+            # verbatim because citation verification checks quoted spans
+            # against it.
+            embed_texts = [f"{header}\n\n{strip_mathematics(c.text)}" for c in chunks]
+            vectors = await self._embedder.embed_documents(embed_texts)
+
+            rows = [
+                (
+                    ChunkRow(
+                        id=uuid4(),
+                        document_id=document.id,
+                        section_id=section_row.id,
+                        ordinal_in_section=chunk.ordinal,
+                        kind=chunk.kind.value,
+                        text=chunk.text,
+                        context_header=header,
+                        token_count=chunk.token_count,
+                        page=chunk.page,
+                    ),
+                    vector,
+                )
+                for chunk, vector in zip(chunks, vectors, strict=True)
+            ]
+            payload.append((section_row, rows))
+            report.chunks += len(rows)
+
+        if not payload:
+            report.failed.append((path.name, "no indexable content after sectioning"))
+            return
+
+        await self._store.add_document(document, payload, model_id=self._embedder.model_id)
+        report.documents += 1
+        report.sections += len(payload)
+        report.warnings.extend(f"{path.name}: {w}" for w in extracted.warnings)
+
+    async def _assign_sections(
+        self,
+        blocks: Sequence[ExtractedBlock],
+        *,
+        kind: DocumentKind,
+        title: str,
+    ) -> list[_PendingSection]:
+        """Group blocks under their preceding heading.
+
+        Content appearing before any heading — the abstract on most IEEE
+        papers — is collected into a leading section rather than discarded.
+        """
+        sections: list[_PendingSection] = []
+        current = _PendingSection(kind=SectionKind.ABSTRACT, heading="Abstract", blocks=[])
+
+        for block in blocks:
+            if block.is_heading:
+                if current.blocks:
+                    sections.append(current)
+                assignment = await self._sectionizer.classify(
+                    block.heading or "", title=title, kind=kind
+                )
+                current = _PendingSection(
+                    kind=assignment.kind, heading=block.heading or "", blocks=[]
+                )
+                continue
+
+            # Equations are kept but never start a section, and a section made
+            # only of equations carries nothing answerable.
+            current.blocks.append(block)
+
+        if current.blocks:
+            sections.append(current)
+
+        return [s for s in sections if any(b.kind is not ChunkKind.EQUATION for b in s.blocks)]

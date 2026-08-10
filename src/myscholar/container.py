@@ -81,8 +81,13 @@ def _build_embedder(settings: Settings) -> Embedder:
             return HashEmbedder(dim=settings.embedding.dim)
 
         case EmbeddingProvider.TORCH:
-            msg = "The torch embedder arrives in Phase 1 (ingestion)."
-            raise ConfigurationError(msg)
+            from myscholar.adapters.embedding.torch_embedder import TorchEmbedder
+
+            return TorchEmbedder(
+                settings.embedding.model_id,
+                device=settings.embedding.device,
+                batch_size=settings.embedding.batch_size,
+            )
 
         case EmbeddingProvider.ONNX:
             msg = "The ONNX embedder arrives in Phase 7 (deployment)."
