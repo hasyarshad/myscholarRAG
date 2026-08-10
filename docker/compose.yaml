@@ -1,0 +1,24 @@
+name: myscholar
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: myscholar
+      POSTGRES_PASSWORD: myscholar
+      POSTGRES_DB: myscholar
+    ports:
+      # 5433 on the host, so an existing local Postgres on 5432 is untouched.
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myscholar -d myscholar"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:

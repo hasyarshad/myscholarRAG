@@ -1,0 +1,144 @@
+"""Documents, sections and chunks — the ingestion side of the domain."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from uuid import UUID
+
+from myscholar.domain.enums import ChunkKind, DocumentKind, SectionKind
+
+
+@dataclass(frozen=True, slots=True)
+class PaperMetadata:
+    """Bibliographic facts, human-verified during ingestion.
+
+    ``verified`` matters: once a human has confirmed these, bibliographic
+    questions are answered from this record by SQL rather than by asking a
+    language model to recall them. That removes an entire class of confident
+    fabrication for the cost of about ten minutes of review.
+    """
+
+    title: str
+    authors: tuple[str, ...] = ()
+    year: int | None = None
+    venue: str | None = None
+    doi: str | None = None
+    url: str | None = None
+    verified: bool = False
+
+    @property
+    def citation_label(self) -> str:
+        """Short human-readable label, e.g. 'Arshad et al., 2023'."""
+        if not self.authors:
+            stem = self.title[:40]
+        elif len(self.authors) == 1:
+            stem = self.authors[0]
+        else:
+            stem = f"{self.authors[0]} et al."
+        return f"{stem}, {self.year}" if self.year else stem
+
+
+@dataclass(frozen=True, slots=True)
+class Document:
+    id: UUID
+    slug: str
+    kind: DocumentKind
+    metadata: PaperMetadata
+    source_path: str
+    content_sha256: str
+    page_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class Section:
+    id: UUID
+    document_id: UUID
+    ordinal: int
+    kind: SectionKind
+    heading: str
+    page_start: int
+    page_end: int
+
+
+@dataclass(frozen=True, slots=True)
+class Chunk:
+    """The unit that gets embedded and retrieved.
+
+    Three text fields, deliberately distinct:
+
+    - ``text`` is verbatim source, used for generation and for verifying that
+      quoted spans are real.
+    - ``context_header`` names the paper and section.
+    - ``embed_text`` is the header plus the text, and is the *only* one that
+      gets embedded.
+
+    The separation is what lets a chunk reading "the proposed method reduces
+    THD by 3.1%" be retrievable for "what has he achieved on harmonic
+    distortion?" — the bare sentence names neither the topic nor the paper.
+    """
+
+    id: UUID
+    document_id: UUID
+    section_id: UUID
+    ordinal_in_section: int
+    kind: ChunkKind
+    text: str
+    context_header: str
+    token_count: int
+    page: int
+
+    @property
+    def embed_text(self) -> str:
+        return f"{self.context_header}\n\n{self.text}" if self.context_header else self.text
+
+
+@dataclass(frozen=True, slots=True)
+class ContextBlock:
+    """A contiguous span of chunks handed to the model as one citable unit.
+
+    Produced by parent expansion: retrieval finds small precise chunks, then
+    neighbours within the same section are merged so the model sees coherent
+    prose rather than isolated fragments. ``label`` (C1, C2, ...) is what the
+    model cites and what the citation verifier resolves.
+    """
+
+    label: str
+    document_id: UUID
+    section_id: UUID
+    document_title: str
+    section_heading: str
+    text: str
+    page_start: int
+    page_end: int
+    score: float = 0.0
+
+    def render(self) -> str:
+        """Format for inclusion in a prompt."""
+        return (
+            f"[{self.label}] {self.document_title} — {self.section_heading} "
+            f"(p. {self.page_start}-{self.page_end})\n{self.text}"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentSummary:
+    """A document-level representation, embedded separately from its chunks.
+
+    Lets "what has he worked on in predictive control?" match whole papers
+    rather than whichever individual sentence happens to score highest.
+    """
+
+    document_id: UUID
+    kind: str  # abstract | contributions | methods | findings
+    text: str
+
+
+@dataclass(slots=True)
+class IngestReport:
+    """Outcome of an ingestion run, for the Phase 1 gate."""
+
+    documents: int = 0
+    sections: int = 0
+    chunks: int = 0
+    skipped: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
