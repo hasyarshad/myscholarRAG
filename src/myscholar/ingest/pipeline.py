@@ -13,17 +13,18 @@ from myscholar.adapters.persistence.orm import Document as DocumentRow
 from myscholar.adapters.persistence.orm import Section as SectionRow
 from myscholar.adapters.persistence.repository import PostgresStore
 from myscholar.domain.documents import PaperMetadata
-from myscholar.domain.enums import NON_INDEXED_SECTIONS, ChunkKind, DocumentKind, SectionKind
+from myscholar.domain.enums import NON_INDEXED_SECTIONS, DocumentKind
 from myscholar.ingest.chunker import (
     ChunkingPolicy,
     build_context_header,
     chunk_section,
     strip_mathematics,
 )
+from myscholar.ingest.grouping import group_into_sections
 from myscholar.ingest.metadata import MetadataExtractor, MetadataProposal, slugify
 from myscholar.ingest.sectionizer import Sectionizer
 from myscholar.ports.embedding import Embedder
-from myscholar.ports.extractor import DocumentExtractor, ExtractedBlock, ExtractionError
+from myscholar.ports.extractor import DocumentExtractor, ExtractionError
 
 logger = logging.getLogger(__name__)
 
@@ -38,18 +39,6 @@ class IngestReport:
     warnings: list[str] = field(default_factory=list)
     section_stats: dict[str, int] = field(default_factory=dict)
     proposals: list[MetadataProposal] = field(default_factory=list)
-
-
-@dataclass(frozen=True, slots=True)
-class _PendingSection:
-    kind: SectionKind
-    heading: str
-    blocks: list[ExtractedBlock]
-
-    @property
-    def pages(self) -> tuple[int, int]:
-        pages = [b.page for b in self.blocks if b.page > 0]
-        return (min(pages), max(pages)) if pages else (0, 0)
 
 
 class IngestionPipeline:
@@ -119,7 +108,12 @@ class IngestionPipeline:
             metadata = proposal.metadata
             report.proposals.append(proposal)
 
-        sections = await self._assign_sections(extracted.blocks, kind=kind, title=metadata.title)
+        sections = await group_into_sections(
+            extracted.blocks,
+            sectionizer=self._sectionizer,
+            title=metadata.title,
+            kind=kind,
+        )
         indexed = [s for s in sections if s.kind not in NON_INDEXED_SECTIONS]
         if dropped := len(sections) - len(indexed):
             report.warnings.append(f"{path.name}: {dropped} section(s) excluded from the index")
@@ -201,39 +195,3 @@ class IngestionPipeline:
         report.documents += 1
         report.sections += len(payload)
         report.warnings.extend(f"{path.name}: {w}" for w in extracted.warnings)
-
-    async def _assign_sections(
-        self,
-        blocks: Sequence[ExtractedBlock],
-        *,
-        kind: DocumentKind,
-        title: str,
-    ) -> list[_PendingSection]:
-        """Group blocks under their preceding heading.
-
-        Content appearing before any heading — the abstract on most IEEE
-        papers — is collected into a leading section rather than discarded.
-        """
-        sections: list[_PendingSection] = []
-        current = _PendingSection(kind=SectionKind.ABSTRACT, heading="Abstract", blocks=[])
-
-        for block in blocks:
-            if block.is_heading:
-                if current.blocks:
-                    sections.append(current)
-                assignment = await self._sectionizer.classify(
-                    block.heading or "", title=title, kind=kind
-                )
-                current = _PendingSection(
-                    kind=assignment.kind, heading=block.heading or "", blocks=[]
-                )
-                continue
-
-            # Equations are kept but never start a section, and a section made
-            # only of equations carries nothing answerable.
-            current.blocks.append(block)
-
-        if current.blocks:
-            sections.append(current)
-
-        return [s for s in sections if any(b.kind is not ChunkKind.EQUATION for b in s.blocks)]
