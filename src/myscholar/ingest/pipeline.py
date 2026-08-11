@@ -120,12 +120,14 @@ class IngestionPipeline:
         if dropped := len(sections) - len(indexed):
             report.warnings.append(f"{path.name}: {dropped} section(s) excluded from the index")
 
+        slug = slugify(metadata.title, path.stem, taken=await self._store.taken_slugs())
         if force:
-            await self._store.delete_document(slugify(metadata.title, path.stem))
+            await self._store.delete_document(slug)
+            slug = slugify(metadata.title, path.stem, taken=await self._store.taken_slugs())
 
         document = DocumentRow(
             id=uuid4(),
-            slug=slugify(metadata.title, path.stem),
+            slug=slug,
             kind=kind.value,
             title=metadata.title,
             authors=list(metadata.authors),

@@ -15,6 +15,7 @@ import pytest
 
 from myscholar.adapters.extraction.docling_extractor import (
     DoclingExtractor,
+    is_plausible_title,
     looks_like_section_heading,
     normalise,
 )
@@ -91,18 +92,18 @@ class TestTitleHandling:
     def test_the_title_is_captured_as_metadata(self, pdf: Path) -> None:
         extractor = _extractor(
             [
-                _Item("title", "A Chaos Based SVPWM Technique"),
+                _Item("title", "A Chaos Based SVPWM Technique for B4 Inverters"),
                 _Item("text", "Some body text."),
             ]
         )
 
-        assert extractor.extract(pdf).title == "A Chaos Based SVPWM Technique"
+        assert extractor.extract(pdf).title == "A Chaos Based SVPWM Technique for B4 Inverters"
 
     def test_the_abstract_survives_as_content(self, pdf: Path) -> None:
         """It sits before the first heading, and is among the best text there is."""
         extractor = _extractor(
             [
-                _Item("title", "Some Paper"),
+                _Item("title", "Some Paper About Predictive Control Methods"),
                 _Item("text", "Abstract— we propose a scheme."),
                 _Item("section_header", "I. INTRODUCTION"),
             ]
@@ -116,7 +117,7 @@ class TestTitleHandling:
         """Only the first is the paper's; later ones are figure or table titles."""
         extractor = _extractor(
             [
-                _Item("title", "The Paper Title"),
+                _Item("title", "A Study of Predictive Control for Induction Motors"),
                 _Item("text", "Body."),
                 _Item("title", "TABLE I: Motor parameters"),
             ]
@@ -124,7 +125,7 @@ class TestTitleHandling:
 
         result = extractor.extract(pdf)
 
-        assert result.title == "The Paper Title"
+        assert result.title == "A Study of Predictive Control for Induction Motors"
         assert any("TABLE I" in b.text for b in result.blocks)
         assert "TABLE I: Motor parameters" not in result.headings
 
@@ -242,7 +243,7 @@ class TestTitleLabelledAsSectionHeader:
         )
         extractor = _extractor(
             [
-                _Item("title", "The Paper Title"),
+                _Item("title", "A Study of Predictive Control for Induction Motors"),
                 _Item("text", "Abstract."),
                 _Item("section_header", long_heading),
                 _Item("text", "Body."),
@@ -251,7 +252,7 @@ class TestTitleLabelledAsSectionHeader:
 
         result = extractor.extract(pdf)
 
-        assert result.title == "The Paper Title"
+        assert result.title == "A Study of Predictive Control for Induction Motors"
         assert long_heading in result.headings
 
     def test_a_short_leading_heading_is_not_mistaken_for_a_title(self, pdf: Path) -> None:
@@ -314,7 +315,9 @@ class TestTitleBeforeAnySectionHeading:
         extractor = _extractor(
             [
                 _Item("text", "IEEE TRANSACTIONS ON INDUSTRIAL ELECTRONICS, VOL. 70"),
-                _Item("section_header", "An Overview of Sequential Learning Algorithms"),
+                _Item(
+                    "section_header", "An Overview of Sequential Learning Algorithms for Networks"
+                ),
                 _Item("section_header", "Abstract"),
                 _Item("text", "We survey online learning."),
             ]
@@ -322,16 +325,20 @@ class TestTitleBeforeAnySectionHeading:
 
         result = extractor.extract(pdf)
 
-        assert result.title == "An Overview of Sequential Learning Algorithms"
+        assert result.title == "An Overview of Sequential Learning Algorithms for Networks"
         assert "Abstract" in result.headings
 
     def test_the_title_repeated_as_a_running_head_is_dropped(self, pdf: Path) -> None:
         extractor = _extractor(
             [
-                _Item("section_header", "An Overview of Sequential Learning Algorithms"),
+                _Item(
+                    "section_header", "An Overview of Sequential Learning Algorithms for Networks"
+                ),
                 _Item("section_header", "Abstract"),
                 _Item("text", "We survey online learning."),
-                _Item("section_header", "An Overview of Sequential Learning Algorithms"),
+                _Item(
+                    "section_header", "An Overview of Sequential Learning Algorithms for Networks"
+                ),
                 _Item("text", "More content."),
             ]
         )
@@ -339,3 +346,73 @@ class TestTitleBeforeAnySectionHeading:
         result = extractor.extract(pdf)
 
         assert result.headings == ("Abstract",)
+
+
+class TestPublisherFurniture:
+    """Elsevier, Frontiers and IEEE templates print a banner above the title.
+
+    Taking the first heading-like item produced five documents titled
+    "ScienceDirect", "ARTICLE", "ORIGINAL RESEARCH" and "Research paper" — and
+    a sixth failed outright when its slug collided with an existing one.
+    """
+
+    @pytest.mark.parametrize(
+        "banner",
+        [
+            "ScienceDirect",
+            "ScienceDirect ScienceDirect",
+            "ARTICLE",
+            "ORIGINAL RESEARCH",
+            "Research paper",
+            "Contents lists available at ScienceDirect",
+            "Journal homepage: www.elsevier.com/locate/x",
+        ],
+    )
+    def test_banners_are_not_plausible_titles(self, banner: str) -> None:
+        assert not is_plausible_title(banner)
+
+    def test_the_real_title_after_a_banner_is_captured(self, pdf: Path) -> None:
+        """The banner must not count as a section heading either.
+
+        Treating it as one set the "seen a section heading" flag and blocked
+        the real title on the following line, which is what produced the
+        ScienceDirect-titled documents.
+        """
+        extractor = _extractor(
+            [
+                _Item("section_header", "ScienceDirect"),
+                _Item(
+                    "section_header",
+                    "Genetic algorithm tuned adaptive discrete-time sliding mode controller",
+                ),
+                _Item("section_header", "Abstract"),
+                _Item("text", "We propose a controller."),
+            ]
+        )
+
+        result = extractor.extract(pdf)
+
+        assert result.title.startswith("Genetic algorithm tuned")
+        assert "ScienceDirect" not in result.headings
+
+    def test_a_very_short_heading_is_never_taken_as_a_title(self, pdf: Path) -> None:
+        extractor = _extractor(
+            [_Item("section_header", "ARTICLE"), _Item("text", "Body text here.")]
+        )
+
+        assert extractor.extract(pdf).title == ""
+
+
+class TestCarriageReturns:
+    def test_carriage_returns_become_newlines(self) -> None:
+        """Two papers have CRLF line endings inside text items."""
+        assert "\r" not in normalise("First line\r\nSecond line")
+
+    def test_ordinary_text_is_untouched(self) -> None:
+        text = "The stator flux estimate converges within two sampling periods."
+        assert normalise(text) == text
+
+    def test_legitimate_word_doubling_survives(self) -> None:
+        """English doubles words; normalisation must not silently rewrite prose."""
+        assert normalise("had had a different meaning") == "had had a different meaning"
+        assert normalise("that that is fine") == "that that is fine"

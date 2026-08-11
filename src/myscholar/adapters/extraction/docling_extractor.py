@@ -77,13 +77,52 @@ _SECTION_HEADING_SHAPE = re.compile(
 )
 
 
+#: Publisher furniture that appears above the title on the first page.
+#: Elsevier, Frontiers and IEEE templates all put a banner there, and taking
+#: the first heading-like item produced five documents titled "ScienceDirect",
+#: "ARTICLE", "ORIGINAL RESEARCH" and "Research paper".
+_PUBLISHER_BANNER = re.compile(
+    r"^\s*(sciencedirect|elsevier|springer|wiley|mdpi|frontiers|ieee|acm|"
+    r"article|original\s+research|research\s+(paper|article)|review\s+article|"
+    r"contents\s+lists|journal\s+homepage|open\s+access|"
+    r"regular\s+paper|full\s+length\s+article)\b",
+    re.IGNORECASE,
+)
+
+#: Shorter than this and it is furniture, not a title. Measured across the
+#: corpus, real titles run 79-108 characters; the shortest plausible academic
+#: title is still well above this floor.
+_MIN_TITLE_CHARS = 30
+
+
 def looks_like_section_heading(text: str) -> bool:
     """Whether a heading-like item is a section heading rather than a title."""
     return bool(_SECTION_HEADING_SHAPE.match(text))
 
 
+def is_plausible_title(text: str) -> bool:
+    """Whether a heading-like item could be the paper's title."""
+    return (
+        len(text) >= _MIN_TITLE_CHARS
+        and not _PUBLISHER_BANNER.match(text)
+        and not looks_like_section_heading(text)
+    )
+
+
 _WHITESPACE = re.compile(r"[ \t]+")
 _BLANK_LINES = re.compile(r"\n{3,}")
+
+# Collapsing repeated phrases is deliberately NOT done here.
+#
+# Two of the twenty papers have overlapping text layers that stack a phrase
+# several times inside one item ("Biases Biases BiasesBiases"). Catching that
+# needs a self-referential regex, and every version that caught the artefact
+# also ate legitimate English doubling ("had had", "that that"). The artefact
+# is cosmetic — it slightly skews lexical term frequencies across a handful of
+# headings — whereas rewriting real prose would be a correctness bug in the
+# very text that citations are verified against.
+#
+# Revisit only if Phase 5 shows lexical retrieval suffering on those papers.
 
 
 def normalise(text: str) -> str:
@@ -95,6 +134,7 @@ def normalise(text: str) -> str:
     either consistently.
     """
     text = unicodedata.normalize("NFKC", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = text.replace("­", "")  # soft hyphens, invisible but tokenised
     text = text.replace("​", "")  # zero-width spaces
     text = _WHITESPACE.sub(" ", text)
@@ -189,10 +229,24 @@ class DoclingExtractor(DocumentExtractor):
                 and is_heading_label
                 and page <= 1
                 and not seen_section_heading
+                and is_plausible_title(text)
+            )
+
+            # Furniture above the title — a banner, a correspondence line — is
+            # neither a title nor a section. Treating it as a section heading
+            # set seen_section_heading and blocked the real title that follows,
+            # which is why five papers ended up titled "ScienceDirect".
+            is_furniture = (
+                is_heading_label
+                and page <= 1
+                and not seen_section_heading
+                and not is_plausible_title(text)
                 and not looks_like_section_heading(text)
             )
 
-            if is_title_label or looks_like_title:
+            if is_furniture:
+                blocks.append(ExtractedBlock(kind=ChunkKind.PROSE, text=text, page=page))
+            elif (is_title_label and is_plausible_title(text)) or looks_like_title:
                 # The first such item is the paper's title; later ones are
                 # figure or table titles, which belong with the surrounding
                 # prose rather than replacing the document title.

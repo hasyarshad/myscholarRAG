@@ -70,9 +70,32 @@ def find_year(text: str) -> int | None:
     return max(set(years), key=years.count) if years else None
 
 
-def slugify(title: str, fallback: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", (title or fallback).lower()).strip("-")
-    return slug[:120] or fallback.lower()[:120]
+def slugify(title: str, fallback: str, *, taken: set[str] | None = None) -> str:
+    """Build a URL-safe identifier, unique against ``taken``.
+
+    Uniqueness matters because the slug is a unique key. Two papers from the
+    same publisher can extract to the same title if extraction goes wrong, and
+    a collision then fails the whole document rather than degrading — which is
+    exactly what happened on the first full run.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", (title or fallback).lower()).strip("-")[:120]
+    if not slug:
+        slug = re.sub(r"[^a-z0-9]+", "-", fallback.lower()).strip("-")[:120] or "document"
+
+    if taken is None or slug not in taken:
+        return slug
+
+    # Disambiguate with the fallback (the filename stem) before resorting to
+    # a counter, since that at least stays human-readable.
+    from_fallback = re.sub(r"[^a-z0-9]+", "-", fallback.lower()).strip("-")[:120]
+    if from_fallback and from_fallback not in taken:
+        return from_fallback
+
+    for suffix in range(2, 100):
+        candidate = f"{slug[:115]}-{suffix}"
+        if candidate not in taken:
+            return candidate
+    return f"{slug[:110]}-{abs(hash(fallback)) % 100000}"
 
 
 @dataclass(frozen=True, slots=True)

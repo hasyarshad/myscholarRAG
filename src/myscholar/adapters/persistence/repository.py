@@ -130,6 +130,12 @@ class PostgresStore(VectorStore):
 
     # -- ingestion ---------------------------------------------------------
 
+    async def taken_slugs(self) -> set[str]:
+        """Slugs already in use, so a new document can avoid colliding."""
+        async with self.session() as session:
+            rows = await session.execute(select(Document.slug))
+            return set(rows.scalars().all())
+
     async def document_exists(self, content_sha256: str) -> bool:
         async with self.session() as session:
             found = await session.scalar(
