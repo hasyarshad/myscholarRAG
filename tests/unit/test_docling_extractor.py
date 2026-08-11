@@ -13,7 +13,11 @@ from typing import Any
 
 import pytest
 
-from myscholar.adapters.extraction.docling_extractor import DoclingExtractor, normalise
+from myscholar.adapters.extraction.docling_extractor import (
+    DoclingExtractor,
+    looks_like_section_heading,
+    normalise,
+)
 from myscholar.domain.enums import ChunkKind
 from myscholar.ports.extractor import ExtractionError
 
@@ -197,3 +201,141 @@ class TestNormalise:
 
     def test_paragraph_breaks_survive(self) -> None:
         assert "\n\n" in normalise("First paragraph.\n\n\n\nSecond paragraph.")
+
+
+class TestTitleLabelledAsSectionHeader:
+    """Docling is inconsistent about how it labels the paper's own title.
+
+    On some documents it is a title item; on others a section_header. Label
+    alone is therefore not a sufficient signal, and relying on it left the
+    title becoming a section on part of the corpus.
+    """
+
+    def test_a_long_leading_section_header_is_treated_as_the_title(self, pdf: Path) -> None:
+        long_title = (
+            "Artificial Bee Colony Optimized Self-tuning PI Speed Controller for "
+            "FCS-MPCC of Permanent Magnet Synchronous Machines"
+        )
+        extractor = _extractor(
+            [
+                _Item("section_header", long_title),
+                _Item("text", "Abstract— this paper proposes a tuning scheme."),
+                _Item("section_header", "I. INTRODUCTION"),
+                _Item("text", "Motor drives are widely used."),
+            ]
+        )
+
+        result = extractor.extract(pdf)
+
+        assert result.title == long_title
+        assert result.headings == ("I. INTRODUCTION",)
+
+    def test_a_long_heading_later_in_the_document_stays_a_heading(self, pdf: Path) -> None:
+        """Only the leading item can be the title; later long headings are real.
+
+        This corpus genuinely contains headings such as "V. FINITE CONTROL SET
+        MODEL PREDICTIVE TORQUE CONTROL OF INDUCTION MOTOR FED WITH SSTPI".
+        """
+        long_heading = (
+            "V. FINITE CONTROL SET MODEL PREDICTIVE TORQUE CONTROL OF INDUCTION "
+            "MOTOR FED WITH SSTPI AND ITS EXPERIMENTAL VALIDATION ON A TEST BENCH"
+        )
+        extractor = _extractor(
+            [
+                _Item("title", "The Paper Title"),
+                _Item("text", "Abstract."),
+                _Item("section_header", long_heading),
+                _Item("text", "Body."),
+            ]
+        )
+
+        result = extractor.extract(pdf)
+
+        assert result.title == "The Paper Title"
+        assert long_heading in result.headings
+
+    def test_a_short_leading_heading_is_not_mistaken_for_a_title(self, pdf: Path) -> None:
+        extractor = _extractor([_Item("section_header", "I. INTRODUCTION"), _Item("text", "Body.")])
+
+        result = extractor.extract(pdf)
+
+        assert result.headings == ("I. INTRODUCTION",)
+        assert result.title == ""
+
+
+class TestSectionHeadingShape:
+    """Shape, not length, is what separates a title from a section heading.
+
+    Measured across the corpus: titles run 79-108 characters, while genuine
+    headings such as "Q. Adaptive Forgetting Factor with Generalized
+    Regularization Online Sequential ..." run longer. A length threshold
+    misclassified four papers in five.
+    """
+
+    @pytest.mark.parametrize(
+        "heading",
+        [
+            "I. INTRODUCTION",
+            "III. METHODOLOGY",
+            "3.1 Results",
+            "B. ESTIMATION",
+            "Abstract",
+            "Keywords",
+            "IMPACT STATEMENT",
+            "CCS CONCEPTS",
+            "REFERENCES",
+            "Q. Adaptive Forgetting Factor with Generalized Regularization Online"
+            " Sequential Learning",
+        ],
+    )
+    def test_section_headings_are_recognised(self, heading: str) -> None:
+        assert looks_like_section_heading(heading)
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "A Chaos Based SVPWM technique for B4 Inverter fed Two-Phase Symmetric Induction Motor",
+            "Exploring Crowdsourced Content Moderation Through Lens of Reddit during COVID-19",
+            "Robust Control of Grid-Tied Inverter with LC Filter via Adaptive FCS-MPC",
+            "Leveraging Meta-Learner-based Stacking Framework for Stator Winding Fault Detection",
+        ],
+    )
+    def test_paper_titles_are_not_mistaken_for_headings(self, title: str) -> None:
+        assert not looks_like_section_heading(title)
+
+
+class TestTitleBeforeAnySectionHeading:
+    def test_a_title_after_a_banner_block_is_still_captured(self, pdf: Path) -> None:
+        """Several papers open with a journal banner or author block.
+
+        Keying on "no content yet" missed those; the condition is "no section
+        heading yet".
+        """
+        extractor = _extractor(
+            [
+                _Item("text", "IEEE TRANSACTIONS ON INDUSTRIAL ELECTRONICS, VOL. 70"),
+                _Item("section_header", "An Overview of Sequential Learning Algorithms"),
+                _Item("section_header", "Abstract"),
+                _Item("text", "We survey online learning."),
+            ]
+        )
+
+        result = extractor.extract(pdf)
+
+        assert result.title == "An Overview of Sequential Learning Algorithms"
+        assert "Abstract" in result.headings
+
+    def test_the_title_repeated_as_a_running_head_is_dropped(self, pdf: Path) -> None:
+        extractor = _extractor(
+            [
+                _Item("section_header", "An Overview of Sequential Learning Algorithms"),
+                _Item("section_header", "Abstract"),
+                _Item("text", "We survey online learning."),
+                _Item("section_header", "An Overview of Sequential Learning Algorithms"),
+                _Item("text", "More content."),
+            ]
+        )
+
+        result = extractor.extract(pdf)
+
+        assert result.headings == ("Abstract",)

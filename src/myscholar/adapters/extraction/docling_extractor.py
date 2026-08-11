@@ -49,6 +49,39 @@ _SKIP_LABELS = frozenset({"page_footer", "page_header", "picture"})
 #: The document title, captured for metadata rather than treated as content.
 _TITLE_LABELS = frozenset({"title"})
 
+#: Shapes that mark a genuine section heading rather than a paper title.
+#:
+#: Length is not a usable discriminator: measured across the corpus, titles run
+#: 79-108 characters while real headings such as "Q. Adaptive Forgetting Factor
+#: with Generalized Regularization Online Sequential ..." run longer still.
+#: Shape is reliable, because a paper title never opens with an enumerator or a
+#: canonical section word.
+_SECTION_HEADING_SHAPE = re.compile(
+    r"""^\s*(
+        # Numeric enumeration: "3.1 Results", "4. Methods". Trailing
+        # punctuation is optional because both forms occur.
+        \d+(?:\.\d+)*[.):\-]?\s+
+        # Roman or single-letter enumeration: "III. METHODOLOGY", "B) Results".
+        # Punctuation is required here, otherwise a title beginning "A Chaos
+        # Based ..." or "I Propose ..." would match.
+        |(?:[IVXLC]+|[A-Z])[.):\-]\s+
+        # Canonical section words. No trailing \b, so plurals and derived
+        # forms ("REFERENCES", "Methodology", "Experiments") match too.
+        |(?:abstract|introduction|keyword|index\s+terms|background|
+           related\s+work|literature\s+review|methodolog|method|
+           experiment|result|discussion|conclusion|reference|
+           bibliograph|acknowledg|appendix|nomenclature|
+           impact\s+statement|ccs\s+concepts)
+    )""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def looks_like_section_heading(text: str) -> bool:
+    """Whether a heading-like item is a section heading rather than a title."""
+    return bool(_SECTION_HEADING_SHAPE.match(text))
+
+
 _WHITESPACE = re.compile(r"[ \t]+")
 _BLANK_LINES = re.compile(r"\n{3,}")
 
@@ -127,6 +160,7 @@ class DoclingExtractor(DocumentExtractor):
         blocks: list[ExtractedBlock] = []
         warnings: list[str] = []
         title = ""
+        seen_section_heading = False
 
         for item, _level in document.iterate_items():
             label = str(getattr(item, "label", "")).lower()
@@ -136,15 +170,42 @@ class DoclingExtractor(DocumentExtractor):
 
             page = self._page_of(item)
 
-            if any(t in label for t in _TITLE_LABELS):
-                # The first title item is the paper's; later ones are usually
+            is_title_label = any(t in label for t in _TITLE_LABELS)
+            is_heading_label = any(head in label for head in _HEADING_LABELS)
+
+            # Docling is inconsistent about the paper's own title: measured
+            # across this corpus, only one paper in five carries a title item,
+            # and the rest label the title as a section_header. Label alone is
+            # therefore not enough.
+            #
+            # The reliable signal is position plus shape: the first heading-like
+            # item, before any content, that does not look like a section
+            # heading, is the paper title.
+            # Keyed on "no section heading yet" rather than "no content yet":
+            # several papers open with a journal banner or an author block
+            # before the title, and requiring an empty block list missed those.
+            looks_like_title = (
+                not title
+                and is_heading_label
+                and page <= 1
+                and not seen_section_heading
+                and not looks_like_section_heading(text)
+            )
+
+            if is_title_label or looks_like_title:
+                # The first such item is the paper's title; later ones are
                 # figure or table titles, which belong with the surrounding
                 # prose rather than replacing the document title.
                 if not title:
                     title = text
                 else:
                     blocks.append(ExtractedBlock(kind=ChunkKind.PROSE, text=text, page=page))
-            elif any(head in label for head in _HEADING_LABELS):
+            elif is_heading_label:
+                # Several papers repeat the title as a running heading. Once it
+                # has been claimed as the title, later copies are not sections.
+                if title and text.casefold() == title.casefold():
+                    continue
+                seen_section_heading = True
                 blocks.append(
                     ExtractedBlock(kind=ChunkKind.PROSE, text=text, page=page, heading=text)
                 )
