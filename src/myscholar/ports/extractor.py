@@ -38,7 +38,15 @@ class ExtractedDocument:
     page_count: int
     blocks: tuple[ExtractedBlock, ...]
     first_page_text: str
-    """Used for bibliographic metadata extraction — title, authors, venue, DOI."""
+    """Used for bibliographic metadata extraction — authors, venue, DOI."""
+
+    title: str = ""
+    """The document's own title, as the extractor labelled it.
+
+    Captured separately rather than left in the block stream: treating it as a
+    section heading produces a section spanning the abstract and author block,
+    headed by the entire paper title.
+    """
 
     warnings: tuple[str, ...] = field(default_factory=tuple)
 

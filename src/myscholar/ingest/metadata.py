@@ -88,7 +88,13 @@ class MetadataExtractor:
     def __init__(self, model: ChatModel | None = None) -> None:
         self._model = model
 
-    async def propose(self, *, first_page: str, source_path: Path) -> MetadataProposal:
+    async def propose(
+        self,
+        *,
+        first_page: str,
+        source_path: Path,
+        extracted_title: str = "",
+    ) -> MetadataProposal:
         notes: list[str] = []
         regex_doi = find_doi(first_page)
         regex_year = find_year(first_page)
@@ -103,7 +109,10 @@ class MetadataExtractor:
             except Exception as exc:  # noqa: BLE001 - fall back rather than abort a run
                 notes.append(f"model extraction failed ({type(exc).__name__}); using filename")
 
-        title = (extracted.title if extracted else "") or source_path.stem
+        # The extractor's title item is the typeset title, so it beats both the
+        # model's reading of the page and the filename. Filenames in this corpus
+        # are lowercased and truncated by the download tool.
+        title = extracted_title or (extracted.title if extracted else "") or source_path.stem
         # Regex findings win over the model's for DOI and year: a pattern match
         # against the literal page text cannot hallucinate, and both fields are
         # exactly the sort a model will confidently invent.

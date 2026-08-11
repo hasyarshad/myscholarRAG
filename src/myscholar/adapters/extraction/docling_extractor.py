@@ -33,12 +33,21 @@ from myscholar.ports.extractor import (
 
 logger = logging.getLogger(__name__)
 
-#: Docling item labels that represent a heading rather than content.
-_HEADING_LABELS = frozenset({"section_header", "title", "page_header"})
+#: Labels that start a new section.
+#:
+#: ``title`` is deliberately excluded. Docling labels the paper's own title as a
+#: title item, and treating it as a section heading produces a section whose
+#: heading is the entire paper title, swallowing the abstract and author block —
+#: which then gets classified by content and filed as, say, methods. The title
+#: is metadata, not a section, and is captured separately.
+_HEADING_LABELS = frozenset({"section_header"})
 
-#: Labels carrying no answerable content — running headers, page numbers,
-#: footnotes referencing the publisher, and so on.
+#: Labels carrying no answerable content — running heads, page numbers, and
+#: image placeholders.
 _SKIP_LABELS = frozenset({"page_footer", "page_header", "picture"})
+
+#: The document title, captured for metadata rather than treated as content.
+_TITLE_LABELS = frozenset({"title"})
 
 _WHITESPACE = re.compile(r"[ \t]+")
 _BLANK_LINES = re.compile(r"\n{3,}")
@@ -117,6 +126,7 @@ class DoclingExtractor(DocumentExtractor):
 
         blocks: list[ExtractedBlock] = []
         warnings: list[str] = []
+        title = ""
 
         for item, _level in document.iterate_items():
             label = str(getattr(item, "label", "")).lower()
@@ -126,7 +136,15 @@ class DoclingExtractor(DocumentExtractor):
 
             page = self._page_of(item)
 
-            if any(head in label for head in _HEADING_LABELS):
+            if any(t in label for t in _TITLE_LABELS):
+                # The first title item is the paper's; later ones are usually
+                # figure or table titles, which belong with the surrounding
+                # prose rather than replacing the document title.
+                if not title:
+                    title = text
+                else:
+                    blocks.append(ExtractedBlock(kind=ChunkKind.PROSE, text=text, page=page))
+            elif any(head in label for head in _HEADING_LABELS):
                 blocks.append(
                     ExtractedBlock(kind=ChunkKind.PROSE, text=text, page=page, heading=text)
                 )
@@ -158,12 +176,16 @@ class DoclingExtractor(DocumentExtractor):
         if not first_page:
             first_page = "\n".join(b.text for b in blocks[:15])[:4000]
 
+        if not title:
+            warnings.append("no title item found; falling back to the filename")
+
         return ExtractedDocument(
             source_path=path,
             content_sha256=_sha256(path),
             page_count=len(getattr(document, "pages", {}) or {}),
             blocks=tuple(blocks),
             first_page_text=first_page,
+            title=title,
             warnings=tuple(warnings),
         )
 

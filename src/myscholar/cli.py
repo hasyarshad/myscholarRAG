@@ -276,3 +276,72 @@ def papers_import_metadata(
         f"{len(entries)} entries, {len(verified)} marked verified.\n"
         f"[dim]Re-run `myscholar ingest run --force` to apply them.[/dim]"
     )
+
+
+@papers_app.command("show")
+def papers_show(
+    slug: Annotated[str, typer.Argument(help="Document slug, or any part of the title.")],
+    section: Annotated[str | None, typer.Option(help="Only this section kind.")] = None,
+    limit: Annotated[int, typer.Option(help="How many chunks to show.")] = 6,
+    full: Annotated[bool, typer.Option("--full", help="Show whole chunks, not excerpts.")] = False,
+) -> None:
+    """Inspect the chunks stored for one document.
+
+    The Phase 1 review step: check that section labels are right and that
+    contextual headers name the paper and section, since a chunk whose header
+    is wrong is retrievable only by accident.
+    """
+    settings = load_settings()
+
+    async def _fetch() -> Any:
+        from sqlalchemy import select
+
+        from myscholar.adapters.persistence.orm import Chunk, Document, Section
+        from myscholar.adapters.persistence.repository import PostgresStore, create_engine
+
+        store = PostgresStore(create_engine(settings.database.url))
+        async with store.session() as session:
+            document = await session.scalar(
+                select(Document).where(Document.slug.ilike(f"%{slug}%")).limit(1)
+            )
+            if document is None:
+                return None, []
+
+            statement = (
+                select(Chunk, Section)
+                .join(Section, Section.id == Chunk.section_id)
+                .where(Chunk.document_id == document.id)
+                .order_by(Section.ordinal, Chunk.ordinal_in_section)
+            )
+            if section:
+                statement = statement.where(Section.kind == section)
+            rows = await session.execute(statement.limit(limit))
+            return document, rows.all()
+
+    document, rows = asyncio.run(_fetch())
+    if document is None:
+        console.print(f"[red]no document matching {slug!r}[/red]")
+        raise typer.Exit(1)
+    if not rows:
+        console.print(f"[yellow]no chunks found (section filter: {section})[/yellow]")
+        return
+
+    console.print(
+        Panel(
+            f"[bold]{document.title}[/bold]\n"
+            f"{', '.join(document.authors) or 'authors unknown'}\n"
+            f"{document.venue or 'venue unknown'} · {document.year or 'year unknown'}"
+            + ("" if document.metadata_verified else "  [yellow](metadata unverified)[/yellow]"),
+            border_style="blue",
+        )
+    )
+
+    for chunk, section_row in rows:
+        body = chunk.text if full else chunk.text[:400] + ("…" if len(chunk.text) > 400 else "")
+        console.print(
+            f"\n[dim]{section_row.kind} · {section_row.heading or '—'} · "
+            f"chunk {chunk.ordinal_in_section} · p.{chunk.page} · "
+            f"{chunk.token_count} tokens · {chunk.kind}[/dim]"
+        )
+        console.print(f"[cyan]header:[/cyan] [dim]{chunk.context_header}[/dim]")
+        console.print(body)

@@ -103,7 +103,9 @@ class IngestionPipeline:
             metadata = reviewed
         else:
             proposal = await self._metadata.propose(
-                first_page=extracted.first_page_text, source_path=path
+                first_page=extracted.first_page_text,
+                source_path=path,
+                extracted_title=extracted.title,
             )
             metadata = proposal.metadata
             report.proposals.append(proposal)
