@@ -4,8 +4,8 @@ An adaptive, citation-grounded retrieval-augmented generation system over a
 personal corpus of 20 research papers and a CV, built to be embedded in a
 portfolio website.
 
-> **Status: Phase 0 of 8.** The skeleton is in place; ingestion and retrieval
-> come next. See [the build plan](#build-phases) below.
+> **Status: Phase 1 of 8.** The corpus is indexed. Retrieval is next.
+> See [the build plan](#build-phases) below.
 
 ## What makes it different from a naive RAG
 
@@ -25,6 +25,8 @@ Written as the project is built, in [`docs/learning/`](docs/learning/):
 
 - [00 — Architecture, ports, and why abstraction is the deployment story](docs/learning/00-architecture-and-ports.md)
 - [00b — Running services without root](docs/learning/00b-running-services-without-root.md)
+- [01 — Chunking and embeddings](docs/learning/01-chunking-and-embeddings.md)
+- [01b — What extraction actually produced](docs/learning/01b-extraction-findings.md)
 
 ## Quick start
 
@@ -47,10 +49,28 @@ Postgres and Ollama both run as ordinary user processes — see
 
 ```bash
 make db-setup       # once: create the cluster, enable pgvector (conda-provided)
-make ollama-setup   # once: install Ollama to ~/.local, pull qwen3:14b + qwen3:4b
+make ollama-setup   # once: install Ollama to ~/.local, pull the models
 make up             # start both
 make down           # stop both
 ```
+
+### Building the index
+
+```bash
+cp .env.example .env             # then set providers to ollama / torch
+uv run myscholar ingest run      # extract, section, chunk, embed, index
+uv run myscholar papers list     # what was indexed
+uv run myscholar papers sections # how sections were classified
+```
+
+Ingestion writes `data/metadata.yaml` with the bibliographic details it
+extracted. **Review it and set `verified: true`** — bibliographic questions
+("how many papers in 2023?") are answered by SQL over verified rows rather
+than by asking a model to recall them, which is where naive RAG invents most
+confidently.
+
+Extraction is cached by content hash, so re-running after a chunker change
+does not re-parse unchanged PDFs.
 
 ## Architecture
 
@@ -74,8 +94,8 @@ knows which implementation is in use.
 
 | Phase | Scope | State |
 |---|---|---|
-| 0 | Foundations: config, ports, fakes, CLI | in progress |
-| 1 | Ingestion: PDF parsing, sectioning, chunking, embedding | pending |
+| 0 | Foundations: config, ports, fakes, CLI | done |
+| 1 | Ingestion: PDF parsing, sectioning, chunking, embedding | done |
 | 2 | Retrieval: hybrid search, RRF, reranking, parent expansion | pending |
 | 3 | Query translation and routing | pending |
 | 4 | Adaptive loop: grading, corrective retry, citation verification | pending |
@@ -88,7 +108,7 @@ knows which implementation is in use.
 ```bash
 make dev        # install with GPU and serving extras
 make check      # lint, typecheck, test — what CI runs
-make db-up      # Postgres with pgvector on :5433
+make up         # start Postgres and Ollama
 ```
 
 ## Licence
