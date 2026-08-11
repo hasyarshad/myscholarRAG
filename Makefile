@@ -64,7 +64,20 @@ up: db-up ollama-up  ## Start every local service
 	@echo "services up"
 
 down: db-down ollama-down  ## Stop every local service
-.PHONY: db-setup db-shell ollama-setup ollama-up ollama-down up down
+.PHONY: db-setup db-shell ollama-setup ollama-up ollama-down up down ingest ingest-force papers
+
+## --- Corpus ---------------------------------------------------------------
+
+ingest:  ## Build the index from papers/ (needs make up first)
+	uv run myscholar ingest run
+
+ingest-force:  ## Rebuild the index, ignoring the content-hash cache
+	uv run myscholar ingest run --force
+
+papers:  ## List what is indexed
+	uv run myscholar papers list
+	@echo
+	uv run myscholar papers sections
 
 clean:  ## Remove caches and build artifacts
 	rm -rf .pytest_cache .ruff_cache .mypy_cache dist build
