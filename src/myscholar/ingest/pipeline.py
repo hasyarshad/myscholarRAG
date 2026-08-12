@@ -120,10 +120,14 @@ class IngestionPipeline:
         if dropped := len(sections) - len(indexed):
             report.warnings.append(f"{path.name}: {dropped} section(s) excluded from the index")
 
-        slug = slugify(metadata.title, path.stem, taken=await self._store.taken_slugs())
         if force:
-            await self._store.delete_document(slug)
-            slug = slugify(metadata.title, path.stem, taken=await self._store.taken_slugs())
+            # Keyed on content, not on the slug. Correcting a title changes the
+            # slug, so deleting by slug removes nothing and the insert then
+            # collides on the content hash — which failed every document on a
+            # forced re-run after a metadata review.
+            await self._store.delete_by_content_hash(extracted.content_sha256)
+
+        slug = slugify(metadata.title, path.stem, taken=await self._store.taken_slugs())
 
         document = DocumentRow(
             id=uuid4(),

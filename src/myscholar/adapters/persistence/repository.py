@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -147,6 +147,17 @@ class PostgresStore(VectorStore):
         async with self.session() as session, session.begin():
             await session.execute(delete(Document).where(Document.slug == slug))
 
+    async def delete_by_content_hash(self, content_sha256: str) -> None:
+        """Remove a document by source content.
+
+        Re-ingestion has to key on the file, not the slug. Correcting a title
+        changes the slug, so deleting by slug removes nothing and the insert
+        then collides on the content hash — which failed every document on a
+        forced re-run after a metadata review.
+        """
+        async with self.session() as session, session.begin():
+            await session.execute(delete(Document).where(Document.content_sha256 == content_sha256))
+
     async def add_document(
         self,
         document: Document,
@@ -175,6 +186,68 @@ class PostgresStore(VectorStore):
                     )
             for summary in summaries:
                 session.add(summary)
+
+    async def chunks_for_reheadering(self) -> list[tuple[UUID, UUID, str, str, str]]:
+        """Every chunk with what is needed to rebuild its contextual header.
+
+        Returns ``(chunk_id, document_id, chunk_text, section_heading,
+        section_kind)``.
+        """
+        async with self.session() as session:
+            rows = await session.execute(
+                select(
+                    Chunk.id,
+                    Chunk.document_id,
+                    Chunk.text,
+                    Section.heading,
+                    Section.kind,
+                ).join(Section, Section.id == Chunk.section_id)
+            )
+            return [
+                (row.id, row.document_id, row.text, row.heading, row.kind) for row in rows.all()
+            ]
+
+    async def update_metadata(self, slug_or_path: str, metadata: dict[str, Any]) -> UUID | None:
+        """Apply reviewed bibliographic fields to one document.
+
+        Matched on source path rather than slug, because correcting a title
+        changes the slug and the review file is keyed by filename.
+        """
+        async with self.session() as session, session.begin():
+            document = await session.scalar(
+                select(Document).where(Document.source_path.like(f"%{slug_or_path}"))
+            )
+            if document is None:
+                return None
+            for field_name, value in metadata.items():
+                setattr(document, field_name, value)
+            return document.id
+
+    async def replace_chunk_headers(
+        self,
+        updates: Sequence[tuple[UUID, str, Vector]],
+        *,
+        model_id: str,
+    ) -> None:
+        """Rewrite contextual headers and their embeddings.
+
+        The header names the paper and section, so correcting a title changes
+        what every chunk of that paper embeds as. Re-embedding is required;
+        re-extraction is not.
+        """
+        async with self.session() as session, session.begin():
+            for chunk_id, header, vector in updates:
+                await session.execute(
+                    update(Chunk).where(Chunk.id == chunk_id).values(context_header=header)
+                )
+                await session.execute(
+                    update(ChunkEmbedding)
+                    .where(
+                        ChunkEmbedding.chunk_id == chunk_id,
+                        ChunkEmbedding.model_id == model_id,
+                    )
+                    .values(embedding=vector)
+                )
 
     # -- statistics --------------------------------------------------------
 

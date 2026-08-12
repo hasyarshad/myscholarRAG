@@ -261,8 +261,16 @@ def papers_sections() -> None:
 def papers_import_metadata(
     path: Annotated[Path | None, typer.Option(help="Reviewed YAML file.")] = None,
 ) -> None:
-    """Apply reviewed bibliographic metadata to the index."""
-    from myscholar.ingest.metadata import read_review_file
+    """Apply reviewed bibliographic metadata to the index.
+
+    Updates the document rows, then rebuilds and re-embeds every affected
+    chunk's contextual header — because the header names the paper, so
+    correcting a title changes what those chunks embed as.
+
+    This does not re-extract the PDFs, which is what makes it take seconds
+    rather than the half hour a full `ingest run --force` costs.
+    """
+    from myscholar.ingest.metadata import MetadataFileError, read_review_file
 
     settings = load_settings()
     target = path or settings.data_dir / "metadata.yaml"
@@ -270,12 +278,88 @@ def papers_import_metadata(
         console.print(f"[red]no such file: {target}[/red]")
         raise typer.Exit(1)
 
-    entries = read_review_file(target)
-    verified = {k: v for k, v in entries.items() if v.verified}
+    try:
+        entries = read_review_file(target)
+    except MetadataFileError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    verified = {name: meta for name, meta in entries.items() if meta.verified}
+    if not verified:
+        console.print(
+            f"[yellow]{len(entries)} entries, none marked verified.[/yellow]\n"
+            f"Set [bold]verified: true[/bold] on the entries you have checked."
+        )
+        return
+
+    async def _apply() -> tuple[int, int]:
+        from myscholar.adapters.persistence.repository import PostgresStore, create_engine
+        from myscholar.ingest.chunker import build_context_header, strip_mathematics
+
+        container = build_container(settings)
+        store = PostgresStore(create_engine(settings.database.url))
+
+        updated_documents: dict[Any, Any] = {}
+        for filename, meta in verified.items():
+            document_id = await store.update_metadata(
+                filename,
+                {
+                    "title": meta.title,
+                    "authors": list(meta.authors),
+                    "year": meta.year,
+                    "venue": meta.venue,
+                    "doi": meta.doi,
+                    "metadata_verified": True,
+                },
+            )
+            if document_id is not None:
+                updated_documents[document_id] = meta
+
+        rows = await store.chunks_for_reheadering()
+        affected = [r for r in rows if r[1] in updated_documents]
+        if not affected:
+            return len(updated_documents), 0
+
+        headers = [
+            build_context_header(
+                title=updated_documents[document_id].title,
+                year=updated_documents[document_id].year,
+                venue=updated_documents[document_id].venue,
+                section_heading=heading,
+                section_kind=kind,
+            )
+            for _chunk_id, document_id, _text, heading, kind in affected
+        ]
+        embed_texts = [
+            f"{header}\n\n{strip_mathematics(text)}"
+            for header, (_cid, _did, text, _h, _k) in zip(headers, affected, strict=True)
+        ]
+        vectors = await container.embedder.embed_documents(embed_texts)
+
+        await store.replace_chunk_headers(
+            [
+                (row[0], header, vector)
+                for row, header, vector in zip(affected, headers, vectors, strict=True)
+            ],
+            model_id=container.embedder.model_id,
+        )
+        return len(updated_documents), len(affected)
+
+    documents, chunks = asyncio.run(_apply())
+
+    if not documents:
+        console.print(
+            "[yellow]no indexed documents matched the reviewed entries.[/yellow]\n"
+            "Filenames in the review file must match the ingested source paths."
+        )
+        return
+
     console.print(
-        f"{len(entries)} entries, {len(verified)} marked verified.\n"
-        f"[dim]Re-run `myscholar ingest run --force` to apply them.[/dim]"
+        f"[green]updated[/green] {documents} document(s), "
+        f"re-embedded {chunks} chunk(s) with corrected headers"
     )
+    if skipped := len(entries) - len(verified):
+        console.print(f"[dim]{skipped} entry(ies) not marked verified, left unchanged[/dim]")
 
 
 @papers_app.command("show")

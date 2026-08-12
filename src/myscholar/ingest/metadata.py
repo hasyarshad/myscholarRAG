@@ -192,15 +192,54 @@ def write_review_file(proposals: list[MetadataProposal], path: Path) -> None:
         "# Only verified entries are used to answer bibliographic questions, which\n"
         "# are otherwise the ones a language model gets confidently wrong.\n"
         "# Entries with a _check key had something the extractor was unsure about;\n"
-        "# they are listed first. Delete _check once reviewed.\n\n"
+        "# they are listed first. Delete _check once reviewed.\n"
+        "#\n"
+        "# Keep values quoted. Titles here contain colons, and an unquoted value\n"
+        '# containing ": " is read by YAML as a nested mapping.\n\n'
     )
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(header + yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), "utf-8")
+    # default_style='"' quotes every scalar. Titles in this corpus routinely
+    # contain ": ", which YAML reads as a nested mapping when unquoted, and the
+    # resulting parse error is opaque to someone editing prose.
+    body = yaml.safe_dump(
+        payload, sort_keys=False, allow_unicode=True, default_style='"', width=100
+    )
+    path.write_text(header + body, "utf-8")
+
+
+class MetadataFileError(RuntimeError):
+    """The review file could not be read.
+
+    Raised in place of a raw YAML ``ScannerError``, which points at a line and
+    column without explaining what a person editing prose is supposed to do
+    about it.
+    """
 
 
 def read_review_file(path: Path) -> dict[str, PaperMetadata]:
     """Read a reviewed YAML file, keyed by filename."""
-    raw: Any = yaml.safe_load(path.read_text("utf-8")) or []
+    try:
+        raw: Any = yaml.safe_load(path.read_text("utf-8")) or []
+    except yaml.YAMLError as exc:
+        # By far the most common cause: a title containing ": ", which YAML
+        # reads as a nested mapping unless the value is quoted. Academic titles
+        # use colons constantly, and the fix is not obvious from the raw error.
+        mark = getattr(exc, "problem_mark", None)
+        where = f" at line {mark.line + 1}" if mark is not None else ""
+        line = ""
+        if mark is not None:
+            lines = path.read_text("utf-8").splitlines()
+            if mark.line < len(lines):
+                line = f"\n\n    {lines[mark.line].strip()}"
+        msg = (
+            f"{path} is not valid YAML{where}.{line}\n\n"
+            f"The usual cause is a value containing a colon followed by a space, "
+            f"such as a title like 'Revisiting media literacy: a new scale'. "
+            f"Wrap the whole value in double quotes:\n\n"
+            f'    title: "Revisiting media literacy: a new scale"'
+        )
+        raise MetadataFileError(msg) from exc
+
     result: dict[str, PaperMetadata] = {}
     for entry in raw:
         if not isinstance(entry, dict) or "file" not in entry:
