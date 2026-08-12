@@ -524,3 +524,104 @@ def search(
             console.print(f"{block.text[:500]}{'…' if len(block.text) > 500 else ''}\n")
         else:
             console.print(f"[dim]{block.text[:160].replace(chr(10), ' ')}…[/dim]\n")
+
+
+def _build_router(settings: Any) -> Any:
+    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
+    from myscholar.query.classifier import QueryClassifier
+    from myscholar.query.planner import QueryPlanner
+    from myscholar.query.router import QueryRouter
+    from myscholar.query.transforms import QueryTransformer
+    from myscholar.retrieval.retriever import HybridRetriever
+
+    container = build_container(settings)
+    store = PostgresStore(create_engine(settings.database.url))
+
+    return QueryRouter(
+        classifier=QueryClassifier(container.utility),
+        planner=QueryPlanner(top_k=settings.retrieval.top_k, rerank_k=settings.retrieval.rerank_k),
+        transformer=QueryTransformer(container.utility),
+        retriever=HybridRetriever(
+            store=store,
+            embedder=container.embedder,
+            reranker=container.reranker,
+            top_k=settings.retrieval.top_k,
+            rerank_k=settings.retrieval.rerank_k,
+            window=settings.retrieval.window,
+            dense_weight=settings.retrieval.dense_weight,
+            lexical_weight=settings.retrieval.lexical_weight,
+        ),
+        store=store,
+    )
+
+
+@app.command()
+def route(
+    question: Annotated[str, typer.Argument(help="The question to route.")],
+    show_text: Annotated[bool, typer.Option("--text", help="Show passage text.")] = False,
+) -> None:
+    """Show how a question is classified and what the router does with it.
+
+    Retrieval only — no answer is generated. This is the Phase 3 gate: the
+    classification, the plan it produced, and the queries actually searched for.
+    """
+    settings = load_settings()
+    result = asyncio.run(_build_router(settings).route(question))
+
+    classification, plan = result.classification, result.plan
+    timings = " · ".join(f"{stage} {ms}ms" for stage, ms in result.timings_ms.items())
+
+    console.print(
+        Panel(
+            f"[bold]{classification.query_class.value}[/bold] "
+            f"[dim](decided by {classification.decided_by})[/dim]\n"
+            f"[dim]{classification.reasoning or '—'}[/dim]",
+            title="classification",
+            border_style="cyan",
+        )
+    )
+
+    routing = []
+    if plan.use_sql:
+        routing.append("[bold]SQL over verified metadata[/bold] — no vector search")
+    elif not plan.retrieve:
+        routing.append("[bold]canned reply[/bold] — no retrieval, no generation")
+    else:
+        routing.append(f"transforms: {', '.join(t.value for t in plan.transforms) or 'none'}")
+        routing.append(f"top_k={plan.top_k} rerank_k={plan.rerank_k}")
+        if plan.filter_document_titles:
+            routing.append(f"filtered to: {plan.filter_document_titles[0][:60]}")
+        if plan.boost_sections:
+            routing.append(f"sections: {', '.join(sorted(s.value for s in plan.boost_sections))}")
+        if plan.max_chunks_per_document:
+            routing.append(f"max {plan.max_chunks_per_document} blocks per paper")
+    console.print(Panel("\n".join(routing), title="plan", border_style="green"))
+
+    if result.bibliographic is not None:
+        console.print(Panel(result.bibliographic.text, title="answer (SQL)", border_style="blue"))
+        if result.bibliographic.unverified:
+            console.print(
+                f"[yellow]{result.bibliographic.unverified} document(s) excluded "
+                f"as unverified[/yellow]"
+            )
+    elif plan.canned_response:
+        console.print(Panel(plan.canned_response, title="answer", border_style="yellow"))
+
+    if result.queries:
+        table = Table("Origin", "Query", "Weight", box=None)
+        for query in result.queries:
+            table.add_row(query.origin.value, query.text[:80], f"{query.weight:.1f}")
+        console.print(table)
+
+    for block in result.blocks:
+        console.print(
+            f"\n[bold cyan]{block.label}[/bold cyan] [bold]{block.document_title[:64]}[/bold]"
+            f"\n[dim]{block.section_heading[:56]} · p.{block.page_start}-{block.page_end}[/dim]"
+        )
+        console.print(
+            f"[dim]{block.text[:200].replace(chr(10), ' ')}…[/dim]"
+            if not show_text
+            else block.text[:600]
+        )
+
+    console.print(f"\n[dim]{timings}[/dim]")
