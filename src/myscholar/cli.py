@@ -299,11 +299,29 @@ def papers_import_metadata(
         container = build_container(settings)
         store = PostgresStore(create_engine(settings.database.url))
 
+        from myscholar.ingest.metadata import slugify
+
         updated_documents: dict[Any, Any] = {}
+        taken = await store.taken_slugs()
+        current = await store.slugs_by_filename()
         for filename, meta in verified.items():
+            # The slug is derived from the title, so correcting a title leaves
+            # a stale identifier behind. Slugs are the public handle for a
+            # document, so they have to follow.
+            #
+            # A document's own current slug is excluded from the collision set:
+            # treating it as taken makes every regeneration look like a clash
+            # and appends a counter to every slug in the corpus.
+            own = current.get(filename)
+            others = taken - {own} if own else taken
+            new_slug = slugify(meta.title, Path(filename).stem, taken=others)
+            if own:
+                taken.discard(own)
+            taken.add(new_slug)
             document_id = await store.update_metadata(
                 filename,
                 {
+                    "slug": new_slug,
                     "title": meta.title,
                     "authors": list(meta.authors),
                     "year": meta.year,
@@ -429,3 +447,80 @@ def papers_show(
         )
         console.print(f"[cyan]header:[/cyan] [dim]{chunk.context_header}[/dim]")
         console.print(body)
+
+
+# ---------------------------------------------------------------------------
+# Retrieval
+# ---------------------------------------------------------------------------
+
+
+def _build_retriever(settings: Any, *, with_reranker: bool = True) -> Any:
+    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
+    from myscholar.retrieval.retriever import HybridRetriever
+
+    container = build_container(settings)
+    store = PostgresStore(create_engine(settings.database.url))
+
+    return HybridRetriever(
+        store=store,
+        embedder=container.embedder,
+        reranker=container.reranker if with_reranker else None,
+        top_k=settings.retrieval.top_k,
+        rerank_k=settings.retrieval.rerank_k,
+        window=settings.retrieval.window,
+        dense_weight=settings.retrieval.dense_weight,
+        lexical_weight=settings.retrieval.lexical_weight,
+    )
+
+
+@app.command()
+def search(
+    query: Annotated[str, typer.Argument(help="What to search for.")],
+    mode: Annotated[
+        str, typer.Option(help="dense | hybrid | full (adds the cross-encoder).")
+    ] = "full",
+    limit: Annotated[int, typer.Option(help="How many results to show.")] = 5,
+    show_text: Annotated[bool, typer.Option("--text", help="Show passage text.")] = False,
+) -> None:
+    """Search the corpus. Generation is not involved.
+
+    The three modes are the Phase 2 ablation: dense reproduces the Phase 1
+    baseline, hybrid adds the lexical branch, full adds the cross-encoder.
+    """
+    from myscholar.retrieval.retriever import RetrievalMode
+
+    settings = load_settings()
+    try:
+        retrieval_mode = RetrievalMode(mode)
+    except ValueError:
+        console.print(f"[red]unknown mode {mode!r}; use dense, hybrid or full[/red]")
+        raise typer.Exit(1) from None
+
+    async def _run() -> Any:
+        retriever = _build_retriever(settings, with_reranker=retrieval_mode is RetrievalMode.FULL)
+        return await retriever.retrieve(query, mode=retrieval_mode, limit=limit)
+
+    result = asyncio.run(_run())
+
+    if not result.blocks:
+        console.print("[yellow]nothing found[/yellow]")
+        return
+
+    timings = " · ".join(f"{stage} {ms}ms" for stage, ms in result.timings_ms.items())
+    console.print(
+        f"[dim]mode={result.mode.value} · {len(result.candidates)} candidates · {timings}"
+        + ("  [yellow](reranker unavailable)[/yellow]" if result.degraded else "")
+        + "[/dim]\n"
+    )
+
+    for block in result.blocks:
+        console.print(
+            f"[bold cyan]{block.label}[/bold cyan] "
+            f"[bold]{block.document_title[:70]}[/bold]\n"
+            f"[dim]{block.section_heading[:60]} · p.{block.page_start}-{block.page_end} · "
+            f"score {block.score:.4f}[/dim]"
+        )
+        if show_text:
+            console.print(f"{block.text[:500]}{'…' if len(block.text) > 500 else ''}\n")
+        else:
+            console.print(f"[dim]{block.text[:160].replace(chr(10), ' ')}…[/dim]\n")

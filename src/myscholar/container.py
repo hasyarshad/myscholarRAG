@@ -102,8 +102,12 @@ def _build_reranker(settings: Settings) -> Reranker:
             return NoopReranker()
 
         case RerankerProvider.TORCH:
-            msg = "The torch reranker arrives in Phase 2 (retrieval)."
-            raise ConfigurationError(msg)
+            from myscholar.adapters.reranking.torch_reranker import TorchReranker
+
+            return TorchReranker(
+                settings.reranker.model_id,
+                device=settings.reranker.device,
+            )
 
         case RerankerProvider.ONNX:
             msg = "The ONNX reranker arrives in Phase 7 (deployment)."

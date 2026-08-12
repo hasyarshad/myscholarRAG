@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -207,7 +208,18 @@ class PostgresStore(VectorStore):
                 (row.id, row.document_id, row.text, row.heading, row.kind) for row in rows.all()
             ]
 
-    async def update_metadata(self, slug_or_path: str, metadata: dict[str, Any]) -> UUID | None:
+    async def slugs_by_filename(self) -> dict[str, str]:
+        """Current slug for each document, keyed by source filename.
+
+        Lets a caller exclude a document's *own* slug when regenerating it,
+        which is otherwise treated as a collision and disambiguated with a
+        counter.
+        """
+        async with self.session() as session:
+            rows = await session.execute(select(Document.source_path, Document.slug))
+            return {Path(source).name: slug for source, slug in rows.all()}
+
+    async def update_metadata(self, filename: str, metadata: dict[str, Any]) -> UUID | None:
         """Apply reviewed bibliographic fields to one document.
 
         Matched on source path rather than slug, because correcting a title
@@ -215,7 +227,7 @@ class PostgresStore(VectorStore):
         """
         async with self.session() as session, session.begin():
             document = await session.scalar(
-                select(Document).where(Document.source_path.like(f"%{slug_or_path}"))
+                select(Document).where(Document.source_path.like(f"%{filename}"))
             )
             if document is None:
                 return None
@@ -248,6 +260,43 @@ class PostgresStore(VectorStore):
                     )
                     .values(embedding=vector)
                 )
+
+    # -- span context ------------------------------------------------------
+
+    async def section_chunk_counts(self, section_ids: set[UUID]) -> dict[UUID, int]:
+        """How many chunks each section holds.
+
+        Parent expansion needs this to clamp a window to the section and to
+        decide whether a span already covers enough of it to be promoted.
+        """
+        if not section_ids:
+            return {}
+        async with self.session() as session:
+            rows = await session.execute(
+                select(Chunk.section_id, func.count(Chunk.id))
+                .where(Chunk.section_id.in_(section_ids))
+                .group_by(Chunk.section_id)
+            )
+            return {section_id: int(count) for section_id, count in rows.all()}
+
+    async def span_context(self, section_id: UUID) -> tuple[str, str, int, int] | None:
+        """Title, heading and page range for a section, for the citation."""
+        async with self.session() as session:
+            row = (
+                await session.execute(
+                    select(
+                        Document.title,
+                        Section.heading,
+                        Section.page_start,
+                        Section.page_end,
+                    )
+                    .join(Document, Document.id == Section.document_id)
+                    .where(Section.id == section_id)
+                )
+            ).first()
+        if row is None:
+            return None
+        return (row.title, row.heading, int(row.page_start), int(row.page_end))
 
     # -- statistics --------------------------------------------------------
 
@@ -357,9 +406,21 @@ class PostgresStore(VectorStore):
         limit: int,
         filters: SearchFilters | None = None,
     ) -> list[SearchHit]:
-        # websearch_to_tsquery tolerates arbitrary user input — quotes, OR, and
-        # minus signs — without the syntax errors plainto_tsquery raises.
-        tsquery = func.websearch_to_tsquery("english", query)
+        # Every built-in query parser combines terms with AND:
+        # websearch_to_tsquery, plainto_tsquery and phraseto_tsquery all
+        # require each term to appear in the same document. For a
+        # natural-language question that means no chunk ever matches —
+        # measured, "NSGA-II" returned 5 hits while "Which paper uses NSGA-II
+        # with TOPSIS for weighting factor selection?" returned 0, which left
+        # the lexical branch contributing nothing to any real query.
+        #
+        # So build an OR query instead: lexemise the question with
+        # to_tsvector (which also strips stopwords and applies stemming), then
+        # join the lexemes with '|'. ts_rank_cd then ranks by how many terms
+        # matched and how close together they are, which is the behaviour
+        # wanted from a lexical branch.
+        lexemes = func.tsvector_to_array(func.to_tsvector("english", query))
+        tsquery = func.to_tsquery("english", func.array_to_string(lexemes, " | "))
         rank = func.ts_rank_cd(Chunk.tsv, tsquery)
         statement = (
             select(

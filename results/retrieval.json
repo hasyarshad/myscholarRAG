@@ -1,0 +1,785 @@
+{
+  "dense": [
+    {
+      "question": "Which paper uses NSGA-II with TOPSIS for weighting factor selection?",
+      "kind": "identifier",
+      "expected": "weighting-factors-optimization-of-model-predictive-torque-control-of-induction-motor-using-nsga-ii-with-topsis-decision-",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "What is FCS-MPCC and how is its speed controller tuned?",
+      "kind": "identifier",
+      "expected": "artificial-bee-colony-optimized-self-tuning-pi-speed-controller-for-fcs-mpcc-of-permanent-magnet-synchronous-machines",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which work applies MOPSO to neutral point voltage balancing?",
+      "kind": "identifier",
+      "expected": "neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "What is done with an LCL filter on a grid-connected inverter?",
+      "kind": "identifier",
+      "expected": "genetic-algorithm-tuned-adaptive-discrete-time-sliding-mode-controller-for-grid-connected-inverter-with-an-lcl-filter",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which paper concerns LSPMSM stator winding inter-turn faults?",
+      "kind": "identifier",
+      "expected": "leveraging-meta-learner-based-stacking-framework-for-stator-winding-inter-turn-fault-detection-of-lspmsm",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "What work uses SVPWM for a B4 inverter?",
+      "kind": "identifier",
+      "expected": "a-chaos-based-svpwm-technique-for-b4-inverter-fed-two-phase-symmetric-induction-motor-for-thd-emi-improvement-at-low-mod",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which paper studies a Cuk converter driving a DC motor?",
+      "kind": "identifier",
+      "expected": "hierarchical-control-of-dc-motor-coupled-with-cuk-converter-combining-differential-flatness-and-sliding-mode-control",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "What research covers modular multilevel converters with lower computation?",
+      "kind": "identifier",
+      "expected": "data-driven-model-predictive-control-for-modular-multilevel-converters-with-reduced-computational-complexity",
+      "rank": 2,
+      "context_precision": 0.75
+    },
+    {
+      "question": "How is torque ripple reduced without using a speed sensor?",
+      "kind": "paraphrase",
+      "expected": "implications-of-the-sensorless-predictive-control-for-line-start-permanent-magnet-synchronous-machine",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "How were volunteers moderating an online forum studied during the pandemic?",
+      "kind": "paraphrase",
+      "expected": "exploring-crowdsourced-content-moderation-through-lens-of-reddit-during-covid-19",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "What survey reviews algorithms that learn incrementally from streaming data?",
+      "kind": "paraphrase",
+      "expected": "an-overview-of-sequential-learning-algorithms-for-single-hidden-layer-networks-current-issues-future-trends",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "How is unbalanced rotation in rotating machinery detected automatically?",
+      "kind": "paraphrase",
+      "expected": "rotor-imbalance-fault-classification-through-unified-feature-fusion-combining-statisticalsignal-processing-with-adaptive",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "How is a questionnaire for assessing people's understanding of media developed and checked?",
+      "kind": "paraphrase",
+      "expected": "revisiting-media-literacy-measurement-development-and-validation-of-3-factor-media-literacy-scale",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "How can malicious network traffic be spotted using an agent that learns by trial and error?",
+      "kind": "paraphrase",
+      "expected": "packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "How is drone position estimated when the sensors drift?",
+      "kind": "paraphrase",
+      "expected": "linear-quadratic-gaussian-control-for-uavs-with-improved-state-estimation-against-gyroscope-and-accelerometer-biases",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "How is deterministic chaos generated and analysed with a simple equation?",
+      "kind": "paraphrase",
+      "expected": "a-simple-technique-for-studying-chaos-using-jerk-equation-with-discrete-time-sine-map",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Direct torque control of a four switch two-phase induction motor",
+      "kind": "topical",
+      "expected": "advanced-direct-torque-control-of-four-switch-fed-two-phase-symmetric-induction-motor",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Comparing field oriented control against model predictive control",
+      "kind": "topical",
+      "expected": "comparison-of-dynamic-performance-of-field-oriented-control-and-model-predictive-control-for-line-start-permanent-magnet",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Robust cost function optimisation for a grid-tied inverter",
+      "kind": "topical",
+      "expected": "robust-control-of-grid-tied-inverter-with-lc-filter-via-adaptive-fcs-mpc-cost-function-optimization",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Data-driven predictive control that is computationally efficient",
+      "kind": "topical",
+      "expected": "computationally-efficient-data-driven-model-predictive-control-for-modular-multilevel-converters",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "What did the Reddit study find about moderator behaviour?",
+      "kind": "crossdomain",
+      "expected": "exploring-crowdsourced-content-moderation-through-lens-of-reddit-during-covid-19",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which paper validates a three-factor measurement scale?",
+      "kind": "crossdomain",
+      "expected": "revisiting-media-literacy-measurement-development-and-validation-of-3-factor-media-literacy-scale",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "What adversarial training approach is used for intrusion detection?",
+      "kind": "crossdomain",
+      "expected": "packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which work applies artificial bee colony optimisation?",
+      "kind": "identifier",
+      "expected": "artificial-bee-colony-optimized-self-tuning-pi-speed-controller-for-fcs-mpcc-of-permanent-magnet-synchronous-machines",
+      "rank": null,
+      "context_precision": 0.0
+    },
+    {
+      "question": "Sliding mode control combined with differential flatness",
+      "kind": "topical",
+      "expected": "hierarchical-control-of-dc-motor-coupled-with-cuk-converter-combining-differential-flatness-and-sliding-mode-control",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which converter control work targets reducing computational burden specifically?",
+      "kind": "confusable",
+      "expected": "data-driven-model-predictive-control-for-modular-multilevel-converters-with-reduced-computational-complexity",
+      "rank": 2,
+      "context_precision": 0.375
+    },
+    {
+      "question": "Which multilevel converter paper appeared in an IET journal?",
+      "kind": "confusable",
+      "expected": "computationally-efficient-data-driven-model-predictive-control-for-modular-multilevel-converters",
+      "rank": 1,
+      "context_precision": 0.875
+    },
+    {
+      "question": "Which motor drive study evaluates performance at no load and then with load applied?",
+      "kind": "deepcontent",
+      "expected": "weighting-factors-optimization-of-model-predictive-torque-control-of-induction-motor-using-nsga-ii-with-topsis-decision-",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which work uses Lyapunov exponents and bifurcation diagrams as evidence?",
+      "kind": "deepcontent",
+      "expected": "a-simple-technique-for-studying-chaos-using-jerk-equation-with-discrete-time-sine-map",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which paper reduces electromagnetic interference by varying the switching frequency?",
+      "kind": "deepcontent",
+      "expected": "a-chaos-based-svpwm-technique-for-b4-inverter-fed-two-phase-symmetric-induction-motor-for-thd-emi-improvement-at-low-mod",
+      "rank": null,
+      "context_precision": 0.0
+    },
+    {
+      "question": "Which study stacks several base learners under a meta-learner?",
+      "kind": "deepcontent",
+      "expected": "leveraging-meta-learner-based-stacking-framework-for-stator-winding-inter-turn-fault-detection-of-lspmsm",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which control paper avoids needing a mechanical position measurement?",
+      "kind": "ambiguousdomain",
+      "expected": "implications-of-the-sensorless-predictive-control-for-line-start-permanent-magnet-synchronous-machine",
+      "rank": null,
+      "context_precision": 0.0
+    },
+    {
+      "question": "Which inverter paper deals with the DC-link capacitor voltages staying balanced?",
+      "kind": "ambiguousdomain",
+      "expected": "neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which work tunes a controller with an evolutionary algorithm for a filtered grid connection?",
+      "kind": "ambiguousdomain",
+      "expected": "genetic-algorithm-tuned-adaptive-discrete-time-sliding-mode-controller-for-grid-connected-inverter-with-an-lcl-filter",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which paper compares two established drive control strategies head to head?",
+      "kind": "ambiguousdomain",
+      "expected": "comparison-of-dynamic-performance-of-field-oriented-control-and-model-predictive-control-for-line-start-permanent-magnet",
+      "rank": 1,
+      "context_precision": 0.875
+    },
+    {
+      "question": "Which study measures how well people can evaluate what they read online?",
+      "kind": "deepcontent",
+      "expected": "revisiting-media-literacy-measurement-development-and-validation-of-3-factor-media-literacy-scale",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which work models an attacker and a defender improving against each other?",
+      "kind": "deepcontent",
+      "expected": "packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training",
+      "rank": 1,
+      "context_precision": 1.0
+    }
+  ],
+  "hybrid": [
+    {
+      "question": "Which paper uses NSGA-II with TOPSIS for weighting factor selection?",
+      "kind": "identifier",
+      "expected": "weighting-factors-optimization-of-model-predictive-torque-control-of-induction-motor-using-nsga-ii-with-topsis-decision-",
+      "rank": 1,
+      "context_precision": 0.625
+    },
+    {
+      "question": "What is FCS-MPCC and how is its speed controller tuned?",
+      "kind": "identifier",
+      "expected": "artificial-bee-colony-optimized-self-tuning-pi-speed-controller-for-fcs-mpcc-of-permanent-magnet-synchronous-machines",
+      "rank": 1,
+      "context_precision": 0.625
+    },
+    {
+      "question": "Which work applies MOPSO to neutral point voltage balancing?",
+      "kind": "identifier",
+      "expected": "neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "What is done with an LCL filter on a grid-connected inverter?",
+      "kind": "identifier",
+      "expected": "genetic-algorithm-tuned-adaptive-discrete-time-sliding-mode-controller-for-grid-connected-inverter-with-an-lcl-filter",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which paper concerns LSPMSM stator winding inter-turn faults?",
+      "kind": "identifier",
+      "expected": "leveraging-meta-learner-based-stacking-framework-for-stator-winding-inter-turn-fault-detection-of-lspmsm",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "What work uses SVPWM for a B4 inverter?",
+      "kind": "identifier",
+      "expected": "a-chaos-based-svpwm-technique-for-b4-inverter-fed-two-phase-symmetric-induction-motor-for-thd-emi-improvement-at-low-mod",
+      "rank": 1,
+      "context_precision": 0.625
+    },
+    {
+      "question": "Which paper studies a Cuk converter driving a DC motor?",
+      "kind": "identifier",
+      "expected": "hierarchical-control-of-dc-motor-coupled-with-cuk-converter-combining-differential-flatness-and-sliding-mode-control",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "What research covers modular multilevel converters with lower computation?",
+      "kind": "identifier",
+      "expected": "data-driven-model-predictive-control-for-modular-multilevel-converters-with-reduced-computational-complexity",
+      "rank": 1,
+      "context_precision": 0.375
+    },
+    {
+      "question": "How is torque ripple reduced without using a speed sensor?",
+      "kind": "paraphrase",
+      "expected": "implications-of-the-sensorless-predictive-control-for-line-start-permanent-magnet-synchronous-machine",
+      "rank": 1,
+      "context_precision": 0.75
+    },
+    {
+      "question": "How were volunteers moderating an online forum studied during the pandemic?",
+      "kind": "paraphrase",
+      "expected": "exploring-crowdsourced-content-moderation-through-lens-of-reddit-during-covid-19",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "What survey reviews algorithms that learn incrementally from streaming data?",
+      "kind": "paraphrase",
+      "expected": "an-overview-of-sequential-learning-algorithms-for-single-hidden-layer-networks-current-issues-future-trends",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "How is unbalanced rotation in rotating machinery detected automatically?",
+      "kind": "paraphrase",
+      "expected": "rotor-imbalance-fault-classification-through-unified-feature-fusion-combining-statisticalsignal-processing-with-adaptive",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "How is a questionnaire for assessing people's understanding of media developed and checked?",
+      "kind": "paraphrase",
+      "expected": "revisiting-media-literacy-measurement-development-and-validation-of-3-factor-media-literacy-scale",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "How can malicious network traffic be spotted using an agent that learns by trial and error?",
+      "kind": "paraphrase",
+      "expected": "packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training",
+      "rank": 1,
+      "context_precision": 0.875
+    },
+    {
+      "question": "How is drone position estimated when the sensors drift?",
+      "kind": "paraphrase",
+      "expected": "linear-quadratic-gaussian-control-for-uavs-with-improved-state-estimation-against-gyroscope-and-accelerometer-biases",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "How is deterministic chaos generated and analysed with a simple equation?",
+      "kind": "paraphrase",
+      "expected": "a-simple-technique-for-studying-chaos-using-jerk-equation-with-discrete-time-sine-map",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Direct torque control of a four switch two-phase induction motor",
+      "kind": "topical",
+      "expected": "advanced-direct-torque-control-of-four-switch-fed-two-phase-symmetric-induction-motor",
+      "rank": 1,
+      "context_precision": 0.625
+    },
+    {
+      "question": "Comparing field oriented control against model predictive control",
+      "kind": "topical",
+      "expected": "comparison-of-dynamic-performance-of-field-oriented-control-and-model-predictive-control-for-line-start-permanent-magnet",
+      "rank": 1,
+      "context_precision": 0.5
+    },
+    {
+      "question": "Robust cost function optimisation for a grid-tied inverter",
+      "kind": "topical",
+      "expected": "robust-control-of-grid-tied-inverter-with-lc-filter-via-adaptive-fcs-mpc-cost-function-optimization",
+      "rank": 1,
+      "context_precision": 0.625
+    },
+    {
+      "question": "Data-driven predictive control that is computationally efficient",
+      "kind": "topical",
+      "expected": "computationally-efficient-data-driven-model-predictive-control-for-modular-multilevel-converters",
+      "rank": 1,
+      "context_precision": 0.5
+    },
+    {
+      "question": "What did the Reddit study find about moderator behaviour?",
+      "kind": "crossdomain",
+      "expected": "exploring-crowdsourced-content-moderation-through-lens-of-reddit-during-covid-19",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which paper validates a three-factor measurement scale?",
+      "kind": "crossdomain",
+      "expected": "revisiting-media-literacy-measurement-development-and-validation-of-3-factor-media-literacy-scale",
+      "rank": 1,
+      "context_precision": 0.625
+    },
+    {
+      "question": "What adversarial training approach is used for intrusion detection?",
+      "kind": "crossdomain",
+      "expected": "packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training",
+      "rank": 1,
+      "context_precision": 0.625
+    },
+    {
+      "question": "Which work applies artificial bee colony optimisation?",
+      "kind": "identifier",
+      "expected": "artificial-bee-colony-optimized-self-tuning-pi-speed-controller-for-fcs-mpcc-of-permanent-magnet-synchronous-machines",
+      "rank": 2,
+      "context_precision": 0.125
+    },
+    {
+      "question": "Sliding mode control combined with differential flatness",
+      "kind": "topical",
+      "expected": "hierarchical-control-of-dc-motor-coupled-with-cuk-converter-combining-differential-flatness-and-sliding-mode-control",
+      "rank": 1,
+      "context_precision": 0.75
+    },
+    {
+      "question": "Which converter control work targets reducing computational burden specifically?",
+      "kind": "confusable",
+      "expected": "data-driven-model-predictive-control-for-modular-multilevel-converters-with-reduced-computational-complexity",
+      "rank": 2,
+      "context_precision": 0.375
+    },
+    {
+      "question": "Which multilevel converter paper appeared in an IET journal?",
+      "kind": "confusable",
+      "expected": "computationally-efficient-data-driven-model-predictive-control-for-modular-multilevel-converters",
+      "rank": 1,
+      "context_precision": 0.5
+    },
+    {
+      "question": "Which motor drive study evaluates performance at no load and then with load applied?",
+      "kind": "deepcontent",
+      "expected": "weighting-factors-optimization-of-model-predictive-torque-control-of-induction-motor-using-nsga-ii-with-topsis-decision-",
+      "rank": 1,
+      "context_precision": 0.5
+    },
+    {
+      "question": "Which work uses Lyapunov exponents and bifurcation diagrams as evidence?",
+      "kind": "deepcontent",
+      "expected": "a-simple-technique-for-studying-chaos-using-jerk-equation-with-discrete-time-sine-map",
+      "rank": 1,
+      "context_precision": 0.625
+    },
+    {
+      "question": "Which paper reduces electromagnetic interference by varying the switching frequency?",
+      "kind": "deepcontent",
+      "expected": "a-chaos-based-svpwm-technique-for-b4-inverter-fed-two-phase-symmetric-induction-motor-for-thd-emi-improvement-at-low-mod",
+      "rank": null,
+      "context_precision": 0.0
+    },
+    {
+      "question": "Which study stacks several base learners under a meta-learner?",
+      "kind": "deepcontent",
+      "expected": "leveraging-meta-learner-based-stacking-framework-for-stator-winding-inter-turn-fault-detection-of-lspmsm",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which control paper avoids needing a mechanical position measurement?",
+      "kind": "ambiguousdomain",
+      "expected": "implications-of-the-sensorless-predictive-control-for-line-start-permanent-magnet-synchronous-machine",
+      "rank": null,
+      "context_precision": 0.0
+    },
+    {
+      "question": "Which inverter paper deals with the DC-link capacitor voltages staying balanced?",
+      "kind": "ambiguousdomain",
+      "expected": "neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which work tunes a controller with an evolutionary algorithm for a filtered grid connection?",
+      "kind": "ambiguousdomain",
+      "expected": "genetic-algorithm-tuned-adaptive-discrete-time-sliding-mode-controller-for-grid-connected-inverter-with-an-lcl-filter",
+      "rank": 1,
+      "context_precision": 0.5
+    },
+    {
+      "question": "Which paper compares two established drive control strategies head to head?",
+      "kind": "ambiguousdomain",
+      "expected": "comparison-of-dynamic-performance-of-field-oriented-control-and-model-predictive-control-for-line-start-permanent-magnet",
+      "rank": 3,
+      "context_precision": 0.25
+    },
+    {
+      "question": "Which study measures how well people can evaluate what they read online?",
+      "kind": "deepcontent",
+      "expected": "revisiting-media-literacy-measurement-development-and-validation-of-3-factor-media-literacy-scale",
+      "rank": 1,
+      "context_precision": 0.5
+    },
+    {
+      "question": "Which work models an attacker and a defender improving against each other?",
+      "kind": "deepcontent",
+      "expected": "packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training",
+      "rank": 1,
+      "context_precision": 0.5
+    }
+  ],
+  "full": [
+    {
+      "question": "Which paper uses NSGA-II with TOPSIS for weighting factor selection?",
+      "kind": "identifier",
+      "expected": "weighting-factors-optimization-of-model-predictive-torque-control-of-induction-motor-using-nsga-ii-with-topsis-decision-",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "What is FCS-MPCC and how is its speed controller tuned?",
+      "kind": "identifier",
+      "expected": "artificial-bee-colony-optimized-self-tuning-pi-speed-controller-for-fcs-mpcc-of-permanent-magnet-synchronous-machines",
+      "rank": 1,
+      "context_precision": 0.625
+    },
+    {
+      "question": "Which work applies MOPSO to neutral point voltage balancing?",
+      "kind": "identifier",
+      "expected": "neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "What is done with an LCL filter on a grid-connected inverter?",
+      "kind": "identifier",
+      "expected": "genetic-algorithm-tuned-adaptive-discrete-time-sliding-mode-controller-for-grid-connected-inverter-with-an-lcl-filter",
+      "rank": 1,
+      "context_precision": 0.875
+    },
+    {
+      "question": "Which paper concerns LSPMSM stator winding inter-turn faults?",
+      "kind": "identifier",
+      "expected": "leveraging-meta-learner-based-stacking-framework-for-stator-winding-inter-turn-fault-detection-of-lspmsm",
+      "rank": 2,
+      "context_precision": 0.75
+    },
+    {
+      "question": "What work uses SVPWM for a B4 inverter?",
+      "kind": "identifier",
+      "expected": "a-chaos-based-svpwm-technique-for-b4-inverter-fed-two-phase-symmetric-induction-motor-for-thd-emi-improvement-at-low-mod",
+      "rank": 1,
+      "context_precision": 0.875
+    },
+    {
+      "question": "Which paper studies a Cuk converter driving a DC motor?",
+      "kind": "identifier",
+      "expected": "hierarchical-control-of-dc-motor-coupled-with-cuk-converter-combining-differential-flatness-and-sliding-mode-control",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "What research covers modular multilevel converters with lower computation?",
+      "kind": "identifier",
+      "expected": "data-driven-model-predictive-control-for-modular-multilevel-converters-with-reduced-computational-complexity",
+      "rank": 1,
+      "context_precision": 0.5
+    },
+    {
+      "question": "How is torque ripple reduced without using a speed sensor?",
+      "kind": "paraphrase",
+      "expected": "implications-of-the-sensorless-predictive-control-for-line-start-permanent-magnet-synchronous-machine",
+      "rank": 1,
+      "context_precision": 0.875
+    },
+    {
+      "question": "How were volunteers moderating an online forum studied during the pandemic?",
+      "kind": "paraphrase",
+      "expected": "exploring-crowdsourced-content-moderation-through-lens-of-reddit-during-covid-19",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "What survey reviews algorithms that learn incrementally from streaming data?",
+      "kind": "paraphrase",
+      "expected": "an-overview-of-sequential-learning-algorithms-for-single-hidden-layer-networks-current-issues-future-trends",
+      "rank": 1,
+      "context_precision": 0.875
+    },
+    {
+      "question": "How is unbalanced rotation in rotating machinery detected automatically?",
+      "kind": "paraphrase",
+      "expected": "rotor-imbalance-fault-classification-through-unified-feature-fusion-combining-statisticalsignal-processing-with-adaptive",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "How is a questionnaire for assessing people's understanding of media developed and checked?",
+      "kind": "paraphrase",
+      "expected": "revisiting-media-literacy-measurement-development-and-validation-of-3-factor-media-literacy-scale",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "How can malicious network traffic be spotted using an agent that learns by trial and error?",
+      "kind": "paraphrase",
+      "expected": "packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "How is drone position estimated when the sensors drift?",
+      "kind": "paraphrase",
+      "expected": "linear-quadratic-gaussian-control-for-uavs-with-improved-state-estimation-against-gyroscope-and-accelerometer-biases",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "How is deterministic chaos generated and analysed with a simple equation?",
+      "kind": "paraphrase",
+      "expected": "a-simple-technique-for-studying-chaos-using-jerk-equation-with-discrete-time-sine-map",
+      "rank": 1,
+      "context_precision": 0.875
+    },
+    {
+      "question": "Direct torque control of a four switch two-phase induction motor",
+      "kind": "topical",
+      "expected": "advanced-direct-torque-control-of-four-switch-fed-two-phase-symmetric-induction-motor",
+      "rank": 1,
+      "context_precision": 0.125
+    },
+    {
+      "question": "Comparing field oriented control against model predictive control",
+      "kind": "topical",
+      "expected": "comparison-of-dynamic-performance-of-field-oriented-control-and-model-predictive-control-for-line-start-permanent-magnet",
+      "rank": null,
+      "context_precision": 0.0
+    },
+    {
+      "question": "Robust cost function optimisation for a grid-tied inverter",
+      "kind": "topical",
+      "expected": "robust-control-of-grid-tied-inverter-with-lc-filter-via-adaptive-fcs-mpc-cost-function-optimization",
+      "rank": 1,
+      "context_precision": 0.125
+    },
+    {
+      "question": "Data-driven predictive control that is computationally efficient",
+      "kind": "topical",
+      "expected": "computationally-efficient-data-driven-model-predictive-control-for-modular-multilevel-converters",
+      "rank": 1,
+      "context_precision": 0.25
+    },
+    {
+      "question": "What did the Reddit study find about moderator behaviour?",
+      "kind": "crossdomain",
+      "expected": "exploring-crowdsourced-content-moderation-through-lens-of-reddit-during-covid-19",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which paper validates a three-factor measurement scale?",
+      "kind": "crossdomain",
+      "expected": "revisiting-media-literacy-measurement-development-and-validation-of-3-factor-media-literacy-scale",
+      "rank": 1,
+      "context_precision": 0.75
+    },
+    {
+      "question": "What adversarial training approach is used for intrusion detection?",
+      "kind": "crossdomain",
+      "expected": "packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which work applies artificial bee colony optimisation?",
+      "kind": "identifier",
+      "expected": "artificial-bee-colony-optimized-self-tuning-pi-speed-controller-for-fcs-mpcc-of-permanent-magnet-synchronous-machines",
+      "rank": 1,
+      "context_precision": 0.125
+    },
+    {
+      "question": "Sliding mode control combined with differential flatness",
+      "kind": "topical",
+      "expected": "hierarchical-control-of-dc-motor-coupled-with-cuk-converter-combining-differential-flatness-and-sliding-mode-control",
+      "rank": 1,
+      "context_precision": 0.875
+    },
+    {
+      "question": "Which converter control work targets reducing computational burden specifically?",
+      "kind": "confusable",
+      "expected": "data-driven-model-predictive-control-for-modular-multilevel-converters-with-reduced-computational-complexity",
+      "rank": 2,
+      "context_precision": 0.625
+    },
+    {
+      "question": "Which multilevel converter paper appeared in an IET journal?",
+      "kind": "confusable",
+      "expected": "computationally-efficient-data-driven-model-predictive-control-for-modular-multilevel-converters",
+      "rank": 4,
+      "context_precision": 0.125
+    },
+    {
+      "question": "Which motor drive study evaluates performance at no load and then with load applied?",
+      "kind": "deepcontent",
+      "expected": "weighting-factors-optimization-of-model-predictive-torque-control-of-induction-motor-using-nsga-ii-with-topsis-decision-",
+      "rank": 1,
+      "context_precision": 0.625
+    },
+    {
+      "question": "Which work uses Lyapunov exponents and bifurcation diagrams as evidence?",
+      "kind": "deepcontent",
+      "expected": "a-simple-technique-for-studying-chaos-using-jerk-equation-with-discrete-time-sine-map",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which paper reduces electromagnetic interference by varying the switching frequency?",
+      "kind": "deepcontent",
+      "expected": "a-chaos-based-svpwm-technique-for-b4-inverter-fed-two-phase-symmetric-induction-motor-for-thd-emi-improvement-at-low-mod",
+      "rank": 1,
+      "context_precision": 0.125
+    },
+    {
+      "question": "Which study stacks several base learners under a meta-learner?",
+      "kind": "deepcontent",
+      "expected": "leveraging-meta-learner-based-stacking-framework-for-stator-winding-inter-turn-fault-detection-of-lspmsm",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which control paper avoids needing a mechanical position measurement?",
+      "kind": "ambiguousdomain",
+      "expected": "implications-of-the-sensorless-predictive-control-for-line-start-permanent-magnet-synchronous-machine",
+      "rank": null,
+      "context_precision": 0.0
+    },
+    {
+      "question": "Which inverter paper deals with the DC-link capacitor voltages staying balanced?",
+      "kind": "ambiguousdomain",
+      "expected": "neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which work tunes a controller with an evolutionary algorithm for a filtered grid connection?",
+      "kind": "ambiguousdomain",
+      "expected": "genetic-algorithm-tuned-adaptive-discrete-time-sliding-mode-controller-for-grid-connected-inverter-with-an-lcl-filter",
+      "rank": 1,
+      "context_precision": 0.75
+    },
+    {
+      "question": "Which paper compares two established drive control strategies head to head?",
+      "kind": "ambiguousdomain",
+      "expected": "comparison-of-dynamic-performance-of-field-oriented-control-and-model-predictive-control-for-line-start-permanent-magnet",
+      "rank": 2,
+      "context_precision": 0.5
+    },
+    {
+      "question": "Which study measures how well people can evaluate what they read online?",
+      "kind": "deepcontent",
+      "expected": "revisiting-media-literacy-measurement-development-and-validation-of-3-factor-media-literacy-scale",
+      "rank": 1,
+      "context_precision": 1.0
+    },
+    {
+      "question": "Which work models an attacker and a defender improving against each other?",
+      "kind": "deepcontent",
+      "expected": "packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training",
+      "rank": 1,
+      "context_precision": 0.875
+    }
+  ]
+}
