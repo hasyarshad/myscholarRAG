@@ -46,15 +46,31 @@ def test_embedder_dimension_mismatch_is_fatal(monkeypatch: pytest.MonkeyPatch) -
         build_container(settings)
 
 
-def test_no_heavy_dependencies_imported_for_fakes() -> None:
-    """Running with fakes must not pull in torch or onnxruntime.
+def test_no_heavy_adapters_are_imported_for_fakes() -> None:
+    """Running with fakes must not import the GPU or ONNX adapters.
 
     Adapter imports are lazy so the unit suite and CI stay installable without
     multi-gigabyte machine learning dependencies.
+
+    This checks *our* modules rather than ``torch`` itself: whether torch is in
+    sys.modules depends on what else ran first in the same process, so the
+    obvious assertion passes alone and fails alongside the integration tests.
+    Our adapter modules are only ever imported by the container.
     """
     import sys
 
+    heavy = [
+        name
+        for name in sys.modules
+        if name.startswith(("myscholar.adapters.embedding", "myscholar.adapters.reranking"))
+    ]
+    for name in heavy:
+        del sys.modules[name]
+
     build_container(make_settings())
 
-    assert "torch" not in sys.modules
-    assert "onnxruntime" not in sys.modules
+    assert not [
+        name
+        for name in sys.modules
+        if name.startswith(("myscholar.adapters.embedding", "myscholar.adapters.reranking"))
+    ]
