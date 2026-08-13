@@ -653,3 +653,20 @@ def route(
         )
 
     console.print(f"\n[dim]{timings}[/dim]")
+
+
+@app.command()
+def serve(
+    host: Annotated[str, typer.Option(help="Bind address.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port.")] = 8000,
+    reload: Annotated[bool, typer.Option("--reload", help="Reload on code changes.")] = False,
+) -> None:
+    """Run the HTTP API.
+
+    Binds to localhost by default. Exposing it publicly is Phase 7's job, and
+    goes through a proxy that adds the controls a bare port does not have.
+    """
+    import uvicorn
+
+    console.print(f"[dim]http://{host}:{port}/docs[/dim]")
+    uvicorn.run("myscholar.api.app:app", host=host, port=port, reload=reload, log_level="warning")

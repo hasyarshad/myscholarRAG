@@ -64,7 +64,7 @@ up: db-up ollama-up  ## Start every local service
 	@echo "services up"
 
 down: db-down ollama-down  ## Stop every local service
-.PHONY: db-setup db-shell ollama-setup ollama-up ollama-down up down ingest ingest-force papers
+.PHONY: db-setup db-shell ollama-setup ollama-up ollama-down up down ingest ingest-force papers serve
 
 ## --- Corpus ---------------------------------------------------------------
 
@@ -73,6 +73,9 @@ ingest:  ## Build the index from papers/ (needs make up first)
 
 ingest-force:  ## Rebuild the index, ignoring the content-hash cache
 	uv run myscholar ingest run --force
+
+serve:  ## Run the API on :8000
+	uv run myscholar serve
 
 papers:  ## List what is indexed
 	uv run myscholar papers list

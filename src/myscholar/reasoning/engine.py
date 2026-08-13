@@ -12,7 +12,8 @@ See docs/learning/05-adaptive-rag-and-hallucination.md.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field, replace
 
 from myscholar.domain.answers import Answer, Refusal, Response, TraceEvent
@@ -68,6 +69,7 @@ class Engine:
         self._router = router
         self._answerer = answerer
         self._budget = budget or Budget()
+        self._listeners: list[asyncio.Queue[TraceEvent | None]] = []
         self._graph = self._build()
 
     async def answer(self, question: str) -> Response:
@@ -83,31 +85,75 @@ class Engine:
         )
         return self._finish(state, trace), trace
 
-    async def stream(self, question: str) -> AsyncIterator[str]:
-        """Yield the answer in chunks.
+    async def stream_events(self, question: str) -> AsyncIterator[TraceEvent | Answer | Refusal]:
+        """Yield each stage as it happens, then the finished response.
 
-        Deliberately not token-streamed from the model: verification happens
-        after generation, and streaming raw tokens would show the visitor text
-        that is then rejected. Phase 6 streams the *stages* instead, which is
-        honest about what is happening.
+        Stages rather than tokens: verification runs after generation, so raw
+        output would show the visitor text that is subsequently rejected.
         """
-        response = await self.answer(question)
-        for word in response.text.split(" "):
-            yield word + " "
+        queue: asyncio.Queue[TraceEvent | None] = asyncio.Queue()
+        self._listeners.append(queue)
+        task = asyncio.create_task(self.answer_with_trace(question))
+
+        try:
+            while True:
+                pending = asyncio.create_task(queue.get())
+                done, _ = await asyncio.wait({pending, task}, return_when=asyncio.FIRST_COMPLETED)
+                if pending in done:
+                    if (event := pending.result()) is not None:
+                        yield event
+                    continue
+
+                pending.cancel()
+                # Drain anything published between the last read and completion.
+                while not queue.empty():
+                    if (event := queue.get_nowait()) is not None:
+                        yield event
+                break
+
+            response, _ = await task
+            yield response
+        finally:
+            self._listeners.remove(queue)
+            if not task.done():
+                task.cancel()
 
     # -- graph ------------------------------------------------------------
+
+    def _publishing(
+        self, node: Callable[[LoopState], Awaitable[LoopState]]
+    ) -> Callable[[LoopState], Awaitable[LoopState]]:
+        """Wrap a node so the events it adds are published as it finishes.
+
+        Without this the API can only replay the trace once the answer is
+        complete, so a visitor watches a generic spinner for twenty seconds and
+        then receives every stage at once. Streaming progress is the point.
+        """
+
+        async def wrapped(state: LoopState) -> LoopState:
+            before = len(state.events)
+            result = await node(state)
+            for event in result.events[before:]:
+                for queue in self._listeners:
+                    queue.put_nowait(event)
+            return result
+
+        return wrapped
 
     def _build(self) -> Graph[LoopState]:
         return Graph[LoopState](
             nodes={
-                "route": self._route,
-                "grade": self._grade,
-                "generate": self._generate,
-                "verify": self._verify,
-                "check_grounding": self._check_grounding,
-                "correct": self._correct,
-                "refuse": self._refuse,
-                "done": self._done,
+                name: self._publishing(node)
+                for name, node in {
+                    "route": self._route,
+                    "grade": self._grade,
+                    "generate": self._generate,
+                    "verify": self._verify,
+                    "check_grounding": self._check_grounding,
+                    "correct": self._correct,
+                    "refuse": self._refuse,
+                    "done": self._done,
+                }.items()
             },
             edges={
                 "route": self._after_route,
