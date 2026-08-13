@@ -114,6 +114,8 @@ async def evaluate(mode: RetrievalMode, cases: list[dict[str, Any]]) -> list[Out
         window=settings.retrieval.window,
         dense_weight=settings.retrieval.dense_weight,
         lexical_weight=settings.retrieval.lexical_weight,
+        rrf_k=settings.retrieval.rrf_k,
+        max_span_chunks=settings.retrieval.max_span_chunks,
     )
 
     outcomes: list[Outcome] = []
@@ -251,6 +253,8 @@ async def evaluate_routed(cases: list[dict[str, Any]]) -> list[Outcome]:
             window=settings.retrieval.window,
             dense_weight=settings.retrieval.dense_weight,
             lexical_weight=settings.retrieval.lexical_weight,
+            rrf_k=settings.retrieval.rrf_k,
+            max_span_chunks=settings.retrieval.max_span_chunks,
         ),
         store=store,
     )

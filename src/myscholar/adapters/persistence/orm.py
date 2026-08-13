@@ -80,9 +80,6 @@ class Document(Base):
     sections: Mapped[list[Section]] = relationship(
         back_populates="document", cascade="all, delete-orphan"
     )
-    summaries: Mapped[list[DocumentSummary]] = relationship(
-        back_populates="document", cascade="all, delete-orphan"
-    )
 
 
 class Section(Base):
@@ -164,27 +161,6 @@ class ChunkEmbedding(Base):
     chunk: Mapped[Chunk] = relationship(back_populates="embeddings")
 
 
-class DocumentSummary(Base):
-    """Document-level representations, embedded separately from chunks.
-
-    "What has he worked on in predictive control?" has no single passage as its
-    answer. Searching summaries first selects relevant papers; chunk search then
-    drills into them.
-    """
-
-    __tablename__ = "document_summaries"
-    __table_args__ = (UniqueConstraint("document_id", "kind", "model_id", name="uq_summary_kind"),)
-
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    document_id: Mapped[UUID] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"))
-    kind: Mapped[str] = mapped_column(String(30))
-    text: Mapped[str] = mapped_column(Text)
-    model_id: Mapped[str] = mapped_column(String(120))
-    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
-
-    document: Mapped[Document] = relationship(back_populates="summaries")
-
-
 #: HNSW indexes are created after bulk loading rather than declared here.
 #: Building them on an empty table and inserting through them is markedly
 #: slower than building once over the finished data.
@@ -192,11 +168,6 @@ HNSW_STATEMENTS = (
     """
     CREATE INDEX IF NOT EXISTS ix_chunk_embeddings_hnsw
     ON chunk_embeddings USING hnsw (embedding vector_cosine_ops)
-    WITH (m = 16, ef_construction = 64)
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS ix_document_summaries_hnsw
-    ON document_summaries USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64)
     """,
 )

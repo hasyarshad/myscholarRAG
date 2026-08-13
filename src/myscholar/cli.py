@@ -494,6 +494,8 @@ def _build_retriever(settings: Any, *, with_reranker: bool = True) -> Any:
         window=settings.retrieval.window,
         dense_weight=settings.retrieval.dense_weight,
         lexical_weight=settings.retrieval.lexical_weight,
+        rrf_k=settings.retrieval.rrf_k,
+        max_span_chunks=settings.retrieval.max_span_chunks,
     )
 
 
@@ -574,6 +576,8 @@ def _build_router(settings: Any) -> Any:
             window=settings.retrieval.window,
             dense_weight=settings.retrieval.dense_weight,
             lexical_weight=settings.retrieval.lexical_weight,
+            rrf_k=settings.retrieval.rrf_k,
+            max_span_chunks=settings.retrieval.max_span_chunks,
         ),
         store=store,
     )

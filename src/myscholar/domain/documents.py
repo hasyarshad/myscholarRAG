@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from uuid import UUID
 
 from myscholar.domain.enums import ChunkKind, DocumentKind, SectionKind
@@ -118,27 +118,3 @@ class ContextBlock:
             f"[{self.label}] {self.document_title} — {self.section_heading} "
             f"(p. {self.page_start}-{self.page_end})\n{self.text}"
         )
-
-
-@dataclass(frozen=True, slots=True)
-class DocumentSummary:
-    """A document-level representation, embedded separately from its chunks.
-
-    Lets "what has he worked on in predictive control?" match whole papers
-    rather than whichever individual sentence happens to score highest.
-    """
-
-    document_id: UUID
-    kind: str  # abstract | contributions | methods | findings
-    text: str
-
-
-@dataclass(slots=True)
-class IngestReport:
-    """Outcome of an ingestion run, for the Phase 1 gate."""
-
-    documents: int = 0
-    sections: int = 0
-    chunks: int = 0
-    skipped: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)

@@ -4,9 +4,9 @@
 
 | Metric | Value | Basis |
 |---|---|---|
-| Correct refusal | **76.9%** | 13 questions the corpus cannot answer |
+| Correct refusal | **76.9%** | 13 unanswerable questions |
 | Over-refusal | **0.0%** | 7 answerable control questions |
-| Citation validity | **100.0%** | 0 dangling of 23 emitted markers |
+| Citation validity | **100.0%** | 0 dangling of 20 markers |
 
 Correct refusal is reported with over-refusal because either alone is
 trivially maximised — refusing everything scores 100% on the first.
@@ -23,7 +23,7 @@ trivially maximised — refusing everything scores 100% on the first.
 ## Incorrect
 
 - **false_premise** — expected refusal: In his 2023 paper he showed that chaotic SVPWM increases EMI. Why does it increase it?
-  > The provided excerpts do not mention any 2023 paper or claim that chaotic SVPWM increases EMI [C1][C2][C3][C4][C5][C6]. Instead, they consistently state that chaotic SVPWM reduces THD and EMI by distributing harmonics ac
+  > The provided excerpts do not mention any 2023 paper or findings that chaotic SVPWM increases EMI [C1][C2][C3]. Instead, they describe chaotic SVPWM as a method to reduce EMI by distributing harmonics across a wider frequ
 - **false_premise** — expected refusal: Why did his NSGA-II study conclude that weighting factors are unnecessary?
   > Instead, the study focuses on optimizing weighting factors for model predictive torque control (MPTC) using NSGA-II with TOPSIS decision-making criteria [C1]. The literature review in [C4] highlights ongoing research int
 - **false_premise** — expected refusal: He found that sensorless control performs worse than sensored control. What caused that?

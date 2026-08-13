@@ -90,7 +90,8 @@ class HybridRetriever:
         rerank_k: int = 8,
         window: int = 2,
         dense_weight: float = 1.0,
-        lexical_weight: float = 0.4,
+        lexical_weight: float = 1.0,
+        rrf_k: int = 60,
         max_span_chunks: int = 8,
     ) -> None:
         self._store = store
@@ -101,6 +102,7 @@ class HybridRetriever:
         self._window = window
         self._dense_weight = dense_weight
         self._lexical_weight = lexical_weight
+        self._rrf_k = rrf_k
         self._max_span_chunks = max_span_chunks
 
     async def retrieve(
@@ -169,6 +171,7 @@ class HybridRetriever:
             [hit.chunk_id for hit in lexical],
             dense_weight=self._dense_weight,
             lexical_weight=self._lexical_weight,
+            k=self._rrf_k,
             limit=self._top_k,
         )
         # Carry the fusion score onto the hit, so downstream ordering and the

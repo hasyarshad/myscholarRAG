@@ -42,6 +42,8 @@ class LoopState:
     draft: str = ""
     correction: str | None = None
     verification: citations.VerificationResult | None = None
+    degraded: bool = False
+    grounding_failed: bool = False
 
     response: Response | None = None
     events: tuple[TraceEvent, ...] = field(default_factory=tuple)
@@ -146,9 +148,9 @@ class Engine:
                 response=Refusal(reason=reason, text=routed.plan.canned_response),
             ).with_event(Stage.DONE, routed.classification.query_class.value)
 
-        return replace(state, budget=budget, blocks=routed.blocks).with_event(
-            Stage.RETRIEVING, f"{len(routed.blocks)} blocks"
-        )
+        return replace(
+            state, budget=budget, blocks=routed.blocks, degraded=routed.degraded
+        ).with_event(Stage.RETRIEVING, f"{len(routed.blocks)} blocks")
 
     async def _grade(self, state: LoopState) -> LoopState:
         graded = await self._answerer.grade(state.question, state.blocks)
@@ -206,6 +208,7 @@ class Engine:
         return replace(
             state,
             budget=budget,
+            grounding_failed=True,
             correction=f"These statements are not supported by the excerpts cited: {quoted}",
         ).with_event(Stage.VERIFYING, f"{len(unsupported)} unsupported statement(s)")
 
@@ -262,15 +265,19 @@ class Engine:
                         text=salvaged.strip(),
                         citations=state.verification.citations,
                         confidence=0.5,
+                        degraded=state.degraded,
                     ),
                 ).with_event(Stage.DONE, "returned a verified draft rather than refusing")
 
         topics = await self._answerer.nearest_topics(state.blocks)
-        reason = (
-            RefusalReason.BUDGET_EXHAUSTED
-            if state.budget.reason_for_stopping()
-            else RefusalReason.NO_RELEVANT_CONTENT
-        )
+        if state.budget.reason_for_stopping():
+            reason = RefusalReason.BUDGET_EXHAUSTED
+        elif state.grounding_failed:
+            # Distinct from "nothing relevant found": passages *were* found and
+            # the answer built on them could not be supported.
+            reason = RefusalReason.UNGROUNDED_AFTER_RETRY
+        else:
+            reason = RefusalReason.NO_RELEVANT_CONTENT
 
         text = "I don't have anything on that in these papers."
         if topics:
@@ -299,6 +306,7 @@ class Engine:
                 text=text.strip(),
                 citations=citations_found,
                 confidence=1.0 if verification and verification.valid else 0.5,
+                degraded=state.degraded,
             ),
         ).with_event(Stage.DONE)
 

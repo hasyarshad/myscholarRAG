@@ -86,6 +86,8 @@ async def build_engine() -> Engine:
             window=settings.retrieval.window,
             dense_weight=settings.retrieval.dense_weight,
             lexical_weight=settings.retrieval.lexical_weight,
+            rrf_k=settings.retrieval.rrf_k,
+            max_span_chunks=settings.retrieval.max_span_chunks,
         ),
         store=store,
     )

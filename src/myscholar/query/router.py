@@ -7,6 +7,8 @@ surface.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import time
 from dataclasses import dataclass, field
 from uuid import UUID
@@ -31,6 +33,10 @@ class RoutedResult:
     blocks: tuple[ContextBlock, ...] = ()
     bibliographic: BibliographicAnswer | None = None
     queries: tuple[SearchQuery, ...] = ()
+    degraded: bool = False
+    """A component was unavailable — currently, reranking. Reported rather than
+    hidden, so a lower-quality answer is identifiable as one."""
+
     timings_ms: dict[str, int] = field(default_factory=dict)
 
     @property
@@ -93,7 +99,7 @@ class QueryRouter:
         timings["transform"] = _elapsed(started)
 
         started = time.monotonic()
-        blocks = await self._search(queries, plan, title_to_id)
+        blocks, degraded = await self._search(queries, plan, title_to_id)
         timings["retrieve"] = _elapsed(started)
 
         return RoutedResult(
@@ -101,6 +107,7 @@ class QueryRouter:
             plan=plan,
             blocks=tuple(blocks),
             queries=tuple(queries),
+            degraded=degraded,
             timings_ms=timings,
         )
 
@@ -109,7 +116,7 @@ class QueryRouter:
         queries: list[SearchQuery],
         plan: Plan,
         title_to_id: dict[str, UUID],
-    ) -> list[ContextBlock]:
+    ) -> tuple[list[ContextBlock], bool]:
         """Retrieve for every query and fuse the results.
 
         A filtered branch is always accompanied by an unfiltered one. An
@@ -143,11 +150,10 @@ class QueryRouter:
             else None
         )
 
-        branches: dict[str, list[str]] = {}
-        block_by_key: dict[str, ContextBlock] = {}
-        weights: dict[str, float] = {}
+        degraded = False
 
-        async def run(name: str, text: str, filters: SearchFilters, weight: float) -> None:
+        async def run(text: str, filters: SearchFilters) -> tuple[ContextBlock, ...]:
+            nonlocal degraded
             result = await self._retriever.retrieve(
                 text,
                 mode=RetrievalMode.FULL,
@@ -160,36 +166,57 @@ class QueryRouter:
                 result = await self._retriever.retrieve(
                     text, mode=RetrievalMode.FULL, limit=plan.rerank_k
                 )
+            degraded = degraded or result.degraded
+            return result.blocks
+
+        # Every branch concurrently. A methodological question produces three
+        # queries and, with the section boost, six searches — each embedding,
+        # querying twice and reranking. Run in sequence those dominate latency;
+        # they are independent, so there is no reason to.
+        plans: list[tuple[str, str, SearchFilters, float]] = []
+        for index, query in enumerate(queries):
+            plans.append((f"{query.origin.value}:{index}", query.text, base, query.weight))
+            if boosted is not None:
+                plans.append(
+                    (
+                        f"{query.origin.value}:{index}:sections",
+                        query.text,
+                        boosted,
+                        query.weight * 0.5,
+                    )
+                )
+
+        results = await asyncio.gather(*(run(text, filters) for _, text, filters, _ in plans))
+
+        branches: dict[str, list[str]] = {}
+        block_by_key: dict[str, ContextBlock] = {}
+        weights: dict[str, float] = {}
+        for (name, _, _, weight), blocks in zip(plans, results, strict=True):
             keys: list[str] = []
-            for block in result.blocks:
-                # Keyed on the text, not the page range. Two distinct spans in
-                # one section frequently share a page range, and keying on that
-                # made them collide — the second was silently dropped, losing
-                # real evidence from the fusion.
-                key = f"{block.section_id}:{hash(block.text)}"
+            for block in blocks:
+                # Keyed on the text digest, not the page range. Two distinct
+                # spans in one section frequently share a page range, and keying
+                # on that made them collide — the second was silently dropped,
+                # losing real evidence from the fusion.
+                #
+                # A digest rather than hash(): the built-in is salted per
+                # process, so the same block would key differently between runs
+                # and make results irreproducible.
+                digest = hashlib.blake2b(block.text.encode(), digest_size=8).hexdigest()
+                key = f"{block.section_id}:{digest}"
                 block_by_key.setdefault(key, block)
                 keys.append(key)
             branches[name] = keys
             weights[name] = weight
 
-        for index, query in enumerate(queries):
-            await run(f"{query.origin.value}:{index}", query.text, base, query.weight)
-            if boosted is not None:
-                await run(
-                    f"{query.origin.value}:{index}:sections",
-                    query.text,
-                    boosted,
-                    query.weight * 0.5,
-                )
-
         if not branches:
-            return []
+            return [], degraded
 
         fused = reciprocal_rank_fusion(branches, weights=weights, limit=plan.rerank_k * 2)
-        blocks = [block_by_key[key] for key, _ in fused if key in block_by_key]
+        ordered: list[ContextBlock] = [block_by_key[key] for key, _ in fused if key in block_by_key]
 
         if plan.max_chunks_per_document is not None:
-            blocks = _cap_per_document(blocks, plan.max_chunks_per_document)
+            ordered = _cap_per_document(ordered, plan.max_chunks_per_document)
 
         # Relabel after fusion so citation markers run C1..Cn in the order the
         # generator will see them.
@@ -205,8 +232,8 @@ class QueryRouter:
                 page_end=b.page_end,
                 score=b.score,
             )
-            for i, b in enumerate(blocks[: plan.rerank_k], start=1)
-        ]
+            for i, b in enumerate(ordered[: plan.rerank_k], start=1)
+        ], degraded
 
 
 def _cap_per_document(blocks: list[ContextBlock], cap: int) -> list[ContextBlock]:

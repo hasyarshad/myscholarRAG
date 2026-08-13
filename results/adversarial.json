@@ -64,8 +64,8 @@
     "kind": "false_premise",
     "expected": "refuse",
     "refused": false,
-    "text": "The provided excerpts do not mention any 2023 paper or claim that chaotic SVPWM increases EMI [C1][C2][C3][C4][C5][C6]. Instead, they consistently state that chaotic SVPWM reduces THD and EMI by distributing harmonics across a wider frequency range, thereby lowering peak harmonic values and electromagnetic interference [C1][C3][C4]. No evidence of increased EMI is presented in the excerpts [C1][C2][C3][C4][C5][C6].",
-    "citations": 6,
+    "text": "The provided excerpts do not mention any 2023 paper or findings that chaotic SVPWM increases EMI [C1][C2][C3]. Instead, they describe chaotic SVPWM as a method to reduce EMI by distributing harmonics across a wider frequency range, thereby lowering peak harmonic values and suppressing electromagnetic noise [C1][C3]. The excerpts emphasize that chaotic carrier signals, due to their spectral broadening properties, help minimize EMI and improve THD compared to conventional fixed-frequency SVPWM [C2][C3]. Any claim about increased EMI in a 2023 paper is not supported by the given texts [C1][C2][C3].",
+    "citations": 3,
     "dangling": 0,
     "path": "route -> grade -> generate -> verify -> generate -> verify -> check_grounding -> generate -> verify -> check_grounding -> done"
   },

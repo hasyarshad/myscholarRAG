@@ -10,7 +10,7 @@ expanded context blocks the generator would receive.
 | dense | 0.86 | 0.92 | 0.92 | 0.892 | 0.883 | 34/37 | 0 |
 | hybrid | 0.81 | 0.92 | 0.95 | 0.872 | 0.662 | 35/37 | 0 |
 | full | 0.84 | 0.92 | 0.95 | 0.885 | 0.706 | 35/37 | 0 |
-| routed | 0.83 | 0.92 | 0.94 | 0.882 | 0.674 | 34/36 | 1 |
+| routed | 0.81 | 0.92 | 0.95 | 0.872 | 0.694 | 35/37 | 0 |
 
 ## hit@3 by question kind
 
@@ -27,7 +27,7 @@ expanded context blocks the generator would receive.
 
 ## Questions routing changed
 
-- 1 -> —  (paraphrase) How is a questionnaire for assessing people's understanding of media developed and checked?
+- 1 -> 2  (topical) Data-driven predictive control that is computationally efficient
 
 ## Questions the reranker changed
 

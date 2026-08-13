@@ -74,7 +74,6 @@ class LLMSettings(BaseModel):
     """Zero by default. Grounded extraction wants determinism, not creativity."""
 
     timeout_seconds: float = 120.0
-    max_output_tokens: int = 1024
 
     @model_validator(mode="after")
     def _require_key_for_hosted(self) -> LLMSettings:
@@ -110,7 +109,6 @@ class RerankerSettings(BaseModel):
 
 class DatabaseSettings(BaseModel):
     url: str = "postgresql+asyncpg://myscholar:myscholar@localhost:5433/myscholar"
-    pool_size: int = 5
     echo: bool = False
 
 
@@ -124,7 +122,9 @@ class RetrievalSettings(BaseModel):
     window: int = 2
     """Chunks of context pulled either side of a hit during parent expansion."""
 
-    max_context_tokens: int = 1800
+    max_span_chunks: int = 8
+    """Cap on how many chunks one expanded span may contain."""
+
     dense_weight: float = 1.0
     lexical_weight: float = 1.0
     """Equal to the dense weight, which was measured rather than assumed.
@@ -174,7 +174,6 @@ class Settings(BaseSettings):
 
     papers_dir: Path = Path("papers")
     data_dir: Path = Path("data")
-    log_level: str = "INFO"
 
 
 def load_settings() -> Settings:

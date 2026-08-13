@@ -23,7 +23,6 @@ from myscholar.adapters.persistence.orm import (
     Chunk,
     ChunkEmbedding,
     Document,
-    DocumentSummary,
     Section,
 )
 from myscholar.ports.embedding import Vector
@@ -99,10 +98,6 @@ class PostgresStore(VectorStore):
             for statement in HNSW_STATEMENTS:
                 await connection.execute(text(statement))
 
-    async def drop_schema(self) -> None:
-        async with self._engine.begin() as connection:
-            await connection.run_sync(Base.metadata.drop_all)
-
     # -- integrity ---------------------------------------------------------
 
     async def indexed_model_ids(self) -> set[str]:
@@ -144,10 +139,6 @@ class PostgresStore(VectorStore):
             )
             return found is not None
 
-    async def delete_document(self, slug: str) -> None:
-        async with self.session() as session, session.begin():
-            await session.execute(delete(Document).where(Document.slug == slug))
-
     async def delete_by_content_hash(self, content_sha256: str) -> None:
         """Remove a document by source content.
 
@@ -165,7 +156,6 @@ class PostgresStore(VectorStore):
         sections: Sequence[tuple[Section, Sequence[tuple[Chunk, Vector]]]],
         *,
         model_id: str,
-        summaries: Sequence[DocumentSummary] = (),
     ) -> None:
         """Insert a document with its sections, chunks and vectors in one transaction.
 
@@ -185,8 +175,6 @@ class PostgresStore(VectorStore):
                     session.add(
                         ChunkEmbedding(chunk_id=chunk.id, model_id=model_id, embedding=vector)
                     )
-            for summary in summaries:
-                session.add(summary)
 
     async def chunks_for_reheadering(self) -> list[tuple[UUID, UUID, str, str, str]]:
         """Every chunk with what is needed to rebuild its contextual header.

@@ -865,14 +865,14 @@
       "kind": "paraphrase",
       "expected": "rotor-imbalance-fault-classification-through-unified-feature-fusion-combining-statisticalsignal-processing-with-adaptive",
       "rank": 1,
-      "context_precision": 0.4
+      "context_precision": 0.4444
     },
     {
       "question": "How is a questionnaire for assessing people's understanding of media developed and checked?",
       "kind": "paraphrase",
       "expected": "revisiting-media-literacy-measurement-development-and-validation-of-3-factor-media-literacy-scale",
-      "rank": null,
-      "context_precision": 0.0
+      "rank": 1,
+      "context_precision": 0.875
     },
     {
       "question": "How can malicious network traffic be spotted using an agent that learns by trial and error?",
@@ -920,7 +920,7 @@
       "question": "Data-driven predictive control that is computationally efficient",
       "kind": "topical",
       "expected": "computationally-efficient-data-driven-model-predictive-control-for-modular-multilevel-converters",
-      "rank": 1,
+      "rank": 2,
       "context_precision": 0.375
     },
     {
@@ -1040,7 +1040,7 @@
       "kind": "deepcontent",
       "expected": "packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training",
       "rank": 1,
-      "context_precision": 0.4
+      "context_precision": 0.875
     }
   ]
 }

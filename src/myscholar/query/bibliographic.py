@@ -27,6 +27,7 @@ class BibliographicIntent(StrEnum):
     COUNT = "count"
     LIST = "list"
     MOST_RECENT = "most_recent"
+    EARLIEST = "earliest"
     BY_YEAR = "by_year"
     VENUES = "venues"
 
@@ -37,6 +38,10 @@ _INTENT_PATTERNS: tuple[tuple[re.Pattern[str], BibliographicIntent], ...] = (
     (
         re.compile(r"\bmost\s+recent|\blatest\b|\bnewest\b", re.IGNORECASE),
         BibliographicIntent.MOST_RECENT,
+    ),
+    (
+        re.compile(r"\boldest\b|\bearliest\b|\bfirst\s+(paper|publication|work)", re.IGNORECASE),
+        BibliographicIntent.EARLIEST,
     ),
     (
         re.compile(r"\bhow\s+many\b|\bnumber\s+of\b|\bcount\b", re.IGNORECASE),
@@ -109,7 +114,9 @@ class BibliographicQuery:
             case BibliographicIntent.COUNT:
                 return self._count(scoped, years, excluded)
             case BibliographicIntent.MOST_RECENT:
-                return self._most_recent(verified, excluded)
+                return self._by_recency(verified, excluded, newest=True)
+            case BibliographicIntent.EARLIEST:
+                return self._by_recency(verified, excluded, newest=False)
             case BibliographicIntent.BY_YEAR:
                 return self._by_year(verified, excluded)
             case BibliographicIntent.VENUES:
@@ -150,23 +157,27 @@ class BibliographicQuery:
             facts={"count": len(ordered), "titles": [d.title for d in ordered]},
         )
 
-    def _most_recent(self, documents: list[DocumentRow], excluded: int) -> BibliographicAnswer:
+    def _by_recency(
+        self, documents: list[DocumentRow], excluded: int, *, newest: bool
+    ) -> BibliographicAnswer:
+        intent = BibliographicIntent.MOST_RECENT if newest else BibliographicIntent.EARLIEST
         dated = [d for d in documents if d.year is not None]
         if not dated:
             return BibliographicAnswer(
                 text="None of the papers has a verified publication year.",
-                intent=BibliographicIntent.MOST_RECENT,
+                intent=intent,
                 unverified=excluded,
             )
-        newest_year = max(d.year or 0 for d in dated)
-        newest = [d for d in dated if d.year == newest_year]
-        listed = "\n".join(f"· {d.title}" + (f" ({d.venue})" if d.venue else "") for d in newest)
+        target = (max if newest else min)(d.year or 0 for d in dated)
+        matching = [d for d in dated if d.year == target]
+        listed = "\n".join(f"· {d.title}" + (f" ({d.venue})" if d.venue else "") for d in matching)
+        label = "most recent" if newest else "earliest"
         return BibliographicAnswer(
-            text=f"The most recent work is from {newest_year}:\n{listed}",
-            intent=BibliographicIntent.MOST_RECENT,
-            documents=tuple(newest),
+            text=f"The {label} work is from {target}:\n{listed}",
+            intent=intent,
+            documents=tuple(matching),
             unverified=excluded,
-            facts={"year": newest_year, "count": len(newest)},
+            facts={"year": target, "count": len(matching)},
         )
 
     def _by_year(self, documents: list[DocumentRow], excluded: int) -> BibliographicAnswer:
