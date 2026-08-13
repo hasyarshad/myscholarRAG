@@ -14,7 +14,6 @@ from rich.table import Table
 from myscholar.config import load_settings
 from myscholar.container import build_container
 from myscholar.domain.answers import Answer
-from myscholar.reasoning import Engine
 
 app = typer.Typer(
     name="myscholar",
@@ -28,30 +27,55 @@ console = Console()
 @app.command()
 def ask(
     question: Annotated[str, typer.Argument(help="The question to answer.")],
-    trace: Annotated[bool, typer.Option("--trace", help="Show pipeline stages.")] = False,
+    trace: Annotated[bool, typer.Option("--trace", help="Show the path through the loop.")] = False,
 ) -> None:
-    """Ask a question about the corpus."""
-    container = build_container()
-    engine = Engine(generator=container.generator, utility=container.utility)
+    """Answer a question, with citations, or refuse."""
+    from myscholar.domain.answers import Refusal
+    from myscholar.generation.answerer import Answerer
+    from myscholar.reasoning.engine import Engine
+    from myscholar.reasoning.graph import Budget
 
-    response = asyncio.run(engine.answer(question))
+    settings = load_settings()
+    container = build_container(settings)
 
-    if response.refused:
-        console.print(Panel(response.text, title="No answer", border_style="yellow"))
+    engine = Engine(
+        router=_build_router(settings),
+        answerer=Answerer(generator=container.generator, utility=container.utility),
+        budget=Budget(
+            max_steps=settings.reasoning.max_steps,
+            max_retrieval_rounds=settings.reasoning.max_retrieval_rounds,
+            max_regenerations=settings.reasoning.max_regenerations,
+            deadline_seconds=settings.reasoning.deadline_seconds,
+        ),
+    )
+
+    response, loop_trace = asyncio.run(engine.answer_with_trace(question))
+
+    if isinstance(response, Refusal):
+        console.print(Panel(response.text, title="no answer", border_style="yellow"))
+        console.print(f"[dim]reason: {response.reason.value}[/dim]")
     else:
-        console.print(Panel(response.text, title="Answer", border_style="green"))
+        console.print(Panel(response.text, title="answer", border_style="green"))
 
     if isinstance(response, Answer) and response.citations:
-        table = Table("Ref", "Source", "Section", box=None)
+        table = Table("Ref", "Source", "Section", "Pages", box=None)
         for citation in response.citations:
-            table.add_row(citation.label, citation.document_title, citation.section_heading)
+            table.add_row(
+                citation.label,
+                citation.document_title[:52],
+                citation.section_heading[:28],
+                f"{citation.page_start}-{citation.page_end}",
+            )
         console.print(table)
 
     if trace:
-        stages = Table("Stage", "Detail", "ms", box=None)
+        stages = Table("Stage", "Detail", box=None)
         for event in response.trace:
-            stages.add_row(event.stage.value, event.detail, str(event.elapsed_ms))
+            stages.add_row(event.stage.value, event.detail)
         console.print(stages)
+        console.print(f"[dim]path: {' -> '.join(loop_trace.path)}[/dim]")
+        if loop_trace.stopped_because:
+            console.print(f"[yellow]stopped early: {loop_trace.stopped_because}[/yellow]")
 
 
 ingest_app = typer.Typer(help="Build the index from source documents.", no_args_is_help=True)

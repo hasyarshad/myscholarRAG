@@ -146,7 +146,14 @@ class ReasoningSettings(BaseModel):
     max_steps: int = 24
     max_retrieval_rounds: int = 3
     max_regenerations: int = 2
-    deadline_seconds: float = 45.0
+
+    deadline_seconds: float = 90.0
+    """Wall clock for one question.
+
+    45s was too tight: a worst-case path is three generations plus grounding
+    checks, and a 14b model takes 8-10s per generation, so the deadline tripped
+    on answers that were already valid.
+    """
 
 
 class Settings(BaseSettings):
