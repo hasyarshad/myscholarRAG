@@ -170,6 +170,43 @@ class PersonSettings(BaseModel):
     site_url: str = "https://haseeb-arshad.me"
 
 
+class RegistrySettings(BaseModel):
+    """Where bibliographic facts are resolved from.
+
+    A DOI found on a paper's first page is matched by regex against the
+    literal text, so it cannot be invented. Resolving it replaces every other
+    bibliographic field with the record the publisher deposited, which removes
+    both the review step and the errors that survived it.
+    """
+
+    enabled: bool = True
+    """Turn off to fall back to extraction plus the review file.
+
+    Kept switchable because it makes ingestion depend on a network service,
+    and a corpus must remain buildable offline.
+    """
+
+    mailto: str = "haseeb.arshad.ee@gmail.com"
+    """Contact address sent to Crossref, which routes to its polite pool.
+
+    Not authentication. Crossref serves anonymous traffic from a slower,
+    rate-limited pool, so omitting this looks like the service being flaky.
+    """
+
+    base_url: str = "https://api.crossref.org"
+    timeout_seconds: float = 20.0
+    publications_url: str = "https://haseeb-arshad.me/research"
+    """The page listing which papers are actually his.
+
+    Deliberately his own page rather than an author profile. OpenAlex's
+    profile for this name is merged with other people called Arshad and
+    credits him with a cangrelor neurointervention review and a 1989
+    air-conditioning paper; ORCID is clean but lists only half the corpus.
+    A page he maintains is the only source that is both correct and complete —
+    checked against the index, the two agree exactly, 20 for 20.
+    """
+
+
 class ApiSettings(BaseModel):
     """HTTP service settings."""
 
@@ -213,6 +250,7 @@ class Settings(BaseSettings):
     reasoning: ReasoningSettings = Field(default_factory=ReasoningSettings)
     api: ApiSettings = Field(default_factory=ApiSettings)
     person: PersonSettings = Field(default_factory=PersonSettings)
+    registry: RegistrySettings = Field(default_factory=RegistrySettings)
 
     papers_dir: Path = Path("papers")
     data_dir: Path = Path("data")

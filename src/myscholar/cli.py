@@ -14,6 +14,7 @@ from rich.table import Table
 from myscholar.config import load_settings
 from myscholar.container import build_container
 from myscholar.domain.answers import Answer
+from myscholar.domain.enums import DocumentKind
 
 app = typer.Typer(
     name="myscholar",
@@ -140,6 +141,7 @@ def _build_pipeline(settings: Any) -> tuple[Any, Any]:
         store=store,
         sectionizer=Sectionizer(container.utility),
         metadata_extractor=MetadataExtractor(container.utility),
+        resolver=container.resolver,
     )
     return pipeline, store
 
@@ -249,10 +251,14 @@ def papers_list() -> None:
         f"\n[dim]{counts['documents']} documents, {counts['sections']} sections, "
         f"{counts['chunks']} chunks, {counts['embeddings']} embeddings[/dim]"
     )
-    if unverified := sum(1 for r in rows if not r.verified):
+    # Papers only. Site pages and the CV have no publisher record and never
+    # appear in the review file, so counting them here reported five documents
+    # as needing a review that does not exist for them.
+    if unverified := sum(1 for r in rows if not r.verified and r.kind == DocumentKind.PAPER):
         console.print(
-            f"[yellow]{unverified} document(s) have unverified metadata.[/yellow] "
-            f"Review {settings.data_dir / 'metadata.yaml'} and run papers import-metadata."
+            f"[yellow]{unverified} paper(s) have unverified metadata.[/yellow] "
+            f"Run [bold]myscholar sync[/bold] to resolve them from the publisher record, "
+            f"or review {settings.data_dir / 'metadata.yaml'} for anything without a DOI."
         )
 
 
@@ -733,3 +739,155 @@ def ingest_web(
         console.print(f"[dim]skipped: {skipped}[/dim]")
     for name, error in report.failed:
         console.print(f"[red]failed:[/red] {name}: {error[:110]}")
+
+
+# ---------------------------------------------------------------------------
+# Keeping the corpus current
+# ---------------------------------------------------------------------------
+
+
+def _published_dois(url: str, *, timeout: float) -> set[str]:
+    """DOIs listed on the publications page.
+
+    The page is scanned for DOI-shaped strings rather than parsed with a
+    selector. That is coarse, but a DOI's shape is distinctive and it survives
+    the page being restyled, which is the whole point of pointing at a page
+    that changes.
+    """
+    import httpx
+
+    from myscholar.ingest.sync import dois_in
+
+    response = httpx.get(url, timeout=timeout, follow_redirects=True)
+    response.raise_for_status()
+    return dois_in(response.text)
+
+
+@app.command()
+def sync(
+    apply: Annotated[
+        bool, typer.Option("--apply", help="Write the corrections. Omit for a dry run.")
+    ] = False,
+    ingest_new: Annotated[
+        bool, typer.Option("--ingest/--no-ingest", help="Also index new PDFs and site pages.")
+    ] = True,
+) -> None:
+    """Bring the index back in step with what has actually been published.
+
+    Run after adding an accepted paper to the papers directory. Bibliographic
+    fields come from the publisher's own record via the DOI, so nothing needs
+    reviewing by hand — which is not merely less work but measurably more
+    accurate, three of twenty reviewed years having been wrong.
+
+    Defaults to a dry run. A sync that silently rewrites twenty documents is
+    not something to discover after the fact.
+    """
+    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
+    from myscholar.ingest.sync import plan
+
+    settings = load_settings()
+
+    if settings.registry.enabled is False:
+        console.print("[yellow]registry lookups are disabled (registry.enabled=false)[/yellow]")
+        raise typer.Exit(1)
+
+    # Indexing runs first so that a paper added in this run is corrected in
+    # this run. Correcting first left anything new carrying its extracted
+    # metadata until the next sync, which is the state this command exists to
+    # prevent.
+    if ingest_new:
+        console.print("[bold]indexing new sources[/bold]")
+        ingest_run()
+        ingest_web()
+        console.print()
+
+    async def _run() -> Any:
+        container = build_container(settings)
+        store = PostgresStore(create_engine(settings.database.url))
+        await store.create_schema()
+
+        if container.resolver is None:  # pragma: no cover - guarded above
+            msg = "no metadata resolver configured"
+            raise RuntimeError(msg)
+
+        published: set[str] = set()
+        try:
+            published = _published_dois(
+                settings.registry.publications_url, timeout=settings.registry.timeout_seconds
+            )
+        except Exception as exc:  # noqa: BLE001 - the page is advisory, not required
+            console.print(f"[yellow]could not read the publications page:[/yellow] {exc}")
+
+        documents = await store.bibliographic_view()
+        result = await plan(documents, resolver=container.resolver, published_dois=published)
+
+        applied = 0
+        if apply:
+            for correction in result.corrections:
+                if await store.apply_correction(
+                    correction.slug, correction.fields, source=correction.resolved.source
+                ):
+                    applied += 1
+
+        await container.resolver.aclose()
+        return result, applied, len(documents), len(published)
+
+    result, applied, total, published_count = asyncio.run(_run())
+
+    console.print(
+        f"checked [bold]{total}[/bold] indexed paper(s) against the registry"
+        + (f", {published_count} listed on the site" if published_count else "")
+    )
+
+    if result.corrections:
+        from collections import Counter
+
+        # Summarised by field first. A first run rewrites author formatting on
+        # nearly every document, and three genuinely wrong years are invisible
+        # inside twenty paragraphs of diff.
+        tally = Counter(c.field for correction in result.corrections for c in correction.changes)
+        console.print(
+            f"\n[bold]{len(result.corrections)} document(s) disagree with the publisher "
+            f"record[/bold]  [dim]("
+            + ", ".join(f"{field} x{count}" for field, count in tally.most_common())
+            + ")[/dim]"
+        )
+        # Years and titles first: they change what the assistant answers,
+        # whereas a reformatted author list changes only how it reads.
+        order = {"year": 0, "title": 1, "venue": 2, "authors": 3, "cited_by": 4}
+        for correction in sorted(
+            result.corrections, key=lambda c: min(order.get(x.field, 9) for x in c.changes)
+        ):
+            console.print(f"  [cyan]{correction.title[:66]}[/cyan]")
+            for change in sorted(correction.changes, key=lambda x: order.get(x.field, 9)):
+                highlight = "yellow" if change.field in {"year", "title"} else "dim"
+                console.print(f"      [{highlight}]{change}[/{highlight}]")
+    else:
+        console.print("[green]every indexed paper matches its publisher record[/green]")
+
+    for doi in result.unknown_to_registry:
+        console.print(f"[dim]not in the registry yet: {doi}[/dim]")
+    for slug in result.without_doi:
+        console.print(f"[dim]no DOI, cannot be checked: {slug}[/dim]")
+    for doi, error in result.unreachable:
+        console.print(f"[yellow]lookup failed, left unchanged:[/yellow] {doi} ({error[:70]})")
+
+    if result.missing_from_index:
+        console.print(
+            f"\n[yellow]{len(result.missing_from_index)} paper(s) on the site are not "
+            f"indexed[/yellow] — add the PDF to {settings.papers_dir}/ and re-run:"
+        )
+        for doi in result.missing_from_index:
+            console.print(f"  https://doi.org/{doi}")
+    if result.missing_from_site:
+        console.print(
+            f"\n[dim]{len(result.missing_from_site)} indexed paper(s) are not on the "
+            f"publications page[/dim]"
+        )
+        for doi in result.missing_from_site:
+            console.print(f"  [dim]https://doi.org/{doi}[/dim]")
+
+    if apply:
+        console.print(f"\n[green]applied[/green] {applied} correction(s)")
+    elif result.corrections:
+        console.print("\n[dim]dry run — re-run with --apply to write these[/dim]")

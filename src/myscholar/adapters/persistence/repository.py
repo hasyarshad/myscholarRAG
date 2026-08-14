@@ -25,6 +25,8 @@ from myscholar.adapters.persistence.orm import (
     Document,
     Section,
 )
+from myscholar.domain.enums import DocumentKind
+from myscholar.ingest.sync import IndexedDocument
 from myscholar.ports.embedding import Vector
 from myscholar.ports.store import SearchFilters, SearchHit, VectorStore
 
@@ -44,11 +46,13 @@ class DocumentRow:
 
     id: UUID
     slug: str
+    kind: str
     title: str
     authors: list[str]
     year: int | None
     venue: str | None
     verified: bool
+    cited_by: int | None
     sections: int
     chunks: int
 
@@ -86,11 +90,27 @@ class PostgresStore(VectorStore):
 
     # -- schema ------------------------------------------------------------
 
+    #: Columns added after the first schema was created.
+    #:
+    #: ``create_all`` creates missing *tables* and ignores missing columns, so
+    #: an existing index would silently keep the old shape and every query
+    #: touching a new column would fail at runtime instead of at startup.
+    #: There is no migration tool here on purpose — the index is rebuildable
+    #: from the papers — but a rebuild costs ~40s per document, which is too
+    #: much to demand for one added column.
+    _ADDED_COLUMNS = (
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS cited_by INTEGER",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS metadata_source VARCHAR(40) "
+        "NOT NULL DEFAULT ''",
+    )
+
     async def create_schema(self) -> None:
         async with self._engine.begin() as connection:
             await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             await connection.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
             await connection.run_sync(Base.metadata.create_all)
+            for statement in self._ADDED_COLUMNS:
+                await connection.execute(text(statement))
 
     async def create_vector_indexes(self) -> None:
         """Built after bulk loading, which is much faster than inserting through them."""
@@ -223,6 +243,50 @@ class PostgresStore(VectorStore):
                 setattr(document, field_name, value)
             return document.id
 
+    async def bibliographic_view(self) -> list[IndexedDocument]:
+        """Every paper's bibliographic fields, for reconciliation.
+
+        Pages and the CV are excluded: they have no DOI and no publisher
+        record, so a registry has nothing to say about them and listing them
+        as "cannot be corrected" would be noise on every run.
+        """
+        async with self.session() as session:
+            rows = await session.scalars(
+                select(Document)
+                .where(Document.kind == DocumentKind.PAPER.value)
+                .order_by(Document.year.desc().nulls_last(), Document.title)
+            )
+            return [
+                IndexedDocument(
+                    slug=row.slug,
+                    title=row.title,
+                    authors=tuple(row.authors or ()),
+                    year=row.year,
+                    venue=row.venue,
+                    doi=row.doi,
+                    cited_by=row.cited_by,
+                )
+                for row in rows
+            ]
+
+    async def apply_correction(self, slug: str, fields: dict[str, Any], *, source: str) -> bool:
+        """Write registry-resolved fields onto one document.
+
+        Keyed on slug and does not touch it, even when the title changes. The
+        slug is a unique key that citations and URLs are built from, and
+        regenerating it on every title tidy-up would break links for a
+        cosmetic difference.
+        """
+        async with self.session() as session, session.begin():
+            document = await session.scalar(select(Document).where(Document.slug == slug))
+            if document is None:
+                return False
+            for name, value in fields.items():
+                setattr(document, name, value)
+            document.metadata_source = source
+            document.metadata_verified = True
+            return True
+
     async def replace_chunk_headers(
         self,
         updates: Sequence[tuple[UUID, str, Vector]],
@@ -314,11 +378,13 @@ class PostgresStore(VectorStore):
                 DocumentRow(
                     id=doc.id,
                     slug=doc.slug,
+                    kind=doc.kind,
                     title=doc.title,
                     authors=list(doc.authors or []),
                     year=doc.year,
                     venue=doc.venue,
                     verified=doc.metadata_verified,
+                    cited_by=doc.cited_by,
                     sections=int(n_sections),
                     chunks=int(n_chunks),
                 )

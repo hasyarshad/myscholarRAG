@@ -25,6 +25,11 @@ from myscholar.ingest.metadata import MetadataExtractor, MetadataProposal, slugi
 from myscholar.ingest.sectionizer import Sectionizer
 from myscholar.ports.embedding import Embedder
 from myscholar.ports.extractor import DocumentExtractor, ExtractionError
+from myscholar.ports.metadata import (
+    MetadataResolutionError,
+    MetadataResolver,
+    ResolvedMetadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +50,25 @@ def _stem(source: Path | str) -> str:
     return Path(source).stem
 
 
+def _merge(proposed: PaperMetadata, resolved: ResolvedMetadata) -> PaperMetadata:
+    """Registry fields win, except where the registry has nothing to say.
+
+    A thin record must not blank a field that extraction did get. The title is
+    the one exception in the other direction — a registry always has one, and
+    the typeset title from a two-column PDF is the field extraction most often
+    mangles.
+    """
+    return PaperMetadata(
+        title=resolved.title or proposed.title,
+        authors=resolved.authors or proposed.authors,
+        year=resolved.year if resolved.year is not None else proposed.year,
+        venue=resolved.venue or proposed.venue,
+        doi=resolved.doi or proposed.doi,
+        url=proposed.url,
+        verified=True,
+    )
+
+
 @dataclass(slots=True)
 class IngestReport:
     documents: int = 0
@@ -55,6 +79,8 @@ class IngestReport:
     warnings: list[str] = field(default_factory=list)
     section_stats: dict[str, int] = field(default_factory=dict)
     proposals: list[MetadataProposal] = field(default_factory=list)
+    resolved: list[str] = field(default_factory=list)
+    """Documents whose metadata came from a registry, needing no review."""
 
 
 class IngestionPipeline:
@@ -67,6 +93,7 @@ class IngestionPipeline:
         sectionizer: Sectionizer,
         metadata_extractor: MetadataExtractor,
         policy: ChunkingPolicy | None = None,
+        resolver: MetadataResolver | None = None,
     ) -> None:
         self._extractor = extractor
         self._embedder = embedder
@@ -74,6 +101,24 @@ class IngestionPipeline:
         self._sectionizer = sectionizer
         self._metadata = metadata_extractor
         self._policy = policy or ChunkingPolicy()
+        self._resolver = resolver
+
+    async def _resolve(
+        self, doi: str | None, report: IngestReport, label: str
+    ) -> ResolvedMetadata | None:
+        """Look up a DOI, treating every failure as "fall back to extraction".
+
+        A registry outage must not fail an ingestion run. The corpus is
+        buildable offline by design, and the review file is still there as the
+        path for anything a registry cannot answer.
+        """
+        if self._resolver is None or not doi:
+            return None
+        try:
+            return await self._resolver.resolve(doi)
+        except MetadataResolutionError as exc:
+            report.warnings.append(f"{label}: registry lookup failed ({exc}); using extraction")
+            return None
 
     async def run(
         self,
@@ -116,7 +161,9 @@ class IngestionPipeline:
             report.skipped.append(f"{_label(path)} (unchanged)")
             return
 
-        if reviewed := known_metadata.get(_label(path)):
+        reviewed = known_metadata.get(_label(path))
+        proposal: MetadataProposal | None = None
+        if reviewed is not None:
             metadata = reviewed
         else:
             proposal = await self._metadata.propose(
@@ -125,6 +172,27 @@ class IngestionPipeline:
                 extracted_title=extracted.title,
             )
             metadata = proposal.metadata
+
+        # A resolved DOI supersedes both the proposal and the review file. The
+        # DOI itself was matched by regex against the literal page, so it
+        # cannot have been invented, and what it resolves to is the record the
+        # publisher deposited.
+        #
+        # Outranking the human review is deliberate and was measured: the
+        # review file is pre-filled with extraction guesses, which asks a
+        # person to spot an error rather than supply an answer, and three of
+        # twenty confirmed years were wrong. Leaving the review on top would
+        # also make ingestion disagree with `myscholar sync`, which corrects
+        # from the same registry — so a forced re-ingest would silently
+        # reintroduce errors sync had already fixed.
+        resolved = await self._resolve(metadata.doi, report, _label(path))
+        if resolved is not None:
+            metadata = _merge(metadata, resolved)
+            report.resolved.append(_label(path))
+        elif proposal is not None:
+            # Nothing authoritative to fall back on, so this one still needs a
+            # human. The review file remains the path for anything without a
+            # resolvable DOI — preprints, theses, work in submission.
             report.proposals.append(proposal)
 
         sections = await group_into_sections(
@@ -155,6 +223,8 @@ class IngestionPipeline:
             year=metadata.year,
             venue=metadata.venue,
             doi=metadata.doi,
+            cited_by=resolved.cited_by if resolved else None,
+            metadata_source=resolved.source if resolved else "",
             metadata_verified=metadata.verified,
             source_path=str(path),
             content_sha256=extracted.content_sha256,

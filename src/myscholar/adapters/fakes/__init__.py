@@ -11,7 +11,14 @@ runners.
 
 from myscholar.adapters.fakes.chat import FakeChatModel
 from myscholar.adapters.fakes.embedding import HashEmbedder
+from myscholar.adapters.fakes.metadata import FakeMetadataResolver
 from myscholar.adapters.fakes.reranker import NoopReranker
 from myscholar.adapters.fakes.store import InMemoryVectorStore
 
-__all__ = ["FakeChatModel", "HashEmbedder", "InMemoryVectorStore", "NoopReranker"]
+__all__ = [
+    "FakeChatModel",
+    "FakeMetadataResolver",
+    "HashEmbedder",
+    "InMemoryVectorStore",
+    "NoopReranker",
+]

@@ -63,9 +63,23 @@ class Document(Base):
     doi: Mapped[str | None] = mapped_column(String(200))
     url: Mapped[str | None] = mapped_column(Text)
 
-    #: False until a human has confirmed the extracted bibliographic fields.
-    #: Bibliographic questions are only answered from verified rows; ten
-    #: minutes of review removes an entire class of confident fabrication.
+    #: Citations recorded by the registry. NULL when unknown, which is a
+    #: different claim from zero and is reported differently.
+    cited_by: Mapped[int | None] = mapped_column(Integer, default=None)
+
+    #: Which registry the bibliographic fields came from, empty when they were
+    #: read off the page. Stored so an answer's provenance is inspectable
+    #: rather than assumed.
+    metadata_source: Mapped[str] = mapped_column(String(40), default="")
+
+    #: False until the bibliographic fields are trustworthy. Bibliographic
+    #: questions are only answered from verified rows.
+    #:
+    #: Originally that meant a human had confirmed them. It now also covers a
+    #: resolved DOI, which measured *more* accurate than the review: the
+    #: review file was pre-filled with extraction guesses, and three of twenty
+    #: confirmed years were wrong because spotting an error is harder than
+    #: supplying the answer.
     metadata_verified: Mapped[bool] = mapped_column(default=False)
 
     source_path: Mapped[str] = mapped_column(Text)

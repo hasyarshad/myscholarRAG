@@ -74,6 +74,12 @@ ingest:  ## Build the index from papers/ (needs make up first)
 ingest-force:  ## Rebuild the index, ignoring the content-hash cache
 	uv run myscholar ingest run --force
 
+sync:  ## Index anything new and reconcile metadata against the publisher record
+	uv run myscholar sync --apply
+
+sync-check:  ## Same, but report only — changes nothing
+	uv run myscholar sync --no-ingest
+
 serve:  ## Run the API on :8000
 	uv run myscholar serve
 

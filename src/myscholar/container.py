@@ -20,6 +20,7 @@ from myscholar.config import (
     load_settings,
 )
 from myscholar.ports import ChatModel, Embedder, Reranker
+from myscholar.ports.metadata import MetadataResolver
 
 
 class ConfigurationError(RuntimeError):
@@ -39,6 +40,8 @@ class Container:
 
     embedder: Embedder
     reranker: Reranker
+    resolver: MetadataResolver | None
+    """Bibliographic registry, or None when the corpus is built offline."""
 
 
 def _build_chat(settings: Settings, *, model: str) -> ChatModel:
@@ -137,4 +140,19 @@ def build_container(settings: Settings | None = None) -> Container:
         utility=_build_chat(settings, model=settings.llm.utility_model),
         embedder=embedder,
         reranker=_build_reranker(settings),
+        resolver=_build_resolver(settings),
+    )
+
+
+def _build_resolver(settings: Settings) -> MetadataResolver | None:
+    """None when disabled, so ingestion still runs with no network at all."""
+    if not settings.registry.enabled:
+        return None
+
+    from myscholar.adapters.metadata import CrossrefResolver
+
+    return CrossrefResolver(
+        mailto=settings.registry.mailto,
+        base_url=settings.registry.base_url,
+        timeout_seconds=settings.registry.timeout_seconds,
     )

@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from myscholar.adapters.persistence.repository import DocumentRow, PostgresStore
+from myscholar.domain.enums import DocumentKind
 
 
 class BibliographicIntent(StrEnum):
@@ -95,9 +96,14 @@ class BibliographicQuery:
         self._store = store
 
     async def answer(self, question: str) -> BibliographicAnswer:
-        documents = await self._store.list_documents()
-        verified = [d for d in documents if d.verified]
-        excluded = len(documents) - len(verified)
+        # Papers only. The CV and the site pages are indexed documents but they
+        # are not publications, and counting them would answer "how many
+        # papers" with five too many. Until now they were excluded incidentally
+        # by being unverified, which stops being true the moment anything marks
+        # a page verified.
+        papers = [d for d in await self._store.list_documents() if d.kind == DocumentKind.PAPER]
+        verified = [d for d in papers if d.verified]
+        excluded = len(papers) - len(verified)
 
         if not verified:
             return BibliographicAnswer(
