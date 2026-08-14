@@ -40,3 +40,6 @@ npm-debug.log*
 .idea/
 .vscode/
 *.swp
+
+# Screenshots dropped into the repo root while reporting a bug
+Screenshot*.png

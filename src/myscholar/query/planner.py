@@ -58,24 +58,35 @@ class Plan:
         return self.canned_response is not None
 
 
-OUT_OF_SCOPE_REPLY = (
-    "I only answer questions about this researcher's publications and CV. "
-    "Ask me about the papers — the methods used, what they found, or when and "
-    "where they were published."
-)
+def out_of_scope_reply(name: str = "this researcher") -> str:
+    return (
+        f"I only answer questions about {name}'s research and background. "
+        f"Ask me about the papers — the methods used, what they found, or when "
+        f"and where they were published."
+    )
 
-AMBIGUOUS_REPLY = (
-    "Which paper do you mean? I cover twenty publications, so a title, a topic "
-    "or a year would let me answer precisely."
-)
+
+def ambiguous_reply() -> str:
+    return "Which paper do you mean? A title, a topic or a year would let me answer precisely."
+
+
+OUT_OF_SCOPE_REPLY = out_of_scope_reply()
+AMBIGUOUS_REPLY = ambiguous_reply()
 
 
 class QueryPlanner:
     """Maps a classification to a plan."""
 
-    def __init__(self, *, top_k: int = 50, rerank_k: int = 8) -> None:
+    def __init__(
+        self,
+        *,
+        top_k: int = 50,
+        rerank_k: int = 8,
+        person_name: str = "this researcher",
+    ) -> None:
         self._top_k = top_k
         self._rerank_k = rerank_k
+        self._out_of_scope = out_of_scope_reply(person_name)
 
     def plan(self, classification: Classification) -> Plan:
         titles = tuple(classification.entities.paper_titles)
@@ -88,7 +99,7 @@ class QueryPlanner:
                 return Plan(
                     query_class=QueryClass.OUT_OF_SCOPE,
                     retrieve=False,
-                    canned_response=OUT_OF_SCOPE_REPLY,
+                    canned_response=self._out_of_scope,
                 )
 
             case QueryClass.AMBIGUOUS:

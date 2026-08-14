@@ -156,6 +156,20 @@ class ReasoningSettings(BaseModel):
     """
 
 
+class PersonSettings(BaseModel):
+    """Whose work this is.
+
+    Configurable rather than hardcoded, because the prompts, the canned
+    replies and the widget copy all name the person, and "this researcher"
+    reads like a template nobody finished filling in.
+    """
+
+    name: str = "Muhammad Haseeb Arshad"
+    short_name: str = "Haseeb"
+    pronoun: str = "his"
+    site_url: str = "https://haseeb-arshad.me"
+
+
 class ApiSettings(BaseModel):
     """HTTP service settings."""
 
@@ -198,6 +212,7 @@ class Settings(BaseSettings):
     retrieval: RetrievalSettings = Field(default_factory=RetrievalSettings)
     reasoning: ReasoningSettings = Field(default_factory=ReasoningSettings)
     api: ApiSettings = Field(default_factory=ApiSettings)
+    person: PersonSettings = Field(default_factory=PersonSettings)
 
     papers_dir: Path = Path("papers")
     data_dir: Path = Path("data")

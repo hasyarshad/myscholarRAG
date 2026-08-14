@@ -33,7 +33,9 @@ class ExtractedBlock:
 class ExtractedDocument:
     """A parsed document, before sectioning and chunking."""
 
-    source_path: Path
+    source_path: Path | str
+    """A filesystem path for documents, a URL for pages."""
+
     content_sha256: str
     page_count: int
     blocks: tuple[ExtractedBlock, ...]
@@ -57,8 +59,13 @@ class ExtractedDocument:
 
 class DocumentExtractor(ABC):
     @abstractmethod
-    def extract(self, path: Path) -> ExtractedDocument:
-        """Parse a document. Raises ``ExtractionError`` if it cannot be read."""
+    def extract(self, source: Path | str) -> ExtractedDocument:
+        """Parse a document from a file path or a URL.
+
+        The union is deliberate. Squeezing a URL into a ``Path`` looks tidy and
+        silently corrupts it — ``Path("https://x.com/y")`` normalises the double
+        slash away and produces ``https:/x.com/y``.
+        """
 
 
 class ExtractionError(RuntimeError):

@@ -186,7 +186,8 @@ class DoclingExtractor(DocumentExtractor):
             self._converter = self._build_converter()
         return self._converter
 
-    def extract(self, path: Path) -> ExtractedDocument:
+    def extract(self, source: Path | str) -> ExtractedDocument:
+        path = Path(source)
         if not path.is_file():
             msg = f"no such file: {path}"
             raise ExtractionError(msg)

@@ -40,7 +40,12 @@ def ask(
 
     engine = Engine(
         router=_build_router(settings),
-        answerer=Answerer(generator=container.generator, utility=container.utility),
+        answerer=Answerer(
+            generator=container.generator,
+            utility=container.utility,
+            person_name=settings.person.name,
+            short_name=settings.person.short_name,
+        ),
         budget=Budget(
             max_steps=settings.reasoning.max_steps,
             max_retrieval_rounds=settings.reasoning.max_retrieval_rounds,
@@ -564,8 +569,12 @@ def _build_router(settings: Any) -> Any:
     store = PostgresStore(create_engine(settings.database.url))
 
     return QueryRouter(
-        classifier=QueryClassifier(container.utility),
-        planner=QueryPlanner(top_k=settings.retrieval.top_k, rerank_k=settings.retrieval.rerank_k),
+        classifier=QueryClassifier(container.utility, person_name=settings.person.name),
+        planner=QueryPlanner(
+            top_k=settings.retrieval.top_k,
+            rerank_k=settings.retrieval.rerank_k,
+            person_name=settings.person.name,
+        ),
         transformer=QueryTransformer(container.utility),
         retriever=HybridRetriever(
             store=store,
@@ -670,3 +679,57 @@ def serve(
 
     console.print(f"[dim]http://{host}:{port}/docs[/dim]")
     uvicorn.run("myscholar.api.app:app", host=host, port=port, reload=reload, log_level="warning")
+
+
+@ingest_app.command("web")
+def ingest_web(
+    urls: Annotated[list[str] | None, typer.Argument(help="Pages to index.")] = None,
+    force: Annotated[bool, typer.Option("--force", help="Re-ingest unchanged pages.")] = False,
+) -> None:
+    """Index pages from the portfolio site.
+
+    The CV, projects and roles are not in any paper, so without them the
+    assistant refuses every biographical question — correctly, but unhelpfully.
+
+    Fetched from the live site rather than from its source repository: the
+    published page is what a visitor sees, it needs no credentials, and this
+    can be re-run whenever the site changes.
+    """
+    from myscholar.adapters.extraction.html_extractor import HtmlExtractor
+    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
+    from myscholar.domain.enums import DocumentKind
+    from myscholar.ingest.metadata import MetadataExtractor
+    from myscholar.ingest.pipeline import IngestionPipeline
+    from myscholar.ingest.sectionizer import Sectionizer
+
+    settings = load_settings()
+    base = settings.person.site_url.rstrip("/")
+    targets = urls or [f"{base}{p}" for p in ("/", "/cv", "/research", "/projects", "/leadership")]
+
+    console.print(f"indexing [bold]{len(targets)}[/bold] page(s)")
+
+    async def _run() -> Any:
+        container = build_container(settings)
+        store = PostgresStore(create_engine(settings.database.url))
+        pipeline = IngestionPipeline(
+            extractor=HtmlExtractor(),
+            embedder=container.embedder,
+            store=store,
+            sectionizer=Sectionizer(container.utility),
+            metadata_extractor=MetadataExtractor(None),
+        )
+        await store.create_schema()
+        report = await pipeline.run(targets, kind=DocumentKind.PAGE, force=force)
+        await store.create_vector_indexes()
+        return report
+
+    report = asyncio.run(_run())
+
+    console.print(
+        f"\n[green]indexed[/green] {report.documents} page(s), "
+        f"{report.sections} section(s), {report.chunks} chunk(s)"
+    )
+    for skipped in report.skipped:
+        console.print(f"[dim]skipped: {skipped}[/dim]")
+    for name, error in report.failed:
+        console.print(f"[red]failed:[/red] {name}: {error[:110]}")

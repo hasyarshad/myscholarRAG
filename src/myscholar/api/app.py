@@ -104,15 +104,24 @@ def _engine(settings: Settings, container: Container, store: PostgresStore) -> E
         max_span_chunks=settings.retrieval.max_span_chunks,
     )
     router = QueryRouter(
-        classifier=QueryClassifier(container.utility),
-        planner=QueryPlanner(top_k=settings.retrieval.top_k, rerank_k=settings.retrieval.rerank_k),
+        classifier=QueryClassifier(container.utility, person_name=settings.person.name),
+        planner=QueryPlanner(
+            top_k=settings.retrieval.top_k,
+            rerank_k=settings.retrieval.rerank_k,
+            person_name=settings.person.name,
+        ),
         transformer=QueryTransformer(container.utility),
         retriever=retriever,
         store=store,
     )
     return Engine(
         router=router,
-        answerer=Answerer(generator=container.generator, utility=container.utility),
+        answerer=Answerer(
+            generator=container.generator,
+            utility=container.utility,
+            person_name=settings.person.name,
+            short_name=settings.person.short_name,
+        ),
         budget=Budget(
             max_steps=settings.reasoning.max_steps,
             max_retrieval_rounds=settings.reasoning.max_retrieval_rounds,

@@ -102,7 +102,7 @@ def slugify(title: str, fallback: str, *, taken: set[str] | None = None) -> str:
 class MetadataProposal:
     """An extraction result, awaiting human confirmation."""
 
-    source_path: Path
+    source_path: Path | str
     metadata: PaperMetadata
     confidence_notes: tuple[str, ...] = ()
 
@@ -115,7 +115,7 @@ class MetadataExtractor:
         self,
         *,
         first_page: str,
-        source_path: Path,
+        source_path: Path | str,
         extracted_title: str = "",
     ) -> MetadataProposal:
         notes: list[str] = []
@@ -135,7 +135,8 @@ class MetadataExtractor:
         # The extractor's title item is the typeset title, so it beats both the
         # model's reading of the page and the filename. Filenames in this corpus
         # are lowercased and truncated by the download tool.
-        title = extracted_title or (extracted.title if extracted else "") or source_path.stem
+        fallback = Path(str(source_path)).stem
+        title = extracted_title or (extracted.title if extracted else "") or fallback
         # Regex findings win over the model's for DOI and year: a pattern match
         # against the literal page text cannot hallucinate, and both fields are
         # exactly the sort a model will confidently invent.
@@ -171,7 +172,7 @@ def write_review_file(proposals: list[MetadataProposal], path: Path) -> None:
     """
     payload = [
         {
-            "file": p.source_path.name,
+            "file": Path(str(p.source_path)).name,
             "title": p.metadata.title,
             "authors": list(p.metadata.authors),
             "year": p.metadata.year,

@@ -74,8 +74,14 @@ async def build_engine() -> Engine:
     documents = await store.list_documents()
 
     router = QueryRouter(
-        classifier=QueryClassifier(container.utility, titles=[d.title for d in documents]),
-        planner=QueryPlanner(top_k=settings.retrieval.top_k, rerank_k=settings.retrieval.rerank_k),
+        classifier=QueryClassifier(
+            container.utility, titles=[d.title for d in documents], person_name=settings.person.name
+        ),
+        planner=QueryPlanner(
+            top_k=settings.retrieval.top_k,
+            rerank_k=settings.retrieval.rerank_k,
+            person_name=settings.person.name,
+        ),
         transformer=QueryTransformer(container.utility),
         retriever=HybridRetriever(
             store=store,
@@ -93,7 +99,12 @@ async def build_engine() -> Engine:
     )
     return Engine(
         router=router,
-        answerer=Answerer(generator=container.generator, utility=container.utility),
+        answerer=Answerer(
+            generator=container.generator,
+            utility=container.utility,
+            person_name=settings.person.name,
+            short_name=settings.person.short_name,
+        ),
         budget=Budget(
             max_steps=settings.reasoning.max_steps,
             max_retrieval_rounds=settings.reasoning.max_retrieval_rounds,

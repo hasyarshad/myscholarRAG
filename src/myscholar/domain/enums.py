@@ -10,6 +10,13 @@ class DocumentKind(StrEnum):
 
     PAPER = "paper"
     CV = "cv"
+    PAGE = "page"
+    """A page from the portfolio site — projects, roles, research summaries.
+
+    Answers biographical and "what does he work on" questions that no paper
+    contains, which the assistant would otherwise refuse correctly but
+    unhelpfully.
+    """
 
 
 class SectionKind(StrEnum):

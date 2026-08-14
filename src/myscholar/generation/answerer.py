@@ -18,10 +18,14 @@ from myscholar.domain.documents import ContextBlock
 from myscholar.domain.enums import Verdict
 from myscholar.ports.llm import ChatModel, Message, Role
 
-#: Never built by formatting user or retrieved text into it. A prompt assembled
-#: from untrusted input is the classic injection vector, and this bot is public.
-SYSTEM_PROMPT = """You answer questions about one researcher's publications, using only the \
-excerpts provided.
+#: The person's name is the *only* thing interpolated, and it comes from
+#: configuration rather than from a request. User text and retrieved passages
+#: are never formatted into this — a prompt assembled from untrusted input is
+#: the classic injection vector, and this bot is public.
+_SYSTEM_TEMPLATE = """You answer questions about {name}'s research and background, using only \
+the excerpts provided.
+
+Refer to {short_name} by name or as "he", never as "the researcher" or "the author".
 
 Rules, in order of importance:
 
@@ -34,6 +38,14 @@ Rules, in order of importance:
 3. Never cite a label that is not in the excerpts you were given.
 4. Quote verbatim only when the words appear exactly in an excerpt.
 5. Be concise. Three or four sentences is usually enough."""
+
+
+def system_prompt(name: str = "the researcher", short_name: str = "they") -> str:
+    return _SYSTEM_TEMPLATE.format(name=name, short_name=short_name)
+
+
+#: Default for callers that do not configure a person.
+SYSTEM_PROMPT = system_prompt()
 
 _GRADE_PROMPT = """Judge whether each excerpt helps answer the question.
 
@@ -122,9 +134,17 @@ class GradedContext:
 class Answerer:
     """The model-backed steps of the adaptive loop."""
 
-    def __init__(self, *, generator: ChatModel, utility: ChatModel) -> None:
+    def __init__(
+        self,
+        *,
+        generator: ChatModel,
+        utility: ChatModel,
+        person_name: str = "the researcher",
+        short_name: str = "they",
+    ) -> None:
         self._generator = generator
         self._utility = utility
+        self._system = system_prompt(person_name, short_name)
 
     @staticmethod
     def render(blocks: Sequence[ContextBlock]) -> str:
@@ -209,7 +229,7 @@ class Answerer:
         so a regeneration addresses the specific problem rather than rerolling.
         """
         messages = [
-            Message(role=Role.SYSTEM, content=SYSTEM_PROMPT),
+            Message(role=Role.SYSTEM, content=self._system),
             Message(
                 role=Role.USER,
                 content=(

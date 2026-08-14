@@ -29,6 +29,22 @@ from myscholar.ports.extractor import DocumentExtractor, ExtractionError
 logger = logging.getLogger(__name__)
 
 
+def _is_url(source: Path | str) -> bool:
+    return isinstance(source, str) and source.startswith(("http://", "https://"))
+
+
+def _label(source: Path | str) -> str:
+    """A short name for reports, whether the source is a file or a URL."""
+    return str(source) if _is_url(source) else Path(source).name
+
+
+def _stem(source: Path | str) -> str:
+    """A slug fallback, whether the source is a file or a URL."""
+    if _is_url(source):
+        return str(source).rstrip("/").rsplit("/", 1)[-1] or "home"
+    return Path(source).stem
+
+
 @dataclass(slots=True)
 class IngestReport:
     documents: int = 0
@@ -61,7 +77,7 @@ class IngestionPipeline:
 
     async def run(
         self,
-        paths: Sequence[Path],
+        paths: Sequence[Path | str],
         *,
         kind: DocumentKind = DocumentKind.PAPER,
         known_metadata: dict[str, PaperMetadata] | None = None,
@@ -70,22 +86,23 @@ class IngestionPipeline:
         report = IngestReport()
         known_metadata = known_metadata or {}
 
-        for path in paths:
+        for source in paths:
+            path = Path(source) if not _is_url(source) else source
             try:
                 await self._ingest_one(path, kind, known_metadata, force, report)
             except ExtractionError as exc:
-                report.failed.append((path.name, str(exc)))
-                logger.warning("extraction failed for %s: %s", path.name, exc)
+                report.failed.append((_label(path), str(exc)))
+                logger.warning("extraction failed for %s: %s", _label(path), exc)
             except Exception as exc:
-                report.failed.append((path.name, f"{type(exc).__name__}: {exc}"))
-                logger.exception("ingestion failed for %s", path.name)
+                report.failed.append((_label(path), f"{type(exc).__name__}: {exc}"))
+                logger.exception("ingestion failed for %s", _label(path))
 
         report.section_stats = dict(self._sectionizer.stats)
         return report
 
     async def _ingest_one(
         self,
-        path: Path,
+        path: Path | str,
         kind: DocumentKind,
         known_metadata: dict[str, PaperMetadata],
         force: bool,
@@ -96,10 +113,10 @@ class IngestionPipeline:
         # Content-hash skip: extraction costs ~40s per paper, and a chunker
         # change should not pay that again for unchanged files.
         if not force and await self._store.document_exists(extracted.content_sha256):
-            report.skipped.append(f"{path.name} (unchanged)")
+            report.skipped.append(f"{_label(path)} (unchanged)")
             return
 
-        if reviewed := known_metadata.get(path.name):
+        if reviewed := known_metadata.get(_label(path)):
             metadata = reviewed
         else:
             proposal = await self._metadata.propose(
@@ -118,7 +135,7 @@ class IngestionPipeline:
         )
         indexed = [s for s in sections if s.kind not in NON_INDEXED_SECTIONS]
         if dropped := len(sections) - len(indexed):
-            report.warnings.append(f"{path.name}: {dropped} section(s) excluded from the index")
+            report.warnings.append(f"{_label(path)}: {dropped} section(s) excluded")
 
         if force:
             # Keyed on content, not on the slug. Correcting a title changes the
@@ -127,7 +144,7 @@ class IngestionPipeline:
             # forced re-run after a metadata review.
             await self._store.delete_by_content_hash(extracted.content_sha256)
 
-        slug = slugify(metadata.title, path.stem, taken=await self._store.taken_slugs())
+        slug = slugify(metadata.title, _stem(path), taken=await self._store.taken_slugs())
 
         document = DocumentRow(
             id=uuid4(),
@@ -196,10 +213,10 @@ class IngestionPipeline:
             report.chunks += len(rows)
 
         if not payload:
-            report.failed.append((path.name, "no indexable content after sectioning"))
+            report.failed.append((_label(path), "no indexable content after sectioning"))
             return
 
         await self._store.add_document(document, payload, model_id=self._embedder.model_id)
         report.documents += 1
         report.sections += len(payload)
-        report.warnings.extend(f"{path.name}: {w}" for w in extracted.warnings)
+        report.warnings.extend(f"{_label(path)}: {w}" for w in extracted.warnings)

@@ -111,7 +111,9 @@ def classify_by_pattern(heading: str, kind: DocumentKind) -> SectionKind | None:
     if not text:
         return None
 
-    patterns = _CV_PATTERNS if kind is DocumentKind.CV else _PATTERNS
+    # Site pages use the same heading vocabulary as a CV — Education,
+    # Experience, Skills — so they share the pattern table.
+    patterns = _CV_PATTERNS if kind in (DocumentKind.CV, DocumentKind.PAGE) else _PATTERNS
     for pattern, section_kind in patterns:
         if pattern.search(text):
             return section_kind

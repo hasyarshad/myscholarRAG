@@ -336,6 +336,15 @@ class Engine:
         ).with_event(Stage.DONE, reason.value)
 
     async def _done(self, state: LoopState) -> LoopState:
+        # A response set earlier stands. The bibliographic path answers in the
+        # route node and routes straight here; rebuilding from the (empty)
+        # draft silently replaced "4 papers in 2023." with an empty string.
+        #
+        # This regressed once when an unrelated `git checkout` reverted the
+        # fix, so it is covered by a test rather than only a comment.
+        if state.response is not None:
+            return state
+
         verification = state.verification
         citations_found = verification.citations if verification else ()
 

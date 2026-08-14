@@ -241,8 +241,14 @@ async def evaluate_routed(cases: list[dict[str, Any]]) -> list[Outcome]:
     slugs = {row.id: row.slug for row in documents}
 
     router = QueryRouter(
-        classifier=QueryClassifier(container.utility, titles=[d.title for d in documents]),
-        planner=QueryPlanner(top_k=settings.retrieval.top_k, rerank_k=settings.retrieval.rerank_k),
+        classifier=QueryClassifier(
+            container.utility, titles=[d.title for d in documents], person_name=settings.person.name
+        ),
+        planner=QueryPlanner(
+            top_k=settings.retrieval.top_k,
+            rerank_k=settings.retrieval.rerank_k,
+            person_name=settings.person.name,
+        ),
         transformer=QueryTransformer(container.utility),
         retriever=HybridRetriever(
             store=store,
