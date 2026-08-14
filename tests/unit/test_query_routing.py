@@ -87,6 +87,55 @@ class TestPatternClassification:
             is None
         )
 
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "how many did haseeb publish in 2026?",
+            "how many did he publish in 2025",
+            "what did he publish in 2024",
+            "has he published anything in 2026?",
+            "did he publish anything last year",
+            "when did he publish the NSGA-II paper",
+        ],
+    )
+    def test_the_noun_may_be_left_implicit(self, question: str) -> None:
+        """ "How many did he publish in 2025" carries the noun in the verb.
+
+        Requiring the word "papers" missed every phrasing like this, and the
+        model then called them out_of_scope — a counting question stripped of
+        its noun reads like chitchat. Five of twelve realistic phrasings fell
+        through this way, including the one Haseeb actually asked.
+        """
+        result = QueryClassifier().classify_by_pattern(question)
+
+        assert result is not None
+        assert result.query_class is QueryClass.BIBLIOGRAPHIC
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "why did he publish this as open access",
+            "how many layers does the network have",
+            "how many electrodes in the 2025 setup",
+        ],
+    )
+    def test_the_verb_form_does_not_swallow_content_questions(self, question: str) -> None:
+        """A wrong bibliographic route answers a count nobody asked for."""
+        assert QueryClassifier().classify_by_pattern(question) is None
+
+    @pytest.mark.parametrize(
+        ("question", "year"),
+        [("how many in 2025", 2025), ("and how many in 2024?", 2024), ("how about 2023", 2023)],
+    )
+    def test_a_bare_count_and_year_is_a_follow_up(self, question: str, year: int) -> None:
+        """Asked of a bot scoped to one person's publications, this phrasing has
+        exactly one reading, so it is resolved without a model or a history."""
+        result = QueryClassifier().classify_by_pattern(question)
+
+        assert result is not None
+        assert result.query_class is QueryClass.BIBLIOGRAPHIC
+        assert result.entities.years == [year]
+
     def test_years_are_extracted_from_bibliographic_questions(self) -> None:
         result = QueryClassifier().classify_by_pattern("How many papers in 2023?")
 

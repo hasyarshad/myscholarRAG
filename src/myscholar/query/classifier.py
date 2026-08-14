@@ -61,7 +61,31 @@ _BIBLIOGRAPHIC = re.compile(
     r"|\b(what|which)\b\s+(venue|journal|conference|proceedings)s?\b"
     r"|\b(his|her|their|your)\s+(venue|journal|conference|proceedings)s?\b"
     r"|\bwhere\b.*\b(has|have)\b.*\bpublish"
-    r"|\bwhat\s+year\b.*\b(publish|appear)",
+    r"|\bwhat\s+year\b.*\b(publish|appear)"
+    # The verb on its own, with the noun left implicit: "how many did he
+    # publish in 2025", "has he published anything since 2023". Requiring the
+    # noun missed every one of these, and the model then classified them
+    # out_of_scope — a counting question stripped of the word "papers" reads
+    # like chitchat to it. Measured: 5 of 12 realistic phrasings fell through.
+    # "why" is excluded: "why did he publish this as open access" asks about a
+    # decision, and routing it to SQL would answer a count question nobody
+    # asked.
+    r"|(?<!why\s)\b(how\s+many|what|which|when|how\s+often|has|have|had|did|does|do)\b"
+    r"[^?.!]{0,40}\bpublish",
+    re.IGNORECASE,
+)
+
+#: A count with its subject left in the previous turn: "how many in 2025",
+#: "and how many in 2024?".
+#:
+#: This is deliberately narrow — the whole question must be nothing but a
+#: count and a year. Within a bot scoped to one person's publications there is
+#: exactly one thing that phrasing can mean, so resolving it deterministically
+#: beats both refusing and asking a model to guess. Anything longer ("how many
+#: layers in the 2025 model") falls through to normal classification.
+_ELLIPTICAL_COUNT = re.compile(
+    r"^\s*(and\s+|ok\s+|so\s+)?(what\s+about\s+|how\s+(many|about))\s*"
+    r"(in|during|for|about)?\s*(19[89]\d|20[0-4]\d)\s*[?.!]?\s*$",
     re.IGNORECASE,
 )
 
@@ -176,7 +200,7 @@ class QueryClassifier:
                 reasoning="refers to a paper with no way to tell which",
                 decided_by="pattern",
             )
-        if _BIBLIOGRAPHIC.search(question):
+        if _BIBLIOGRAPHIC.search(question) or _ELLIPTICAL_COUNT.match(question):
             return Classification(
                 query_class=QueryClass.BIBLIOGRAPHIC,
                 entities=QueryEntities(years=[int(y) for y in _YEAR.findall(question)]),
