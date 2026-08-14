@@ -36,7 +36,10 @@ _YEAR = re.compile(r"\b(19[89]\d|20[0-4]\d)\b")
 
 _INTENT_PATTERNS: tuple[tuple[re.Pattern[str], BibliographicIntent], ...] = (
     (
-        re.compile(r"\bmost\s+recent|\blatest\b|\bnewest\b", re.IGNORECASE),
+        # "recent" without "most" counts: "what is his recent paper?" asks the
+        # same thing, and classification has already established that this is a
+        # question about the collection.
+        re.compile(r"\brecent\b|\blatest\b|\bnewest\b", re.IGNORECASE),
         BibliographicIntent.MOST_RECENT,
     ),
     (

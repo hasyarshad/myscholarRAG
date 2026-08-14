@@ -124,6 +124,43 @@ class TestPatternClassification:
         assert QueryClassifier().classify_by_pattern(question) is None
 
     @pytest.mark.parametrize(
+        "question",
+        [
+            "and what is his recent paper?",
+            "his latest publication",
+            "what's his newest work",
+            "his latest journal article",
+            "what was his first publication",
+        ],
+    )
+    def test_recency_does_not_require_the_word_most(self, question: str) -> None:
+        """Only "most recent" matched, so "what is his recent paper?" went to
+        retrieval and named a 2021 chaos paper — confident, cited and wrong."""
+        result = QueryClassifier().classify_by_pattern(question)
+
+        assert result is not None
+        assert result.query_class is QueryClass.BIBLIOGRAPHIC
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "how does the latest controller work",
+            "how did the first stage work",
+            "his recent work on fault detection",
+            "what is his recent research about MPC",
+        ],
+    )
+    def test_recency_words_do_not_swallow_content_questions(self, question: str) -> None:
+        """Two separate traps.
+
+        "work" is a verb as often as a noun, and the earlier pattern allowed
+        ".*" between the adjective and the noun, so "how does the latest
+        controller work" read as a request for the newest paper. And a topical
+        tail means the question is about the topic, not the collection.
+        """
+        assert QueryClassifier().classify_by_pattern(question) is None
+
+    @pytest.mark.parametrize(
         ("question", "year"),
         [("how many in 2025", 2025), ("and how many in 2024?", 2024), ("how about 2023", 2023)],
     )

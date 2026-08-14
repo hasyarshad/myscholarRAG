@@ -52,8 +52,26 @@ _BIBLIOGRAPHIC = re.compile(
     r"|\b(list|show|name)\b.*\b(all|every|your|his|the)\b.*"
     r"\b(paper|publication|article|work)s?\b"
     r"|\b(paper|publication|article|work)s?\b.*\bin\s+(19|20)\d{2}\b"
-    r"|\b(most\s+(recent|cited|latest)|oldest|earliest|first|newest|latest)\b"
-    r".*\b(paper|publication|work|article)s?\b"
+    # Recency and precedence: "his most recent paper", "his latest publication",
+    # "what was his first paper".
+    #
+    # Only "most recent" used to be matched, so "what is his recent paper?"
+    # went to retrieval and came back naming a 2021 chaos paper — a confident,
+    # cited, wrong answer, which is a worse failure than the refusals the noun
+    # gap produced. A bare "recent" is now included.
+    #
+    # The adjective and the noun must be adjacent. The earlier form allowed
+    # ".*" between them, which quietly made "how does the latest controller
+    # work" a bibliographic question. "work" additionally gets no intervening
+    # words at all, since it is a verb as often as a noun; the unambiguous
+    # nouns keep a wider gap so "his latest journal article" still matches.
+    #
+    # A topical tail disqualifies the match: "his recent work on fault
+    # detection" is a content question, and answering it with the latest paper
+    # overall would ignore what was asked.
+    r"|\b(most\s+(recent|cited|latest)|recent|latest|newest|earliest|oldest|first)\s+"
+    r"((\w+\s+){0,2}(paper|publication|article)s?|works?)\b"
+    r"(?!\s+(on|about|regarding|concerning|involving|related\s+to)\b)"
     # Venue questions *about the collection*: "which journals has he published
     # in", "where has he published". Deliberately not "which paper appeared in
     # an IET journal", which asks to identify a paper and belongs in retrieval —
