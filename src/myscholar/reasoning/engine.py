@@ -13,6 +13,7 @@ See docs/learning/05-adaptive-rag-and-hallucination.md.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field, replace
 
@@ -23,6 +24,8 @@ from myscholar.generation import citations
 from myscholar.generation.answerer import Answerer, GradedContext
 from myscholar.query.router import QueryRouter
 from myscholar.reasoning.graph import Budget, Graph, Trace
+
+logger = logging.getLogger(__name__)
 
 REWRITE = "rewrite"
 BROADEN = "broaden"
@@ -205,9 +208,26 @@ class Engine:
         ).with_event(Stage.GRADING, f"{len(graded.kept)} kept, {len(graded.rejected)} dropped")
 
     async def _generate(self, state: LoopState) -> LoopState:
-        draft = await self._answerer.generate(
-            state.question, state.blocks, correction=state.correction
-        )
+        try:
+            draft = await self._answerer.generate(
+                state.question, state.blocks, correction=state.correction
+            )
+        except Exception:
+            # A model that times out or dies mid-loop is an outage, not a
+            # programming error, and the loop already knows how to end without
+            # a draft. Letting it propagate turned a slow generation into an
+            # HTTP 500 and a red "something went wrong" in the widget, which is
+            # both less useful and less honest than a refusal — and it threw
+            # away any verified draft from an earlier attempt.
+            #
+            # Spending the whole regeneration budget stops the loop retrying an
+            # unavailable model until the wall clock runs out.
+            logger.exception("generation failed; ending the loop without a new draft")
+            budget = state.budget.step().exhaust_regenerations()
+            return replace(state, budget=budget, correction=None, degraded=True).with_event(
+                Stage.GENERATING, "generation unavailable"
+            )
+
         budget = state.budget.step()
         if state.correction:
             budget = budget.regenerated()

@@ -89,6 +89,16 @@ class Budget:
     def regenerated(self) -> Budget:
         return replace(self, regenerations_used=self.regenerations_used + 1)
 
+    def exhaust_regenerations(self) -> Budget:
+        """Spend the whole regeneration allowance at once.
+
+        Used when generation fails outright rather than producing something
+        flawed. Retrying an unavailable model just burns the wall clock, and
+        the loop's exits are all expressed in terms of the budget, so saying
+        "there are no attempts left" is how a node declines to continue.
+        """
+        return replace(self, regenerations_used=self.max_regenerations)
+
     def tried(self, strategy: str) -> Budget:
         """Record a corrective strategy, so none is attempted twice."""
         return replace(self, strategies_tried=self.strategies_tried | {strategy})

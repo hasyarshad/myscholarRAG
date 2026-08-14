@@ -206,11 +206,13 @@ class IngestionPipeline:
             report.warnings.append(f"{_label(path)}: {dropped} section(s) excluded")
 
         if force:
-            # Keyed on content, not on the slug. Correcting a title changes the
-            # slug, so deleting by slug removes nothing and the insert then
-            # collides on the content hash — which failed every document on a
-            # forced re-run after a metadata review.
-            await self._store.delete_by_content_hash(extracted.content_sha256)
+            # Never keyed on the slug. Correcting a title changes the slug, so
+            # deleting by slug removes nothing and the insert then collides on
+            # the content hash — which failed every document on a forced re-run
+            # after a metadata review.
+            await self._store.delete_for_reingest(
+                content_sha256=extracted.content_sha256, source_path=str(path)
+            )
 
         slug = slugify(metadata.title, _stem(path), taken=await self._store.taken_slugs())
 

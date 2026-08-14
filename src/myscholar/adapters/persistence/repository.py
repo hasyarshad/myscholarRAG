@@ -159,16 +159,29 @@ class PostgresStore(VectorStore):
             )
             return found is not None
 
-    async def delete_by_content_hash(self, content_sha256: str) -> None:
-        """Remove a document by source content.
+    async def delete_for_reingest(self, *, content_sha256: str, source_path: str) -> None:
+        """Remove any prior copy of a document, by either identity it has.
 
-        Re-ingestion has to key on the file, not the slug. Correcting a title
-        changes the slug, so deleting by slug removes nothing and the insert
-        then collides on the content hash — which failed every document on a
-        forced re-run after a metadata review.
+        Both keys are needed, and neither alone is sufficient.
+
+        The content hash catches a file that has been renamed. It cannot catch
+        a re-extraction, because for web pages the hash is computed *over the
+        extracted text* — so improving the extractor changes the key, the
+        delete matches nothing, and the insert lands beside the old row under a
+        disambiguated slug. That is not hypothetical: fixing the CV extractor
+        left cv/cv-2, projects/projects-2 and leadership/leadership-2 in the
+        index, silently doubling that content in retrieval while the reported
+        counts looked normal.
+
+        The source path catches exactly that case, and is stable for files too.
         """
         async with self.session() as session, session.begin():
-            await session.execute(delete(Document).where(Document.content_sha256 == content_sha256))
+            await session.execute(
+                delete(Document).where(
+                    (Document.content_sha256 == content_sha256)
+                    | (Document.source_path == source_path)
+                )
+            )
 
     async def add_document(
         self,

@@ -37,7 +37,11 @@ Rules, in order of importance:
    still a claim about them and still needs a marker.
 3. Never cite a label that is not in the excerpts you were given.
 4. Quote verbatim only when the words appear exactly in an excerpt.
-5. Be concise. Three or four sentences is usually enough."""
+5. Be concise. Three or four sentences is usually enough.
+6. If the question asks which things, how many, or for a list, name them.
+   Saying they "are listed in the excerpts" is not an answer — the reader
+   cannot see the excerpts. This outranks rule 5: a list of nine awards is
+   still concise if nine were asked for."""
 
 
 def system_prompt(name: str = "the researcher", short_name: str = "they") -> str:

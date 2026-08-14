@@ -53,13 +53,35 @@ _BLOCKS = frozenset({"p", "li", "td", "dd", "dt", "blockquote", "figcaption"})
 
 #: Boilerplate that survives the structural filter.
 _NOISE = re.compile(
-    r"^\s*(skip to (main )?content|menu|close|toggle|back to top|©|copyright"
-    r"|all rights reserved|cookie|accept|home)\b",
+    # The copyright sign is matched separately: it is not a word character, so
+    # the trailing \b never fired after it and "© 2026" was let through. Only
+    # ever visible in a footer, which is skipped by tag — but the rule was
+    # silently doing nothing.
+    r"^\s*(©"
+    r"|(skip to (main )?content|menu|close|toggle|back to top|copyright"
+    r"|all rights reserved|cookie|accept|home)\b)",
     re.IGNORECASE,
 )
 
-#: Anything shorter is a label, a button or a stray fragment.
-_MIN_BLOCK_CHARS = 24
+#: Decoration that is genuinely contentless: the ordinals a styled list prints
+#: beside each entry ("01", "02"), and bare link labels.
+#:
+#: This replaced a 24-character minimum, which was written for prose pages and
+#: is actively wrong for a CV. Measured on /cv, the length rule discarded 99 of
+#: 200 blocks — every date range, every funder, every award amount, and the
+#: entire skills list down to "Python", "PyTorch" and "NSGA-II". The page
+#: looked indexed and answered biographical questions plausibly, which is what
+#: kept it hidden.
+#:
+#: Short is not the same as empty. On a CV the short strings *are* the data,
+#: and the structural filters above — skipped tags, then this — are what
+#: separate content from chrome.
+_CHROME = re.compile(r"^(\d{1,3}|doi|pdf|link|url|[ivxlc]+)$", re.IGNORECASE)
+
+
+def is_content(text: str) -> bool:
+    """Whether a block carries anything worth indexing."""
+    return bool(re.search(r"\w", text)) and not _CHROME.match(text) and not _NOISE.match(text)
 
 
 @dataclass
@@ -130,7 +152,7 @@ class _Reader(HTMLParser):
             # a degree, a role, a project — which the surrounding prose often
             # does not repeat.
             self.blocks.append(ExtractedBlock(kind=ChunkKind.PROSE, text=text, page=1))
-        elif len(text) >= _MIN_BLOCK_CHARS:
+        elif is_content(text):
             self.blocks.append(ExtractedBlock(kind=ChunkKind.PROSE, text=text, page=1))
 
 
