@@ -11,6 +11,13 @@ cd web && npm install && npm run dev        # the demo, on :3000
 
 The demo defaults to `http://127.0.0.1:8000`. Override with `MYSCHOLAR_API`.
 
+**If the widget says "could not reach the assistant" while the API is
+healthy, it is CORS.** The browser blocks the request and `fetch` reports a
+generic network failure, so the widget cannot tell you the real reason. Check
+that the port your dev server actually bound to is in
+`MYSCHOLAR_API__ALLOWED_ORIGINS` — Next picks the next free port if 3000 is
+taken, which is exactly how this was first hit.
+
 ## Using the widget elsewhere
 
 `components/scholar-chat/` is self-contained — five files, no dependencies

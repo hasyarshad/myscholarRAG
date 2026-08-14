@@ -20,6 +20,7 @@ from myscholar.api.app import Services, create_app
 from myscholar.api.limits import Gate, Limits, OverloadedError, RateLimitedError, RateLimiter
 from myscholar.api.schemas import MAX_QUESTION_CHARS
 from myscholar.api.sse import frame
+from myscholar.config import load_settings
 from myscholar.domain.answers import Answer, Citation, Refusal, TraceEvent
 from myscholar.domain.enums import RefusalReason, Stage
 
@@ -112,7 +113,7 @@ def _answer(store: _Store) -> Answer:
 def _client(response: Answer | Refusal | None = None, *, store: _Store | None = None) -> TestClient:
     store = store or _Store()
     services = Services(
-        settings=None,  # type: ignore[arg-type]
+        settings=load_settings(),
         engine=_Engine(response or _answer(store)),  # type: ignore[arg-type]
         store=store,  # type: ignore[arg-type]
         slugs={str(store.doc.id): store.doc.slug},
@@ -315,3 +316,68 @@ class TestLimits:
         async with gate:  # occupies the only slot
             with pytest.raises(OverloadedError):
                 await gate.__aenter__()
+
+
+class TestCors:
+    """A misconfigured origin fails in the browser and nowhere else.
+
+    The API stays healthy, curl works, every test passes — and the widget
+    reports "could not reach the assistant". That happened: the allow list
+    hardcoded port 3000 and the dev server was started on 3100.
+    """
+
+    @pytest.mark.parametrize(
+        "origin",
+        [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:3100",
+            "https://haseeb-arshad.me",
+        ],
+    )
+    def test_expected_origins_pass_preflight(self, origin: str) -> None:
+        response = _client().options(
+            "/v1/ask",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == origin
+
+    def test_an_unknown_origin_is_refused(self) -> None:
+        """Exact origins, never a wildcard."""
+        response = _client().options(
+            "/v1/ask",
+            headers={
+                "Origin": "https://not-my-site.example",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+
+        assert response.status_code == 400
+
+    def test_a_configured_origin_is_honoured(self) -> None:
+        from myscholar.api.app import create_app as build
+
+        store = _Store()
+        services = Services(
+            settings=load_settings(),
+            engine=_Engine(_answer(store)),  # type: ignore[arg-type]
+            store=store,  # type: ignore[arg-type]
+            ready=True,
+        )
+        client = TestClient(build(services, origins=["https://elsewhere.example"]))
+
+        response = client.options(
+            "/v1/ask",
+            headers={
+                "Origin": "https://elsewhere.example",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+
+        assert response.status_code == 200

@@ -143,9 +143,13 @@ def create_app(services: Services | None = None, *, origins: list[str] | None = 
     # Exact origins, never a wildcard. Worth being clear that CORS is a
     # browser-only control and stops nothing from curl — the real gate in
     # production is a shared secret injected by the Next.js proxy.
+    allowed = origins or (services.settings.api.allowed_origins if services else None)
+    if allowed is None:
+        allowed = load_settings().api.allowed_origins
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=origins or ["http://localhost:3000", "https://haseeb-arshad.me"],
+        allow_origins=allowed,
         allow_credentials=False,
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],

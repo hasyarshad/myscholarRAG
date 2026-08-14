@@ -156,6 +156,32 @@ class ReasoningSettings(BaseModel):
     """
 
 
+class ApiSettings(BaseModel):
+    """HTTP service settings."""
+
+    allowed_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:3100",
+            "http://127.0.0.1:3100",
+            "https://haseeb-arshad.me",
+            "https://www.haseeb-arshad.me",
+        ]
+    )
+    """Browser origins permitted to call the API.
+
+    Exact origins, never a wildcard. Several localhost ports are listed
+    because a dev server lands wherever the port is free — hardcoding one and
+    then starting the site on another produced a preflight 400 and a widget
+    reporting "could not reach the assistant", with the API perfectly healthy.
+
+    Worth restating that CORS is a browser-only control: it stops a page on
+    another origin, and stops nothing from curl. The real gate in production is
+    the shared secret the Next.js proxy injects.
+    """
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="MYSCHOLAR_",
@@ -171,6 +197,7 @@ class Settings(BaseSettings):
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     retrieval: RetrievalSettings = Field(default_factory=RetrievalSettings)
     reasoning: ReasoningSettings = Field(default_factory=ReasoningSettings)
+    api: ApiSettings = Field(default_factory=ApiSettings)
 
     papers_dir: Path = Path("papers")
     data_dir: Path = Path("data")
