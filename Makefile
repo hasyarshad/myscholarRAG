@@ -83,6 +83,20 @@ sync-check:  ## Same, but report only — changes nothing
 serve:  ## Run the API on :8000
 	uv run myscholar serve
 
+## --- Evaluation ----------------------------------------------------------
+
+eval:  ## Run every evaluation and write results/report.md (~30 min)
+	uv run python scripts/eval.py
+
+eval-fast:  ## Everything except generation — deterministic, about two minutes
+	uv run python scripts/eval.py --skip generation
+
+eval-generation:  ## The three-pipeline comparison only
+	uv run python scripts/eval_generation.py
+
+eval-refusal:  ## Just the adaptive system's refusal behaviour, no baselines
+	uv run python scripts/eval_generation.py --configs adaptive
+
 papers:  ## List what is indexed
 	uv run myscholar papers list
 	@echo

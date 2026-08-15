@@ -83,13 +83,27 @@ class Engine:
         return response
 
     async def answer_with_trace(self, question: str) -> tuple[Response, Trace]:
+        response, trace, _ = await self.answer_with_context(question)
+        return response, trace
+
+    async def answer_with_context(
+        self, question: str
+    ) -> tuple[Response, Trace, tuple[ContextBlock, ...]]:
+        """The response, the path taken, and the passages the model was given.
+
+        The context is exposed for evaluation: judging whether a claim is
+        supported means judging it against what the generator actually saw.
+        Reconstructing that from the citations is not equivalent — a citation
+        carries a quote at most, and the loop may have retrieved, graded and
+        broadened several times before settling.
+        """
         # A fresh budget per question. The stored one is a template of limits;
         # reusing the instance would carry the previous question's elapsed time
         # and step count into this one.
         state, trace = await self._graph.run(
             LoopState(question=question, search_text=question, budget=self._budget.fresh())
         )
-        return self._finish(state, trace), trace
+        return self._finish(state, trace), trace, state.blocks
 
     async def stream_events(self, question: str) -> AsyncIterator[TraceEvent | Answer | Refusal]:
         """Yield each stage as it happens, then the finished response.

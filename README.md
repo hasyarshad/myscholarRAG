@@ -146,13 +146,29 @@ path: route -> grade -> generate -> verify -> generate -> verify -> done
 ### Evaluation
 
 ```bash
+make eval          # everything, writes results/report.md   (~30 min)
+make eval-fast     # retrieval and routing only, deterministic  (~2 min)
+```
+
+Or one stage at a time:
+
+```bash
+uv run python scripts/eval_generation.py    # naive vs retrieved vs adaptive
 uv run python scripts/eval_retrieval.py     # dense vs hybrid vs rerank vs routed
 uv run python scripts/eval_routing.py       # classification accuracy
-uv run python scripts/eval_adversarial.py   # refusal and citation validity
+uv run python scripts/eval_generation.py --configs adaptive   # refusal only, faster
 uv run python scripts/check_extraction.py   # PDF extraction sanity, ~20s
 ```
 
-Results land in `results/` as markdown and JSON.
+Results land in `results/` as markdown and JSON. `results/report.md` is the
+consolidated one.
+
+The `naive` configuration is a dense-only, single-call baseline,
+implemented in `src/myscholar/evaluation/baseline.py` and run against the
+*same* index, embedder and generator — so the difference between the rows is
+pipeline design and nothing else. See
+[docs/learning/06-evaluating-rag.md](docs/learning/06-evaluating-rag.md) for
+why the baseline is deliberately made stronger than the original was.
 
 ## Stack
 
@@ -178,8 +194,8 @@ its termination guarantee property-testable.
 | 3 | Query translation, routing, bibliographic SQL | done |
 | 4 | Adaptive loop: grading, citation verification, refusal | done |
 | — | Audit: 15 findings, 13 fixed | done |
-| 6 | API and chat widget | in progress |
-| 5 | Evaluation: larger golden set, per-claim faithfulness | pending |
+| 6 | API, chat widget, conversation memory | done |
+| 5 | Evaluation: three-pipeline comparison, per-claim faithfulness | done |
 | 7 | Deployment: local containers, then free cloud | pending |
 
 ## Known limitations
