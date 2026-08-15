@@ -344,8 +344,13 @@ class PostgresStore(VectorStore):
             )
             return {section_id: int(count) for section_id, count in rows.all()}
 
-    async def span_context(self, section_id: UUID) -> tuple[str, str, int, int] | None:
-        """Title, heading and page range for a section, for the citation."""
+    async def span_context(self, section_id: UUID) -> tuple[str, str, int, int, str] | None:
+        """Title, heading, page range and document kind for a section.
+
+        The kind rides along with the citation fields because it is needed at
+        the same moment and by the same caller: it is what lets the interface
+        say whether a passage came from a paper or from the CV.
+        """
         async with self.session() as session:
             row = (
                 await session.execute(
@@ -354,6 +359,7 @@ class PostgresStore(VectorStore):
                         Section.heading,
                         Section.page_start,
                         Section.page_end,
+                        Document.kind,
                     )
                     .join(Document, Document.id == Section.document_id)
                     .where(Section.id == section_id)
@@ -361,7 +367,7 @@ class PostgresStore(VectorStore):
             ).first()
         if row is None:
             return None
-        return (row.title, row.heading, int(row.page_start), int(row.page_end))
+        return (row.title, row.heading, int(row.page_start), int(row.page_end), row.kind)
 
     # -- statistics --------------------------------------------------------
 

@@ -53,6 +53,7 @@ def ask(
             max_regenerations=settings.reasoning.max_regenerations,
             deadline_seconds=settings.reasoning.deadline_seconds,
         ),
+        short_name=settings.person.short_name,
     )
 
     response, loop_trace = asyncio.run(engine.answer_with_trace(question))
@@ -725,7 +726,24 @@ def ingest_web(
             metadata_extractor=MetadataExtractor(None),
         )
         await store.create_schema()
-        report = await pipeline.run(targets, kind=DocumentKind.PAGE, force=force)
+
+        # The CV is filed as a CV rather than as another page. It was already
+        # sectioned with the CV patterns; giving it its own kind lets the
+        # interface say "the CV" instead of folding it into "the site", which
+        # is what a visitor asking about awards or degrees is actually reading.
+        cv = [u for u in targets if u.rstrip("/").endswith("/cv")]
+        pages = [u for u in targets if u not in cv]
+
+        report = await pipeline.run(pages, kind=DocumentKind.PAGE, force=force)
+        if cv:
+            cv_report = await pipeline.run(cv, kind=DocumentKind.CV, force=force)
+            report.documents += cv_report.documents
+            report.sections += cv_report.sections
+            report.chunks += cv_report.chunks
+            report.skipped.extend(cv_report.skipped)
+            report.failed.extend(cv_report.failed)
+            report.warnings.extend(cv_report.warnings)
+
         await store.create_vector_indexes()
         return report
 

@@ -112,6 +112,15 @@ class ContextBlock:
     page_end: int
     score: float = 0.0
 
+    document_kind: str = ""
+    """Paper, CV or site page.
+
+    Carried so the interface can say what was actually searched. The widget
+    used to label every retrieval "Searching the papers", which was untrue for
+    any question the CV answered — and it is the CV questions where a visitor
+    is most likely to be checking whether the thing works.
+    """
+
     def render(self) -> str:
         """Format for inclusion in a prompt."""
         return (

@@ -11,9 +11,19 @@
 
 import type { StageEvent } from "./types";
 
+/**
+ * Labels say what the stage *is*; the detail, which the server supplies, says
+ * what it found.
+ *
+ * `retrieving` used to read "Searching the papers". That was a guess made in
+ * the browser, and once the CV and the site were indexed it was simply untrue
+ * — a visitor asking about awards watched it claim to search papers while it
+ * read the CV. Only the server knows what was actually searched, so the label
+ * stays neutral and the specifics arrive as detail.
+ */
 const LABELS: Record<string, string> = {
   classifying: "Reading the question",
-  retrieving: "Searching the papers",
+  retrieving: "Searching",
   grading: "Checking what was found",
   generating: "Writing the answer",
   verifying: "Verifying every citation",

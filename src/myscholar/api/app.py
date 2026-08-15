@@ -128,6 +128,7 @@ def _engine(settings: Settings, container: Container, store: PostgresStore) -> E
             max_regenerations=settings.reasoning.max_regenerations,
             deadline_seconds=settings.reasoning.deadline_seconds,
         ),
+        short_name=settings.person.short_name,
     )
 
 
@@ -280,9 +281,18 @@ async def _stream(
             if await request.is_disconnected():
                 return
 
+            # Restarted after the concurrency gate. Measured from before it,
+            # the elapsed time includes however long the request queued behind
+            # another, so a metadata lookup that takes 6ms was reported as 28
+            # seconds — describing the server's load rather than the work, in
+            # the one place the interface claims to show the work.
+            started = time.monotonic()
+
             yield frame(
                 "stage",
-                StageEvent(stage="classifying", detail="reading the question"),
+                # No detail: the widget already labels this stage, and repeating
+                # the label as its own detail read as a stutter.
+                StageEvent(stage="classifying"),
             )
 
             # Each stage as the pipeline reaches it, not replayed afterwards.

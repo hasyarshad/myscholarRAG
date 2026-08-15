@@ -20,6 +20,7 @@ from dataclasses import dataclass, field, replace
 from myscholar.domain.answers import Answer, Refusal, Response, TraceEvent
 from myscholar.domain.documents import ContextBlock
 from myscholar.domain.enums import RefusalReason, Stage
+from myscholar.domain.narration import describe_class, describe_sources
 from myscholar.generation import citations
 from myscholar.generation.answerer import Answerer, GradedContext
 from myscholar.query.router import QueryRouter
@@ -68,10 +69,12 @@ class Engine:
         router: QueryRouter,
         answerer: Answerer,
         budget: Budget | None = None,
+        short_name: str = "him",
     ) -> None:
         self._router = router
         self._answerer = answerer
         self._budget = budget or Budget()
+        self._name = short_name
         self._listeners: list[asyncio.Queue[TraceEvent | None]] = []
         self._graph = self._build()
 
@@ -195,11 +198,19 @@ class Engine:
                 state,
                 budget=budget,
                 response=Refusal(reason=reason, text=routed.plan.canned_response),
-            ).with_event(Stage.DONE, routed.classification.query_class.value)
+            ).with_event(
+                Stage.DONE, describe_class(routed.classification.query_class, short_name=self._name)
+            )
 
+        # Names what was actually searched, not what the plan intended. The
+        # retriever always runs one unrestricted branch, so a biographical
+        # question can and does return paper passages — a label predicted from
+        # the query class would be wrong exactly when it mattered.
+        sources = describe_sources((b.document_kind, b.document_id) for b in routed.blocks)
+        detail = f"{len(routed.blocks)} passages" + (f" from {sources}" if sources else "")
         return replace(
             state, budget=budget, blocks=routed.blocks, degraded=routed.degraded
-        ).with_event(Stage.RETRIEVING, f"{len(routed.blocks)} blocks")
+        ).with_event(Stage.RETRIEVING, detail)
 
     async def _grade(self, state: LoopState) -> LoopState:
         graded = await self._answerer.grade(state.question, state.blocks)

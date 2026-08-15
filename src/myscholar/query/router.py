@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from uuid import UUID
 
 from myscholar.adapters.persistence.repository import PostgresStore
@@ -220,19 +220,14 @@ class QueryRouter:
 
         # Relabel after fusion so citation markers run C1..Cn in the order the
         # generator will see them.
+        #
+        # `replace` rather than rebuilding field by field. The explicit version
+        # dropped every field it did not list, so adding `document_kind` to
+        # ContextBlock left it populated by the retriever and blank by the time
+        # anything downstream saw it — silently, since a blank string is a
+        # valid value. Only the label needs to change here.
         return [
-            ContextBlock(
-                label=f"C{i}",
-                document_id=b.document_id,
-                section_id=b.section_id,
-                document_title=b.document_title,
-                section_heading=b.section_heading,
-                text=b.text,
-                page_start=b.page_start,
-                page_end=b.page_end,
-                score=b.score,
-            )
-            for i, b in enumerate(ordered[: plan.rerank_k], start=1)
+            replace(b, label=f"C{i}") for i, b in enumerate(ordered[: plan.rerank_k], start=1)
         ], degraded
 
 

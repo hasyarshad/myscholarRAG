@@ -250,7 +250,7 @@ class HybridRetriever:
         context = await self._store.span_context(span.section_id)
         if context is None:
             return None
-        document_title, section_heading, page_start, page_end = context
+        document_title, section_heading, page_start, page_end, document_kind = context
 
         return ContextBlock(
             label=f"C{label_index}",
@@ -262,6 +262,7 @@ class HybridRetriever:
             page_start=page_start,
             page_end=page_end,
             score=span.max_score,
+            document_kind=document_kind,
         )
 
 
