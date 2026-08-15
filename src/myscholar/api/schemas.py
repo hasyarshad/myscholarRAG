@@ -19,7 +19,11 @@ class AskRequest(BaseModel):
     session_id: str | None = Field(
         default=None,
         max_length=64,
-        description="Opaque identifier. Conversation turns are held server-side.",
+        description=(
+            "Issued by the server on the first turn and echoed back on later "
+            "ones. Conversation turns are held server-side and are never "
+            "accepted from a client."
+        ),
     )
 
 
@@ -36,6 +40,21 @@ class CitationView(BaseModel):
     page_start: int
     page_end: int
     slug: str = ""
+
+
+class SessionEvent(BaseModel):
+    """The conversation this exchange belongs to.
+
+    Sent first, so a client that disconnects mid-answer can still continue the
+    conversation on its next request.
+
+    The identifier is generated here rather than accepted from the request. A
+    client-chosen one could be guessed or reused, and would then hand one
+    visitor another visitor's questions as the context for resolving a
+    follow-up.
+    """
+
+    session_id: str
 
 
 class StageEvent(BaseModel):

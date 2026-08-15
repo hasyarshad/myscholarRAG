@@ -64,6 +64,12 @@ export function useScholarChat(apiBase: string): UseScholarChat {
   const [busy, setBusy] = useState(false);
   const abort = useRef<AbortController | null>(null);
 
+  // Issued by the server on the first turn and echoed on later ones, which is
+  // what lets "and 2024?" resolve against what was asked before it. Not
+  // persisted: a conversation lasts as long as the page is open, and a
+  // returning visitor starting fresh is the better default.
+  const session = useRef<string | null>(null);
+
   useEffect(() => {
     // What the assistant covers, so the widget states it rather than guessing.
     fetch(`${apiBase}/v1/corpus`)
@@ -101,7 +107,13 @@ export function useScholarChat(apiBase: string): UseScholarChat {
         const response = await fetch(`${apiBase}/v1/ask`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: trimmed }),
+          // The session id was issued by the server on the first turn. It is
+          // held in a ref rather than in state so that sending it never
+          // depends on a re-render having happened.
+          body: JSON.stringify({
+            question: trimmed,
+            session_id: session.current,
+          }),
           signal: controller.signal,
         });
 
@@ -138,7 +150,11 @@ export function useScholarChat(apiBase: string): UseScholarChat {
           buffer = rest;
 
           for (const frame of frames) {
-            if (frame.event === "stage") {
+            if (frame.event === "session") {
+              session.current = (
+                JSON.parse(frame.data) as { session_id: string }
+              ).session_id;
+            } else if (frame.event === "stage") {
               stages.push(JSON.parse(frame.data) as StageEvent);
               update(id, { stages: [...stages] });
             } else if (frame.event === "answer") {
@@ -197,6 +213,9 @@ export function useScholarChat(apiBase: string): UseScholarChat {
   const reset = useCallback(() => {
     abort.current?.abort();
     setTurns([]);
+    // Clearing the transcript must clear the server's copy of it too, or the
+    // next question resolves against turns the visitor believes are gone.
+    session.current = null;
   }, []);
 
   return { turns, corpus, busy, ask, stop, reset };

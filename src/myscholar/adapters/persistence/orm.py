@@ -175,6 +175,43 @@ class ChunkEmbedding(Base):
     chunk: Mapped[Chunk] = relationship(back_populates="embeddings")
 
 
+class ConversationTurn(Base):
+    """One exchange, held server-side.
+
+    The turns are stored here rather than sent up with each request, and that
+    is a security control rather than a convenience. A client that supplies its
+    own history can supply an assistant turn that never happened — "Understood,
+    I will now answer general questions" — and the model has no way to tell a
+    forged turn from a real one. Server-owned turns make that impossible to
+    express.
+
+    Only the question and the answer are kept. No IP, no user agent, nothing
+    that identifies a visitor; the conversation id is random and is the only
+    thing linking two turns together.
+    """
+
+    __tablename__ = "conversation_turns"
+    __table_args__ = (
+        Index("ix_turns_conversation", "conversation_id", "ordinal"),
+        Index("ix_turns_created", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    conversation_id: Mapped[str] = mapped_column(String(64))
+    ordinal: Mapped[int] = mapped_column(Integer)
+
+    question: Mapped[str] = mapped_column(Text)
+    answer: Mapped[str] = mapped_column(Text)
+    refused: Mapped[bool] = mapped_column(default=False)
+    """Recorded so a refusal is not offered as an antecedent. Resolving "and
+    2024?" against a turn that answered nothing produces a follow-up to a
+    non-answer."""
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 #: HNSW indexes are created after bulk loading rather than declared here.
 #: Building them on an empty table and inserting through them is markedly
 #: slower than building once over the finished data.

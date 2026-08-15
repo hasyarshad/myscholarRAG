@@ -23,6 +23,7 @@ from myscholar.api.sse import frame
 from myscholar.config import load_settings
 from myscholar.domain.answers import Answer, Citation, Refusal, TraceEvent
 from myscholar.domain.enums import RefusalReason, Stage
+from myscholar.query.history import FollowUpResolver, Turn
 
 
 @dataclass
@@ -42,6 +43,7 @@ class _Store:
     def __init__(self, *, healthy: bool = True, chunks: int = 10) -> None:
         self._healthy = healthy
         self._chunks = chunks
+        self.turns: dict[str, list[Turn]] = {}
         self.doc = _Doc(
             id=uuid4(),
             slug="a-paper",
@@ -63,6 +65,18 @@ class _Store:
 
     async def assert_embedder_matches(self, model_id: str) -> None:
         return
+
+    # -- conversations -----------------------------------------------------
+
+    async def recent_turns(self, conversation_id: str, *, limit: int = 4) -> list[Turn]:
+        return list(self.turns.get(conversation_id, []))
+
+    async def append_turn(
+        self, conversation_id: str, *, question: str, answer: str, refused: bool
+    ) -> None:
+        self.turns.setdefault(conversation_id, []).append(
+            Turn(question=question, answer=answer, refused=refused)
+        )
 
 
 class _Engine:
@@ -116,6 +130,7 @@ def _client(response: Answer | Refusal | None = None, *, store: _Store | None = 
         settings=load_settings(),
         engine=_Engine(response or _answer(store)),  # type: ignore[arg-type]
         store=store,  # type: ignore[arg-type]
+        resolver=FollowUpResolver(None),
         slugs={str(store.doc.id): store.doc.slug},
         ready=bool(store._chunks),  # noqa: SLF001
     )
@@ -368,6 +383,7 @@ class TestCors:
             settings=load_settings(),
             engine=_Engine(_answer(store)),  # type: ignore[arg-type]
             store=store,  # type: ignore[arg-type]
+            resolver=FollowUpResolver(None),
             ready=True,
         )
         client = TestClient(build(services, origins=["https://elsewhere.example"]))
@@ -381,3 +397,71 @@ class TestCors:
         )
 
         assert response.status_code == 200
+
+
+class TestConversations:
+    """Follow-ups resolve against turns the server owns."""
+
+    def test_a_session_is_issued_before_anything_else(self) -> None:
+        """Sent first so a client that disconnects mid-answer can still
+        continue the conversation on its next request."""
+        client = _client()
+
+        events = parse_sse(client.post("/v1/ask", json={"question": "hello?"}).text)
+
+        assert events[0][0] == "session"
+        assert events[0][1]["session_id"]
+
+    def test_the_turn_is_recorded(self) -> None:
+        store = _Store()
+        client = _client(store=store)
+
+        body = client.post("/v1/ask", json={"question": "what is it about?"}).text
+        session = parse_sse(body)[0][1]["session_id"]
+
+        assert [t.question for t in store.turns[session]] == ["what is it about?"]
+
+    def test_the_same_session_accumulates_turns(self) -> None:
+        store = _Store()
+        client = _client(store=store)
+
+        first = parse_sse(client.post("/v1/ask", json={"question": "one"}).text)[0][1]["session_id"]
+        client.post("/v1/ask", json={"question": "two", "session_id": first})
+
+        assert [t.question for t in store.turns[first]] == ["one", "two"]
+
+    def test_a_client_invented_identifier_is_replaced(self) -> None:
+        """A guessable id would hand one visitor another's questions as the
+        context for resolving a follow-up."""
+        store = _Store()
+        client = _client(store=store)
+
+        body = client.post("/v1/ask", json={"question": "one", "session_id": "session-1"}).text
+        issued = parse_sse(body)[0][1]["session_id"]
+
+        assert issued != "session-1"
+        assert "session-1" not in store.turns
+
+    def test_the_original_question_is_stored_not_the_rewrite(self) -> None:
+        """The transcript should read as the visitor typed it."""
+        store = _Store()
+        client = _client(store=store)
+
+        body = client.post("/v1/ask", json={"question": "and 2024?"}).text
+        session = parse_sse(body)[0][1]["session_id"]
+
+        assert store.turns[session][0].question == "and 2024?"
+
+    def test_a_failure_to_record_does_not_lose_the_answer(self) -> None:
+        store = _Store()
+
+        async def _boom(*args: Any, **kwargs: Any) -> None:
+            msg = "database gone"
+            raise RuntimeError(msg)
+
+        store.append_turn = _boom  # type: ignore[method-assign]
+        client = _client(store=store)
+
+        events = parse_sse(client.post("/v1/ask", json={"question": "anything"}).text)
+
+        assert [name for name, _ in events][-1] == "answer"

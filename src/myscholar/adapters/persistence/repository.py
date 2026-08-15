@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import (
@@ -22,6 +22,7 @@ from myscholar.adapters.persistence.orm import (
     Base,
     Chunk,
     ChunkEmbedding,
+    ConversationTurn,
     Document,
     Section,
 )
@@ -29,6 +30,7 @@ from myscholar.domain.enums import DocumentKind
 from myscholar.ingest.sync import IndexedDocument
 from myscholar.ports.embedding import Vector
 from myscholar.ports.store import SearchFilters, SearchHit, VectorStore
+from myscholar.query.history import MAX_TURN_CHARS, Turn
 
 
 class IndexMismatchError(RuntimeError):
@@ -182,6 +184,70 @@ class PostgresStore(VectorStore):
                     | (Document.source_path == source_path)
                 )
             )
+
+    # -- conversations -----------------------------------------------------
+
+    async def recent_turns(self, conversation_id: str, *, limit: int = 4) -> list[Turn]:
+        """The last few exchanges, oldest first.
+
+        Only a handful: a follow-up refers to the turn before it, occasionally
+        the one before that. Feeding twenty turns to the resolver costs tokens
+        and gives it more chances to attach the question to the wrong
+        antecedent.
+        """
+        async with self.session() as session:
+            rows = await session.scalars(
+                select(ConversationTurn)
+                .where(ConversationTurn.conversation_id == conversation_id)
+                .order_by(ConversationTurn.ordinal.desc())
+                .limit(limit)
+            )
+            return [
+                Turn(question=row.question, answer=row.answer, refused=row.refused)
+                for row in reversed(list(rows))
+            ]
+
+    async def append_turn(
+        self, conversation_id: str, *, question: str, answer: str, refused: bool
+    ) -> None:
+        """Record an exchange.
+
+        Text is truncated on the way in. The stored turns exist to resolve
+        "and 2024?", which needs the gist of what was asked, not a full answer
+        with its citations.
+        """
+        async with self.session() as session, session.begin():
+            last = await session.scalar(
+                select(func.max(ConversationTurn.ordinal)).where(
+                    ConversationTurn.conversation_id == conversation_id
+                )
+            )
+            session.add(
+                ConversationTurn(
+                    id=uuid4(),
+                    conversation_id=conversation_id,
+                    ordinal=(last or 0) + 1,
+                    question=question[:MAX_TURN_CHARS],
+                    answer=answer[:MAX_TURN_CHARS],
+                    refused=refused,
+                )
+            )
+
+    async def prune_conversations(self, *, older_than_days: int = 30) -> int:
+        """Drop old turns.
+
+        A public widget accumulates strangers' questions indefinitely
+        otherwise. Nothing here identifies anyone, but keeping it forever is
+        still collecting something for no reason.
+        """
+        async with self.session() as session, session.begin():
+            result = await session.execute(
+                delete(ConversationTurn).where(
+                    ConversationTurn.created_at
+                    < func.now() - text(f"interval '{int(older_than_days)} days'")
+                )
+            )
+            return int(getattr(result, "rowcount", 0) or 0)
 
     async def add_document(
         self,
