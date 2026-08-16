@@ -191,18 +191,26 @@ async def _build(settings: Any) -> tuple[Any, HybridRetriever, PostgresStore, En
     return container, retriever, store, engine
 
 
-async def _score(
+async def _score_all(
     judge: FaithfulnessJudge,
-    outcome: Outcome,
-    text: str,
-    blocks: tuple[ContextBlock, ...],
+    pending: list[tuple[Outcome, str, tuple[ContextBlock, ...]]],
 ) -> None:
-    if outcome.declined or not text:
-        return
-    result = await judge.score(text, blocks)
-    outcome.claims_judged = result.judged
-    outcome.claims_unsupported = len(result.unsupported)
-    outcome.unsupported_examples = result.unsupported[:2]
+    """Judge every answer once the generating is finished.
+
+    Deliberately not interleaved. Generation uses the 14b model and judging the
+    4b one, and alternating them makes Ollama evict and reload a model between
+    every question — which dominated the runtime of the first full run. Doing
+    all the generating, then all the judging, cuts the swaps from two per
+    question to two per configuration.
+    """
+    print(f"  judging {len(pending)} answer(s) ...", flush=True)
+    for outcome, text, blocks in pending:
+        if outcome.declined or not text:
+            continue
+        result = await judge.score(text, blocks)
+        outcome.claims_judged = result.judged
+        outcome.claims_unsupported = len(result.unsupported)
+        outcome.unsupported_examples = result.unsupported[:2]
 
 
 async def run_naive(
@@ -213,6 +221,7 @@ async def run_naive(
     name: str,
 ) -> ConfigResult:
     result = ConfigResult(name=name)
+    pending: list[tuple[Outcome, str, tuple[ContextBlock, ...]]] = []
     for index, case in enumerate(cases, 1):
         started = time.monotonic()
         try:
@@ -229,12 +238,13 @@ async def run_naive(
             text=answer.text,
             seconds=time.monotonic() - started,
         )
-        await _score(judge, outcome, answer.text, answer.blocks)
+        pending.append((outcome, answer.text, answer.blocks))
         result.outcomes.append(outcome)
         print(
             f"  [{name}] {index}/{len(cases)} {outcome.seconds:5.1f}s  {case['question'][:52]}",
             flush=True,
         )
+    await _score_all(judge, pending)
     return result
 
 
@@ -245,6 +255,7 @@ async def run_adaptive(
     judge: FaithfulnessJudge,
 ) -> ConfigResult:
     result = ConfigResult(name="adaptive")
+    pending: list[tuple[Outcome, str, tuple[ContextBlock, ...]]] = []
     for index, case in enumerate(cases, 1):
         started = time.monotonic()
         try:
@@ -275,12 +286,13 @@ async def run_adaptive(
             dangling=dangling,
             path=" -> ".join(trace.path),
         )
-        await _score(judge, outcome, response.text, blocks)
+        pending.append((outcome, response.text, blocks))
         result.outcomes.append(outcome)
         print(
             f"  [adaptive] {index}/{len(cases)} {outcome.seconds:5.1f}s  {case['question'][:52]}",
             flush=True,
         )
+    await _score_all(judge, pending)
     return result
 
 
