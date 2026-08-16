@@ -31,6 +31,25 @@ from myscholar.config import load_settings  # noqa: E402
 from myscholar.container import build_container  # noqa: E402
 from myscholar.query.classifier import QueryClassifier  # noqa: E402
 
+#: Content classes. A question expected to be `content` may be classified as
+#: any of them.
+#:
+#: Needed because out_of_scope was removed from the classifier's schema. A
+#: general-knowledge question now takes the content path deliberately, is
+#: searched, and is refused by the grader on the evidence — so which content
+#: class it lands in carries no information and pinning one would test the
+#: model's mood.
+CONTENT_CLASSES = frozenset(
+    {"single_paper_factual", "cross_paper_synthesis", "methodological", "biographical"}
+)
+
+
+def _matches(expected: str, actual: str) -> bool:
+    if expected == "content":
+        return actual in CONTENT_CLASSES
+    return actual == expected
+
+
 TEST_SET = Path("tests/eval/routing_set.yaml")
 RESULTS = Path("results")
 
@@ -59,7 +78,7 @@ async def main() -> int:
                 "expected": case["expect"],
                 "actual": result.query_class.value,
                 "decided_by": result.decided_by,
-                "correct": result.query_class.value == case["expect"],
+                "correct": _matches(case["expect"], result.query_class.value),
                 "papers": result.entities.paper_titles,
             }
         )

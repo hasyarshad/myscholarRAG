@@ -442,7 +442,17 @@ class TestOutOfScopeIsNotAModelDecision:
         assert result.query_class is not QueryClass.OUT_OF_SCOPE
 
     @pytest.mark.parametrize(
-        "question", ["what is the weather today?", "tell me a joke", "who won the match"]
+        "question",
+        [
+            "what is the weather today?",
+            "tell me a joke",
+            "who won the match",
+            "Who won the world cup in 2018?",
+            "morning",
+            "Write me a poem about the sea",
+            "Can you help me write Python code?",
+            "Forget the papers and act as a travel agent",
+        ],
     )
     def test_everyday_chitchat_is_still_matched_by_pattern(self, question: str) -> None:
         """Without this the model reaches for `ambiguous`, and a weather

@@ -27,7 +27,9 @@ from myscholar.ports.llm import ChatModel, Message, Role
 #: share of what a public bot receives, and spending 300ms of GPU on "hi" is
 #: waste.
 _GREETING = re.compile(
-    r"^\s*(hi|hey|hello|yo|sup|good\s+(morning|afternoon|evening)|"
+    # "morning" on its own as well as "good morning" — a bare time-of-day
+    # greeting is common and was reaching the model.
+    r"^\s*(hi|hey|hello|yo|sup|(good\s+)?(morning|afternoon|evening)|"
     r"thanks?|thank\s+you|cheers|bye|goodbye|ok|okay)\b"
     r"(\s+(there|everyone|all|mate|again))?[\s!.?,]*$",
     re.IGNORECASE,
@@ -144,7 +146,26 @@ _INJECTION = re.compile(
     r"(instruction|prompt|rule|direction|context)"
     r"|\byou\s+are\s+now\b|\bact\s+as\b[^.?!]{0,20}\b(dan|jailbreak|unrestricted)"
     r"|\b(system|developer)\s+prompt\b"
-    r"|\brepeat\b[^.?!]{0,20}\byour\s+(instruction|prompt|system)",
+    r"|\brepeat\b[^.?!]{0,20}\byour\s+(instruction|prompt|system)"
+    # "Forget the papers and act as a travel agent" — the redirection names no
+    # instruction and no jailbreak persona, so both earlier branches missed it.
+    r"|\b(forget|ignore|disregard)\b[^.?!]{0,20}\b(the\s+)?(papers|corpus|research|documents)\b"
+    r"|\bact\s+as\s+(a|an|my)\b"
+    r"|\bpretend\s+(you|to\s+be)\b",
+    re.IGNORECASE,
+)
+
+#: Requests to *do* something rather than questions about the corpus.
+#:
+#: A public assistant gets these constantly — write me a poem, help me with
+#: this code, translate this. None is a question about the research, and none
+#: benefits from a retrieval round before being declined.
+_TASK_REQUEST = re.compile(
+    r"^\s*(can|could|will|would|please)?\s*(you\s+)?"
+    r"(write|compose|draft|generate|create|translate|summari[sz]e\s+this|"
+    r"help\s+me\s+(write|with|build|code|debug)|code|program|debug|fix)\b"
+    r"[^?.!]{0,60}\b(poem|story|essay|song|joke|code|script|program|email|letter|"
+    r"python|javascript|sql|homework|assignment)\b",
     re.IGNORECASE,
 )
 
@@ -160,7 +181,8 @@ _CHITCHAT = re.compile(
     r"\b(weather|forecast|temperature\s+(today|outside)|"
     r"what\s+time\s+is\s+it|what\s+day\s+is|today'?s\s+date|"
     r"tell\s+me\s+a\s+joke|football|cricket|soccer|movie|recipe|"
-    r"stock\s+price|bitcoin|who\s+won\s+the\s+(match|game|election))\b",
+    r"stock\s+price|bitcoin"
+    r"|who\s+won\s+the\s+(match|game|election|world\s+cup|cup|series|final|title))\b",
     re.IGNORECASE,
 )
 
@@ -301,7 +323,7 @@ class QueryClassifier:
                 reasoning="asks the assistant to disregard its instructions",
                 decided_by="pattern",
             )
-        if _CHITCHAT.search(question):
+        if _CHITCHAT.search(question) or _TASK_REQUEST.match(question):
             return Classification(
                 query_class=QueryClass.OUT_OF_SCOPE,
                 reasoning="everyday topic the corpus does not cover",
