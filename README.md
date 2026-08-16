@@ -11,18 +11,31 @@ it cannot.
 
 Measured on this corpus, reproducible from `scripts/`.
 
-| Metric | Value | Basis |
-|---|---|---|
-| **Citation validity** | **100%** | 0 dangling markers of 20 emitted — enforced in code, not by prompting |
-| **Over-refusal** | **0%** | 7 answerable control questions |
-| Correct refusal | 76.9% | 13 questions the corpus genuinely cannot answer |
-| Query classification | 93.5% | 46 questions; **100%** on the two classes where a misroute causes fabrication |
-| Retrieval MRR | 0.872 | 37 questions, document-level, over the blocks a generator receives |
-| Tests | 340 | unit + integration, including property tests |
+| Metric | naive | adaptive | Basis |
+|---|---|---|---|
+| **Unsupported claims** | 65.4% | **12.8%** | factual sentences the retrieved passages do not support |
+| **Correct refusal** | 52.4% | **71.4%** | 21 questions the corpus cannot answer, incl. 12 false premises |
+| Over-refusal | 18.8% | 12.5% | 16 answerable controls, incl. CV and bibliographic |
+| Citation validity | — | **100%** | 0 dangling markers — enforced in code, not by prompting |
+| Query classification | — | 93.5% | 46 questions; **100%** on the classes where a misroute fabricates |
+| Retrieval MRR | 0.851 | 0.867 | 37 questions, document-level, over the blocks a generator receives |
+| Tests | — | 380 | unit + integration, including property tests |
+
+`naive` is a baseline of dense-only retrieval and one ungrounded call, run against the *same* index,
+embedder, generator and corpus, so the difference is pipeline design and
+nothing else. Full table, including the retrieval-only middle configuration,
+in [results/report.md](results/report.md).
 
 **Read these as smoke tests with numbers attached.** Every one rests on fewer
 than 50 examples, so a single question is two to eight percentage points. They
 are enough to catch a broken component and not enough to rank two good ones.
+
+The faithfulness figures come from a 4B judge, which is itself measured before
+it is trusted — 16 cases where the right answer is not in doubt, 100% in both
+directions ([results/judge.md](results/judge.md)). An earlier, uncalibrated
+version of that judge reported 57% of the adaptive system's claims as
+unsupported when the sampled failures were all correct and cited. That is worth
+stating: the instrument needed debugging more than the system did.
 
 The exception is citation validity, which is 100% *by construction* rather than
 by sampling — every marker is checked against the retrieved set in code. If it
@@ -202,11 +215,15 @@ its termination guarantee property-testable.
 
 Stated plainly rather than discovered later.
 
-- **False premises are handled poorly — 1 of 4.** Asked *"in his 2023 paper he
-  showed chaotic SVPWM increases EMI, why?"* (it reduces it), the system answers
-  around the false premise instead of correcting it. Retrieval is right, the
-  citations verify, the answer is grounded — it simply accepts a premise the
-  source contradicts.
+- **False premises are the weakest family — 50%, on 12 cases.** Asked *"in his
+  2023 paper he showed chaotic SVPWM increases EMI, why?"* (it reduces it), the
+  system sometimes answers around the false premise instead of correcting it.
+  Retrieval is right, the citations verify, the answer is grounded — it simply
+  accepts a premise the source contradicts. Still the best of the three
+  configurations, and still not good.
+- **Over-refusal is 12.5%, and both cases are real.** One question about MMC
+  control was declined with nearest-topics that name the very papers that
+  answer it; another was sent back for clarification it did not need.
 - **Dense-only retrieval beats hybrid on context precision** — 0.883 against
   0.66–0.71. The lexical branch earns its place on identifier queries such as
   `NSGA-II` and pays for it elsewhere.

@@ -99,6 +99,18 @@ def headline() -> list[str]:
             f"| {name} | {_pct(config['unsupported_claims'])} "
             f"| {_pct(config['correct_refusal'])} | {_pct(config['over_refusal'])} |"
         )
+    counts = {
+        name: (
+            sum(o["claims_judged"] for o in config["outcomes"]),
+            sum(1 for o in config["outcomes"] if not o["declined"]),
+        )
+        for name, config in generation.items()
+    }
+    basis = ", ".join(
+        f"{name} {claims} claims over {answers} answers"
+        for name, (claims, answers) in counts.items()
+    )
+
     lines += [
         "",
         "`naive` is the pipeline this project replaces, reimplemented against "
@@ -106,6 +118,21 @@ def headline() -> list[str]:
         "difference is pipeline design and nothing else. `retrieved` keeps the "
         "one-shot generation and swaps in hybrid retrieval, reranking and "
         "parent expansion. `adaptive` is the full system.",
+        "",
+        f"Basis: {basis}.",
+        "",
+        "The denominators differ because the configurations write differently. "
+        "That does not mechanically move the *rate*, which is per sentence — "
+        "but it does mean the adaptive figure rests on far fewer judgements, "
+        "so each one is worth about two and a half points. Read the direction, "
+        "not the decimal.",
+        "",
+        "Part of what separates the rows is style rather than retrieval: the "
+        "adaptive system's prompt requires every factual sentence to carry a "
+        "citation, which shapes what it is willing to write. That is a design "
+        "choice being measured, not a confound — but it is why the middle row "
+        "matters. Better retrieval alone moved the rate by 0.4 points. The "
+        "verification loop moved it by 52.",
         "",
     ]
     return lines
