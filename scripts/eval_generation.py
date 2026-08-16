@@ -403,7 +403,7 @@ async def main() -> None:
 
     settings = load_settings()
     container, retriever, _store, engine = await _build(settings)
-    judge = FaithfulnessJudge(container.utility)
+    judge = FaithfulnessJudge(container.utility, person=settings.person.name)
 
     print(f"{len(cases)} questions x {len(wanted)} configuration(s)\n", flush=True)
     results: list[ConfigResult] = []

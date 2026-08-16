@@ -1,0 +1,111 @@
+# Calibration for the faithfulness judge.
+#
+# The judge is a 4B model deciding whether an excerpt supports a statement, and
+# its verdicts become the headline number of the whole evaluation. An
+# uncalibrated judge does not produce a soft number — it produces a confident
+# wrong one, and nothing downstream can tell.
+#
+# So it is measured first, on cases where the right answer is not in doubt.
+# Half supported, half not, in the shapes that actually occur: verbatim
+# restatement, paraphrase, legitimate synthesis across two sentences, and the
+# four ways an answer goes wrong (invented number, inverted finding, added
+# cause, wrong attribution).
+#
+# Run: uv run python scripts/eval_judge.py
+
+# --- supported: the excerpt says it -----------------------------------------
+
+- excerpt: "The proposed framework achieves 98.53% accuracy on the held-out recordings."
+  statement: "The framework achieved 98.53% accuracy."
+  supported: true
+  kind: verbatim
+
+- excerpt: "Weighting factors are selected using NSGA-II combined with TOPSIS decision making."
+  statement: "NSGA-II with TOPSIS is used to choose the weighting factors."
+  supported: true
+  kind: paraphrase
+
+- excerpt: "Chaotic SVPWM distributes the switching harmonics across a wider frequency band. This
+    spreading reduces the peak electromagnetic interference."
+  statement: "Chaotic SVPWM reduces EMI by spreading harmonics over a wider band."
+  supported: true
+  kind: synthesis
+
+- excerpt: "Muhammad Haseeb Arshad is a PhD candidate in Electrical & Computer Engineering at the
+    University of Alberta, Edmonton."
+  statement: "He is a PhD candidate at the University of Alberta."
+  supported: true
+  kind: paraphrase
+
+- excerpt: "Best Paper Presentation Award, IEEE International Symposium on Industrial Electronics
+    (ISIE). Alberta Innovates Graduate Student Scholarship, University of Alberta, $31,000 a year."
+  statement: "He received the Best Paper Presentation Award at the IEEE International Symposium on
+    Industrial Electronics."
+  supported: true
+  kind: verbatim
+
+- excerpt: "The method uses acoustic signals recorded by a microphone, avoiding the need for
+    current sensors, which are not standard in LSPMSM drives."
+  statement: "The approach detects faults from acoustic signals rather than current sensors."
+  supported: true
+  kind: paraphrase
+
+- excerpt: "Base learners include LFBLSTM, AFL-1DCNN and Random Forest. A gradient boosting machine
+    serves as the meta-learner over out-of-fold class-posterior vectors."
+  statement: "A gradient boosting machine is used as the meta-learner."
+  supported: true
+  kind: verbatim
+
+- excerpt: "Bifurcation diagrams, 2-D attractors, Fourier spectra and correlation dimension are
+    computed in MATLAB to characterise the chaotic regime."
+  statement: "Chaos is analysed using bifurcation diagrams and Fourier spectra in MATLAB."
+  supported: true
+  kind: synthesis
+
+# --- unsupported: the four ways an answer goes wrong -------------------------
+
+- excerpt: "The proposed framework achieves 98.53% accuracy on the held-out recordings."
+  statement: "The framework achieved 99.9% accuracy."
+  supported: false
+  kind: invented_number
+
+- excerpt: "Chaotic SVPWM distributes the switching harmonics across a wider frequency band, which
+    reduces the peak electromagnetic interference."
+  statement: "Chaotic SVPWM increases electromagnetic interference."
+  supported: false
+  kind: inverted_finding
+
+- excerpt: "Weighting factors are selected using NSGA-II combined with TOPSIS decision making."
+  statement: "The study concluded that weighting factors are unnecessary."
+  supported: false
+  kind: inverted_finding
+
+- excerpt: "The method uses acoustic signals recorded by a microphone, avoiding the need for
+    current sensors."
+  statement: "Current sensors were found to outperform acoustic sensing."
+  supported: false
+  kind: inverted_finding
+
+- excerpt: "A gradient boosting machine serves as the meta-learner over out-of-fold class-posterior
+    vectors."
+  statement: "The meta-learner was chosen because gradient boosting handles class imbalance better
+    than stacking."
+  supported: false
+  kind: added_cause
+
+- excerpt: "Weighting factors are selected using NSGA-II combined with TOPSIS decision making."
+  statement: "The grid-tied inverter study used an NSGA-II optimiser."
+  supported: false
+  kind: wrong_attribution
+
+- excerpt: "Muhammad Haseeb Arshad is a PhD candidate in Electrical & Computer Engineering at the
+    University of Alberta."
+  statement: "He completed his PhD at the University of Alberta in 2024."
+  supported: false
+  kind: invented_number
+
+- excerpt: "Bifurcation diagrams and Fourier spectra are computed in MATLAB to characterise the
+    chaotic regime."
+  statement: "The chaotic regime was validated experimentally on a hardware testbed."
+  supported: false
+  kind: added_detail

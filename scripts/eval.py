@@ -32,6 +32,16 @@ RESULTS = Path("results")
 
 #: name -> (script, what it measures, roughly how long)
 STAGES: dict[str, tuple[str, str, str]] = {
+    # First, because it gates the credibility of the generation numbers. A
+    # miscalibrated judge does not produce a soft result, it produces a
+    # confident wrong one — measured here, an uncalibrated version reported 57%
+    # of the adaptive system's claims as unsupported when the sampled failures
+    # were all correct and cited.
+    "judge": (
+        "scripts/eval_judge.py",
+        "can the faithfulness judge be trusted",
+        "~1 min",
+    ),
     "retrieval": ("scripts/eval_retrieval.py", "is the right document found", "~1 min"),
     "routing": ("scripts/eval_routing.py", "is the right strategy chosen", "~1 min"),
     "generation": (
@@ -117,6 +127,25 @@ def compose(ran: dict[str, tuple[bool, float]]) -> str:
         ok, seconds = ran.get(name, (False, 0.0))
         status = "ok" if ok else ("skipped" if name not in ran else "**failed**")
         lines.append(f"| [{name}](./{name}.md) | {measures} | {status} | {seconds:.0f}s |")
+
+    if judge := _load("judge"):
+        supported = [r for r in judge if r["expected"] is True]
+        unsupported = [r for r in judge if r["expected"] is False]
+        lines += [
+            "",
+            "## Judge calibration",
+            "",
+            "The faithfulness numbers above are only as good as the model "
+            "producing them, so it is measured first, on cases where the right "
+            "answer is not in doubt.",
+            "",
+            "| Measure | Value |",
+            "|---|---|",
+            f"| Recognises a supported claim | "
+            f"{sum(bool(r['correct']) for r in supported) / max(len(supported), 1):.0%} |",
+            f"| Catches an unsupported claim | "
+            f"{sum(bool(r['correct']) for r in unsupported) / max(len(unsupported), 1):.0%} |",
+        ]
 
     if retrieval := _load("retrieval"):
         # Recomputed from the per-question ranks rather than read from a stored

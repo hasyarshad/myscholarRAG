@@ -94,6 +94,9 @@ eval-fast:  ## Everything except generation — deterministic, about two minutes
 eval-generation:  ## The three-pipeline comparison only
 	uv run python scripts/eval_generation.py
 
+eval-judge:  ## Check the faithfulness judge against known cases
+	uv run python scripts/eval_judge.py
+
 eval-refusal:  ## Just the adaptive system's refusal behaviour, no baselines
 	uv run python scripts/eval_generation.py --configs adaptive
 

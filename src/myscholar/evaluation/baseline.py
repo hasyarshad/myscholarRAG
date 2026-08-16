@@ -63,6 +63,18 @@ _TEXTUAL_REFUSAL = re.compile(
 )
 
 
+#: Markdown emphasis, stripped before matching.
+#:
+#: Not cosmetic. The baseline writes "The provided content does **not mention**
+#: lithium battery degradation", and the asterisks fall inside the phrase being
+#: matched — so four correct refusals per run were scored as hallucinations,
+#: eleven points of correct-refusal rate, entirely against the baseline. The
+#: adaptive system's plainer prose was unaffected, which is exactly the shape
+#: of an unfair comparison: a measurement artefact that favours the thing being
+#: advocated for.
+_EMPHASIS = re.compile(r"[*_`]+")
+
+
 def declines(text: str) -> bool:
     """Whether an answer declines, however it was produced.
 
@@ -71,7 +83,7 @@ def declines(text: str) -> bool:
     scoring them differently would flatter whichever system happens to express
     it structurally.
     """
-    return bool(_TEXTUAL_REFUSAL.search(text))
+    return bool(_TEXTUAL_REFUSAL.search(_EMPHASIS.sub("", text)))
 
 
 @dataclass(frozen=True, slots=True)

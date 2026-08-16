@@ -1,0 +1,114 @@
+[
+  {
+    "kind": "verbatim",
+    "expected": true,
+    "actual": true,
+    "correct": true,
+    "statement": "The framework achieved 98.53% accuracy."
+  },
+  {
+    "kind": "paraphrase",
+    "expected": true,
+    "actual": true,
+    "correct": true,
+    "statement": "NSGA-II with TOPSIS is used to choose the weighting factors."
+  },
+  {
+    "kind": "synthesis",
+    "expected": true,
+    "actual": true,
+    "correct": true,
+    "statement": "Chaotic SVPWM reduces EMI by spreading harmonics over a wider band."
+  },
+  {
+    "kind": "paraphrase",
+    "expected": true,
+    "actual": true,
+    "correct": true,
+    "statement": "He is a PhD candidate at the University of Alberta."
+  },
+  {
+    "kind": "verbatim",
+    "expected": true,
+    "actual": true,
+    "correct": true,
+    "statement": "He received the Best Paper Presentation Award at the IEEE International Symposium on Industrial Electronics."
+  },
+  {
+    "kind": "paraphrase",
+    "expected": true,
+    "actual": true,
+    "correct": true,
+    "statement": "The approach detects faults from acoustic signals rather than current sensors."
+  },
+  {
+    "kind": "verbatim",
+    "expected": true,
+    "actual": true,
+    "correct": true,
+    "statement": "A gradient boosting machine is used as the meta-learner."
+  },
+  {
+    "kind": "synthesis",
+    "expected": true,
+    "actual": true,
+    "correct": true,
+    "statement": "Chaos is analysed using bifurcation diagrams and Fourier spectra in MATLAB."
+  },
+  {
+    "kind": "invented_number",
+    "expected": false,
+    "actual": false,
+    "correct": true,
+    "statement": "The framework achieved 99.9% accuracy."
+  },
+  {
+    "kind": "inverted_finding",
+    "expected": false,
+    "actual": false,
+    "correct": true,
+    "statement": "Chaotic SVPWM increases electromagnetic interference."
+  },
+  {
+    "kind": "inverted_finding",
+    "expected": false,
+    "actual": false,
+    "correct": true,
+    "statement": "The study concluded that weighting factors are unnecessary."
+  },
+  {
+    "kind": "inverted_finding",
+    "expected": false,
+    "actual": false,
+    "correct": true,
+    "statement": "Current sensors were found to outperform acoustic sensing."
+  },
+  {
+    "kind": "added_cause",
+    "expected": false,
+    "actual": false,
+    "correct": true,
+    "statement": "The meta-learner was chosen because gradient boosting handles class imbalance better than stacking."
+  },
+  {
+    "kind": "wrong_attribution",
+    "expected": false,
+    "actual": false,
+    "correct": true,
+    "statement": "The grid-tied inverter study used an NSGA-II optimiser."
+  },
+  {
+    "kind": "invented_number",
+    "expected": false,
+    "actual": false,
+    "correct": true,
+    "statement": "He completed his PhD at the University of Alberta in 2024."
+  },
+  {
+    "kind": "added_detail",
+    "expected": false,
+    "actual": false,
+    "correct": true,
+    "statement": "The chaotic regime was validated experimentally on a hardware testbed."
+  }
+]
