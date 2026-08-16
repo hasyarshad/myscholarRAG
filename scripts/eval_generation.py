@@ -64,6 +64,14 @@ from myscholar.retrieval.retriever import HybridRetriever, RetrievalMode  # noqa
 TEST_SET = Path("tests/eval/adversarial_set.yaml")
 RESULTS = Path("results")
 
+#: Longest a single question may take before it is abandoned.
+#:
+#: Generous — the adaptive loop's own deadline is 90s and three regenerations
+#: fit inside it — but finite. A run of this length must not be able to stall
+#: invisibly on one wedged request, which is what a silent 20-minute hang
+#: during the first full run looked like from outside.
+QUESTION_TIMEOUT = 300.0
+
 #: Kinds where declining is the correct answer.
 MUST_REFUSE = {"unanswerable", "false_premise", "injection"}
 
@@ -207,7 +215,12 @@ async def run_naive(
     result = ConfigResult(name=name)
     for index, case in enumerate(cases, 1):
         started = time.monotonic()
-        answer = await pipeline.answer(case["question"])
+        try:
+            async with asyncio.timeout(QUESTION_TIMEOUT):
+                answer = await pipeline.answer(case["question"])
+        except Exception as exc:  # noqa: BLE001 - one bad question must not end the run
+            print(f"  [{name}] {index}/{len(cases)} FAILED: {type(exc).__name__}", flush=True)
+            continue
         outcome = Outcome(
             question=case["question"],
             kind=case["kind"],
@@ -218,7 +231,10 @@ async def run_naive(
         )
         await _score(judge, outcome, answer.text, answer.blocks)
         result.outcomes.append(outcome)
-        print(f"  [{name}] {index}/{len(cases)} {case['question'][:56]}")
+        print(
+            f"  [{name}] {index}/{len(cases)} {outcome.seconds:5.1f}s  {case['question'][:52]}",
+            flush=True,
+        )
     return result
 
 
@@ -231,7 +247,12 @@ async def run_adaptive(
     result = ConfigResult(name="adaptive")
     for index, case in enumerate(cases, 1):
         started = time.monotonic()
-        response, trace, blocks = await engine.answer_with_context(case["question"])
+        try:
+            async with asyncio.timeout(QUESTION_TIMEOUT):
+                response, trace, blocks = await engine.answer_with_context(case["question"])
+        except Exception as exc:  # noqa: BLE001 - one bad question must not end the run
+            print(f"  [adaptive] {index}/{len(cases)} FAILED: {type(exc).__name__}", flush=True)
+            continue
         # A structural refusal and a paragraph that says "the excerpts do not
         # mention this" are the same outcome for a reader, so both count.
         declined = isinstance(response, Refusal) or declines(response.text)
@@ -256,7 +277,10 @@ async def run_adaptive(
         )
         await _score(judge, outcome, response.text, blocks)
         result.outcomes.append(outcome)
-        print(f"  [adaptive] {index}/{len(cases)} {case['question'][:56]}")
+        print(
+            f"  [adaptive] {index}/{len(cases)} {outcome.seconds:5.1f}s  {case['question'][:52]}",
+            flush=True,
+        )
     return result
 
 
@@ -369,7 +393,7 @@ async def main() -> None:
     container, retriever, _store, engine = await _build(settings)
     judge = FaithfulnessJudge(container.utility)
 
-    print(f"{len(cases)} questions x {len(wanted)} configuration(s)\n")
+    print(f"{len(cases)} questions x {len(wanted)} configuration(s)\n", flush=True)
     results: list[ConfigResult] = []
 
     if "naive" in wanted:

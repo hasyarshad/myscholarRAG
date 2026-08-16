@@ -194,8 +194,8 @@ its termination guarantee property-testable.
 | 3 | Query translation, routing, bibliographic SQL | done |
 | 4 | Adaptive loop: grading, citation verification, refusal | done |
 | — | Audit: 15 findings, 13 fixed | done |
-| 6 | API, chat widget, conversation memory | done |
 | 5 | Evaluation: three-pipeline comparison, per-claim faithfulness | done |
+| 6 | API, chat widget, conversation memory | done |
 | 7 | Deployment: local containers, then free cloud | pending |
 
 ## Known limitations
@@ -209,9 +209,13 @@ Stated plainly rather than discovered later.
   source contradicts.
 - **Dense-only retrieval beats hybrid on context precision** — 0.883 against
   0.66–0.71. The lexical branch earns its place on identifier queries such as
-  `NSGA-II` and pays for it elsewhere. Unresolved without answer-quality
-  measurement.
-- **Every measurement uses fewer than 50 examples.**
+  `NSGA-II` and pays for it elsewhere.
+- **Every measurement uses fewer than 50 examples.** Enough to catch a broken
+  component, not enough to rank two good ones.
+- **Faithfulness is judged by a 4B model.** A judge that small will miss subtle
+  unsupported claims, so the rate is a floor rather than a count. It is applied
+  identically to every configuration, which is what keeps the *comparison*
+  sound even where the absolute number is soft.
 - **Equations are extracted but excluded from embeddings.** The assistant
   discusses approaches, not formulae.
 - **The Docker Compose file is untested**, because the development machine has
