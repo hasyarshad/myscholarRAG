@@ -20,6 +20,7 @@ import hashlib
 import logging
 import re
 import unicodedata
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -112,17 +113,139 @@ def is_plausible_title(text: str) -> bool:
 _WHITESPACE = re.compile(r"[ \t]+")
 _BLANK_LINES = re.compile(r"\n{3,}")
 
-# Collapsing repeated phrases is deliberately NOT done here.
-#
-# Two of the twenty papers have overlapping text layers that stack a phrase
-# several times inside one item ("Biases Biases BiasesBiases"). Catching that
-# needs a self-referential regex, and every version that caught the artefact
-# also ate legitimate English doubling ("had had", "that that"). The artefact
-# is cosmetic — it slightly skews lexical term frequencies across a handful of
-# headings — whereas rewriting real prose would be a correctness bug in the
-# very text that citations are verified against.
-#
-# Revisit only if Phase 5 shows lexical retrieval suffering on those papers.
+#: Shortest repeat worth removing.
+#:
+#: Long enough that ordinary English cannot reach it by accident. "had had" and
+#: "that that" are seven characters; a duplicated title or affiliation line runs
+#: to fifty.
+_MIN_REPEAT_CHARS = 20
+
+#: How far back to look for the original. The stacked layer interleaves with
+#: the real one, so a duplicate follows its original within a few items.
+_REPEAT_WINDOW = 6
+
+_ALPHANUMERIC = re.compile(r"[^a-z0-9]+")
+
+
+def _dedup_key(text: str) -> str:
+    """Punctuation-free, lowercased. The duplicate layer differs only in these.
+
+    IFAC's template stacks two text layers, and the second has its punctuation
+    stripped: "Surveillance, reconnaissance, infrastructure inspection" is
+    followed by "Surveillancereconnaissanceinfrastructure inspection". Compared
+    literally the two are different strings; normalised, they are identical.
+    """
+    return _ALPHANUMERIC.sub("", text.casefold())
+
+
+def collapse_repeated_lines(text: str, seen: set[str] | None = None) -> str:
+    """Drop lines already seen, across the whole document by default.
+
+    The damage is *inside* a block, not between blocks. One block in the UAV
+    paper runs to 49,588 characters and is a single abstract accumulating line
+    by line:
+
+        Abstract: This paper proposes a linear quadratic Gaussian control ...
+        Abstract: This paper proposes a linear quadratic Gaussian control ...
+        a quadrotor UAV ...
+        Abstract: This paper proposes a linear quadratic Gaussian control ...
+
+    Deduplication spans the document rather than the block, because the copies
+    are not confined to one: consecutive blocks are growing prefixes of the
+    same text, so no two are identical and every one is mostly repeat.
+
+    That is safe here, and it was measured rather than assumed. Across the
+    twenty papers, nineteen contain 0-3% repeated lines — a figure caption
+    restated, a running header — and the UAV paper contains 52%. A rule that
+    removes three percent from healthy documents and half of a broken one is
+    hitting what it aims at.
+
+    Working at line granularity keeps the Phase 1 caution intact. No line is
+    ever edited, so every surviving line is verbatim source and a quoted span
+    still resolves; only whole duplicate lines are removed. English does not
+    repeat a twenty-character line, whereas it repeats "had had" all the time —
+    which is why the earlier attempt at a self-referential regex over the prose
+    failed and this does not.
+    """
+    seen = set() if seen is None else seen
+    kept: list[str] = []
+    for line in text.split("\n"):
+        key = _dedup_key(line)
+        if len(key) >= _MIN_REPEAT_CHARS:
+            if key in seen:
+                continue
+            seen.add(key)
+        kept.append(line)
+    return "\n".join(kept)
+
+
+def drop_repeated(blocks: list[ExtractedBlock]) -> tuple[list[ExtractedBlock], int]:
+    """Remove blocks that restate a nearby one.
+
+    Phase 1 deliberately left this alone, on the grounds that the artefact was
+    cosmetic and that a self-referential regex over prose would be a
+    correctness bug in the very text citations are verified against. The first
+    half of that was wrong: measured in Phase 5, the worst-affected paper
+    produced 796 chunks from 6 pages against ~12 per page elsewhere, and its
+    garbled fragments were crowding out real content in unrelated searches.
+
+    The second half still stands, which is why this compares *whole blocks*
+    rather than rewriting inside one. A block is dropped only when another
+    block nearby says the same thing — no prose is ever edited, so a citation
+    can still be verified against text that appears exactly as extracted.
+    """
+    kept: list[ExtractedBlock] = []
+    seen: dict[str, int] = {}  # key -> index in kept
+    recent: list[tuple[str, int]] = []  # (key, index in kept), for containment
+    seen_lines: set[str] = set()
+    dropped = 0
+
+    for original in blocks:
+        # Tables are left alone: a column of repeated values is data, not an
+        # artefact, and the table was exported as one unit already.
+        block = original
+        if block.kind is not ChunkKind.TABLE:
+            collapsed = collapse_repeated_lines(block.text, seen_lines)
+            if not collapsed.strip():
+                # Everything in it had already been said elsewhere.
+                dropped += 1
+                continue
+            if collapsed != block.text:
+                block = replace(block, text=collapsed)
+
+        key = _dedup_key(block.text)
+        if len(key) < _MIN_REPEAT_CHARS:
+            kept.append(block)
+            continue
+
+        # Exact repeats are matched across the whole document, not a window.
+        # The stacked layer is not merely adjacent: the same paragraph
+        # reappears dozens of times at every distance, and a six-block window
+        # caught 94 of them out of several thousand.
+        duplicate_of = seen.get(key)
+
+        # Containment stays windowed. Globally it would drop a short block that
+        # happens to be a substring of an unrelated one — a heading inside a
+        # paragraph quoting it — which is a real loss rather than an artefact.
+        if duplicate_of is None:
+            for other_key, index in recent:
+                if key in other_key or other_key in key:
+                    duplicate_of = index
+                    break
+
+        if duplicate_of is None:
+            seen[key] = len(kept)
+            recent.append((key, len(kept)))
+            kept.append(block)
+        else:
+            dropped += 1
+            # Keep whichever copy is longer: the truncated one is the artefact.
+            if len(block.text) > len(kept[duplicate_of].text):
+                kept[duplicate_of] = block
+
+        del recent[:-_REPEAT_WINDOW]
+
+    return kept, dropped
 
 
 def normalise(text: str) -> str:
@@ -283,6 +406,10 @@ class DoclingExtractor(DocumentExtractor):
                     page=self._page_of(table),
                 )
             )
+
+        blocks, repeated = drop_repeated(blocks)
+        if repeated:
+            warnings.append(f"dropped {repeated} block(s) repeating a nearby one")
 
         if not blocks:
             msg = f"{path.name} parsed but yielded no content"

@@ -9,6 +9,7 @@ See docs/learning/05-adaptive-rag-and-hallucination.md.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -50,6 +51,45 @@ def system_prompt(name: str = "the researcher", short_name: str = "they") -> str
 
 #: Default for callers that do not configure a person.
 SYSTEM_PROMPT = system_prompt()
+
+#: Questions that assert something and then ask about it.
+#:
+#: "Why did his NSGA-II study conclude weighting factors are unnecessary?"
+#: contains a claim ("concluded they are unnecessary") that the papers
+#: contradict, wrapped in a question ("why") that presupposes it. Retrieval
+#: works perfectly — NSGA-II passages come back — and everything downstream
+#: then helps the model explain a thing that never happened.
+#:
+#: Only these shapes are checked, because a question that asserts nothing has
+#: no premise to test and the call would be wasted.
+_ASSERTS_SOMETHING = re.compile(
+    # "Why did X conclude/find/show/report Y", "how does X improve Y"
+    r"^\s*(why|how\s+come)\b"
+    # A statement followed by a question: "He found X. What caused that?"
+    r"|\b(he|she|they|his|her|their|the\s+\w+)\s+"
+    r"(found|showed|shows|concluded|concludes|proved|demonstrated|reported|"
+    r"observed|claimed|states?|reached|achieved|used)\b"
+    # "In his 2023 paper he showed ..."
+    r"|^\s*(in|according\s+to)\b[^,]{0,60},",
+    re.IGNORECASE,
+)
+
+_PREMISE_PROMPT = """A question can take something for granted that is not true.
+
+Question: "{question}"
+
+Excerpts:
+{excerpts}
+
+First: what does the question take for granted? State it in one sentence, or \
+leave it empty if the question asserts nothing and merely asks.
+
+Then: do the excerpts state something incompatible with that? Answer \
+contradicted only when the excerpts say otherwise — not when they are simply \
+silent, and not when they neither confirm nor deny.
+
+If contradicted, say in one sentence what the excerpts do say instead.
+/no_think"""
 
 _GRADE_PROMPT = """Judge whether each excerpt helps answer the question.
 
@@ -110,6 +150,25 @@ class RewrittenQuery(BaseModel):
 class Groundedness(BaseModel):
     supported: bool
     reason: str = Field(default="", max_length=200)
+
+
+class PremiseCheck(BaseModel):
+    """Whether a claim smuggled into the question survives the sources."""
+
+    premise: str = Field(
+        default="",
+        max_length=300,
+        description=(
+            "The claim the question takes for granted. Empty if it takes nothing for granted."
+        ),
+    )
+    contradicted: bool = Field(
+        default=False,
+        description="True only if the excerpts state something incompatible with the premise.",
+    )
+    correction: str = Field(
+        default="", max_length=300, description="What the excerpts actually say instead."
+    )
 
 
 class NearestTopics(BaseModel):
@@ -254,6 +313,38 @@ class Answerer:
                 )
             )
         return await self._generator.complete(messages)
+
+    async def check_premise(
+        self, question: str, blocks: Sequence[ContextBlock]
+    ) -> PremiseCheck | None:
+        """Whether the question assumes something the sources contradict.
+
+        Runs only on questions shaped like an assertion, which is most of the
+        cost avoided: a question that asserts nothing has no premise to test.
+
+        A contradicted premise is not a retrieval failure and cannot be fixed
+        by retrieving harder — the right passages are already in hand, and they
+        are what disprove it. It is handled by telling the generator what is
+        wrong, so the answer corrects the question instead of elaborating on
+        it.
+        """
+        if not blocks or not _ASSERTS_SOMETHING.search(question):
+            return None
+        try:
+            result = await self._utility.structured(
+                [
+                    Message(
+                        role=Role.USER,
+                        content=_PREMISE_PROMPT.format(
+                            question=question[:400], excerpts=self.render(blocks)[:6000]
+                        ),
+                    )
+                ],
+                PremiseCheck,
+            )
+        except Exception:  # noqa: BLE001 - an unavailable check is not a failed check
+            return None
+        return result if result.contradicted and result.premise else None
 
     async def is_grounded(self, statement: str, excerpt: str) -> bool:
         """Whether one excerpt supports one statement.

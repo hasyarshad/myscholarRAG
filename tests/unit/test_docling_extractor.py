@@ -15,6 +15,7 @@ import pytest
 
 from myscholar.adapters.extraction.docling_extractor import (
     DoclingExtractor,
+    collapse_repeated_lines,
     is_plausible_title,
     looks_like_section_heading,
     normalise,
@@ -416,3 +417,64 @@ class TestCarriageReturns:
         """English doubles words; normalisation must not silently rewrite prose."""
         assert normalise("had had a different meaning") == "had had a different meaning"
         assert normalise("that that is fine") == "that that is fine"
+
+
+class TestRepeatedText:
+    """Two of twenty papers ship a stacked text layer.
+
+    Phase 1 left this alone as cosmetic. Phase 5 measured it: the worst paper
+    produced 796 chunks from 6 pages against ~12 per page elsewhere, and its
+    garbled fragments were surfacing in unrelated searches.
+    """
+
+    def test_a_line_repeated_in_the_same_block_is_dropped(self) -> None:
+        text = (
+            "Abstract: This paper proposes a linear quadratic Gaussian control.\n"
+            "Abstract: This paper proposes a linear quadratic Gaussian control.\n"
+            "The quadrotor model is derived from first principles."
+        )
+
+        assert collapse_repeated_lines(text).count("Abstract:") == 1
+
+    def test_punctuation_only_differences_count_as_repeats(self) -> None:
+        """The stacked layer has its punctuation stripped, so the two copies
+        are different strings and identical text."""
+        text = (
+            "Surveillance, reconnaissance, infrastructure inspection.\n"
+            "Surveillancereconnaissanceinfrastructure inspection"
+        )
+
+        assert len(collapse_repeated_lines(text).split("\n")) == 1
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "The controller had had a stable response.",
+            "We note that that assumption is reasonable.",
+            "It is what it is, and the result is what the result is.",
+        ],
+    )
+    def test_english_doubling_survives(self, text: str) -> None:
+        """The reason Phase 1 refused a regex over the prose. Working at line
+        granularity keeps that concern answered: a repeat has to be a whole
+        twenty-character line, which English does not produce."""
+        assert collapse_repeated_lines(text) == text
+
+    def test_no_line_is_ever_edited(self) -> None:
+        """Citations are verified against this text, so a surviving line must
+        be verbatim source. Only whole lines are removed."""
+        text = "A unique first line here.\nA unique first line here.\nA different second line."
+
+        for line in collapse_repeated_lines(text).split("\n"):
+            assert line in text
+
+    def test_repeats_are_found_across_blocks(self) -> None:
+        """The copies are not adjacent. Consecutive blocks are growing prefixes
+        of the same text, so a per-block or windowed rule catches almost none —
+        measured, a six-block window found 94 of several thousand."""
+        seen: set[str] = set()
+        first = collapse_repeated_lines("A sufficiently long line of real prose here.", seen)
+        second = collapse_repeated_lines("A sufficiently long line of real prose here.", seen)
+
+        assert first
+        assert not second.strip()

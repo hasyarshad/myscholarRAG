@@ -46,6 +46,13 @@ class LoopState:
     graded: GradedContext | None = None
     draft: str = ""
     correction: str | None = None
+    premise_correction: str | None = None
+    """Set when the question assumes something the sources contradict.
+
+    Carried separately from ``correction``, which is consumed and cleared by
+    each regeneration. A false premise stays true across every attempt, so it
+    has to survive them."""
+
     verification: citations.VerificationResult | None = None
     degraded: bool = False
     grounding_failed: bool = False
@@ -228,14 +235,36 @@ class Engine:
 
     async def _grade(self, state: LoopState) -> LoopState:
         graded = await self._answerer.grade(state.question, state.blocks)
-        return replace(
+        state = replace(
             state, budget=state.budget.step(), graded=graded, blocks=graded.kept
         ).with_event(Stage.GRADING, f"{len(graded.kept)} kept, {len(graded.rejected)} dropped")
 
+        # A false premise is not a retrieval failure and retrieving harder
+        # cannot fix it: the right passages are already here, and they are what
+        # disprove the question. Checked after grading so the check sees only
+        # passages judged relevant, and before generation so the answer can
+        # correct the question rather than elaborate on it.
+        premise = await self._answerer.check_premise(state.question, graded.kept)
+        if premise is None:
+            return state
+
+        return replace(
+            state,
+            premise_correction=(
+                f"The question takes for granted that {premise.premise} "
+                f"The excerpts do not support that: {premise.correction} "
+                f"Open by saying plainly that the premise is wrong, state what the "
+                f"excerpts do say, and do not explain the thing that did not happen."
+            ),
+        ).with_event(Stage.GRADING, f"false premise: {premise.premise[:80]}")
+
     async def _generate(self, state: LoopState) -> LoopState:
+        # Both, when both apply: the premise correction holds for every attempt
+        # while the verification correction is specific to the last one.
+        correction = " ".join(c for c in (state.premise_correction, state.correction) if c) or None
         try:
             draft = await self._answerer.generate(
-                state.question, state.blocks, correction=state.correction
+                state.question, state.blocks, correction=correction
             )
         except Exception:
             # A model that times out or dies mid-loop is an outage, not a
