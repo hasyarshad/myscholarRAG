@@ -41,6 +41,20 @@ class Plan:
 
     top_k: int = 50
     rerank_k: int = 8
+    select_documents: int = 9
+    """How many documents to pre-select by summary, when a class does so.
+
+    Nine of twenty-five. Six was tighter and let the site pages squeeze the
+    papers out: the CV, the projects page and the home page all describe the
+    person broadly, so they match a broad question about him and took four of
+    six slots, leaving two for twenty papers.
+
+    Widening costs nothing downstream — the per-document cap and rerank_k still
+    bound what reaches the generator — and the selection is still doing work at
+    nine of twenty-five. Only used where ``max_chunks_per_document`` is set,
+    which is the class that needs breadth.
+    """
+
     max_chunks_per_document: int | None = None
     """Caps how much of the context one paper may occupy.
 
@@ -133,16 +147,46 @@ class QueryPlanner:
             case QueryClass.CROSS_PAPER_SYNTHESIS:
                 # Widest budget, and the only class that caps per-document
                 # coverage, because the answer must span papers.
+                #
+                # The cap was 4 and that was too generous. Asked to rate
+                # Haseeb's contribution to machine learning, retrieval returned
+                # thirteen of twenty-two passages from a single *survey* of
+                # learning algorithms — a paper that discusses the term
+                # constantly — while the papers that actually apply machine
+                # learning, described in their own vocabulary as stacking
+                # ensembles and feature fusion, were retrieved and then crowded
+                # out before the cut. The answer named one line from the
+                # leadership page and concluded there was nothing else.
+                #
+                # A synthesis question is about the corpus, so no document may
+                # occupy more than a fifth of the context. Two per document
+                # across ten slots guarantees at least five papers are heard.
+                #
+                # HyDE is the other half, and the more important one. A
+                # question asks about "machine learning"; the papers that do it
+                # call it stacking ensembles, LFBLSTM base learners and feature
+                # fusion, and never compete on the question's own words. The
+                # only paper that does is the survey *about* learning
+                # algorithms, which is why it won.
+                #
+                # A hypothetical answer is written in the corpus's vocabulary
+                # rather than the asker's, which is exactly the gap. Measured
+                # on this question: the literal query returns six of ten
+                # passages from the survey, the hypothetical one returns the
+                # stacking framework, rotor imbalance and intrusion detection
+                # papers. Multi-query does not help — its variants are all
+                # rephrasings of the question, so they share its vocabulary.
                 return Plan(
                     query_class=QueryClass.CROSS_PAPER_SYNTHESIS,
                     transforms=(
                         TransformKind.NORMALISE,
                         TransformKind.MULTI_QUERY,
                         TransformKind.DECOMPOSE,
+                        TransformKind.HYDE,
                     ),
                     top_k=self._top_k,
                     rerank_k=10,
-                    max_chunks_per_document=4,
+                    max_chunks_per_document=2,
                 )
 
             case QueryClass.METHODOLOGICAL:

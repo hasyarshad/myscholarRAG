@@ -28,12 +28,9 @@ from myscholar.adapters.persistence.repository import (  # noqa: E402
     PostgresStore,
     create_engine,
 )
+from myscholar.assembly import build_router  # noqa: E402
 from myscholar.config import load_settings  # noqa: E402
 from myscholar.container import build_container  # noqa: E402
-from myscholar.query.classifier import QueryClassifier  # noqa: E402
-from myscholar.query.planner import QueryPlanner  # noqa: E402
-from myscholar.query.router import QueryRouter  # noqa: E402
-from myscholar.query.transforms import QueryTransformer  # noqa: E402
 from myscholar.retrieval.retriever import HybridRetriever, RetrievalMode  # noqa: E402
 
 TEST_SET = Path("tests/eval/retrieval_set.yaml")
@@ -105,6 +102,9 @@ async def evaluate(mode: RetrievalMode, cases: list[dict[str, Any]]) -> list[Out
 
     slugs = {row.id: row.slug for row in await store.list_documents()}
 
+    # Constructed here rather than through assembly because this is the
+    # ablation: the reranker is deliberately absent for the dense and hybrid
+    # rows, which is the one thing the shared builder will not do.
     retriever = HybridRetriever(
         store=store,
         embedder=container.embedder,
@@ -240,30 +240,11 @@ async def evaluate_routed(cases: list[dict[str, Any]]) -> list[Outcome]:
     documents = await store.list_documents()
     slugs = {row.id: row.slug for row in documents}
 
-    router = QueryRouter(
-        classifier=QueryClassifier(
-            container.utility, titles=[d.title for d in documents], person_name=settings.person.name
-        ),
-        planner=QueryPlanner(
-            top_k=settings.retrieval.top_k,
-            rerank_k=settings.retrieval.rerank_k,
-            person_name=settings.person.name,
-        ),
-        transformer=QueryTransformer(container.utility),
-        retriever=HybridRetriever(
-            store=store,
-            embedder=container.embedder,
-            reranker=container.reranker,
-            top_k=settings.retrieval.top_k,
-            rerank_k=settings.retrieval.rerank_k,
-            window=settings.retrieval.window,
-            dense_weight=settings.retrieval.dense_weight,
-            lexical_weight=settings.retrieval.lexical_weight,
-            rrf_k=settings.retrieval.rrf_k,
-            max_span_chunks=settings.retrieval.max_span_chunks,
-        ),
-        store=store,
-    )
+    # Assembled through myscholar.assembly so the `routed` row measures the
+    # pipeline that ships. Built by hand it had already drifted: the
+    # transformer was constructed without corpus titles, so its hypothetical
+    # passages were ungrounded and it was retrieving for a different system.
+    router = build_router(settings, container, store, titles=[d.title for d in documents])
 
     outcomes: list[Outcome] = []
     for case in cases:

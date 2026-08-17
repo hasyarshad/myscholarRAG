@@ -35,18 +35,12 @@ from myscholar.api.schemas import (
     StageEvent,
 )
 from myscholar.api.sse import SSE_HEADERS, frame
+from myscholar.assembly import build_engine
 from myscholar.config import Settings, load_settings
-from myscholar.container import Container, build_container
+from myscholar.container import build_container
 from myscholar.domain.answers import Answer, Refusal, TraceEvent
-from myscholar.generation.answerer import Answerer
-from myscholar.query.classifier import QueryClassifier
 from myscholar.query.history import FollowUpResolver, Turn
-from myscholar.query.planner import QueryPlanner
-from myscholar.query.router import QueryRouter
-from myscholar.query.transforms import QueryTransformer
 from myscholar.reasoning.engine import Engine
-from myscholar.reasoning.graph import Budget
-from myscholar.retrieval.retriever import HybridRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +72,7 @@ async def build_services(settings: Settings | None = None) -> Services:
 
     services = Services(
         settings=settings,
-        engine=_engine(settings, container, store),
+        engine=build_engine(settings, container, store),
         store=store,
         # The small model, not the generator. Expanding an ellipsis is a
         # rewriting task, and paying 14b latency for it on every follow-up
@@ -107,48 +101,6 @@ async def build_services(settings: Settings | None = None) -> Services:
         logger.exception("service startup checks failed")
 
     return services
-
-
-def _engine(settings: Settings, container: Container, store: PostgresStore) -> Engine:
-    retriever = HybridRetriever(
-        store=store,
-        embedder=container.embedder,
-        reranker=container.reranker,
-        top_k=settings.retrieval.top_k,
-        rerank_k=settings.retrieval.rerank_k,
-        window=settings.retrieval.window,
-        dense_weight=settings.retrieval.dense_weight,
-        lexical_weight=settings.retrieval.lexical_weight,
-        rrf_k=settings.retrieval.rrf_k,
-        max_span_chunks=settings.retrieval.max_span_chunks,
-    )
-    router = QueryRouter(
-        classifier=QueryClassifier(container.utility, person_name=settings.person.name),
-        planner=QueryPlanner(
-            top_k=settings.retrieval.top_k,
-            rerank_k=settings.retrieval.rerank_k,
-            person_name=settings.person.name,
-        ),
-        transformer=QueryTransformer(container.utility),
-        retriever=retriever,
-        store=store,
-    )
-    return Engine(
-        router=router,
-        answerer=Answerer(
-            generator=container.generator,
-            utility=container.utility,
-            person_name=settings.person.name,
-            short_name=settings.person.short_name,
-        ),
-        budget=Budget(
-            max_steps=settings.reasoning.max_steps,
-            max_retrieval_rounds=settings.reasoning.max_retrieval_rounds,
-            max_regenerations=settings.reasoning.max_regenerations,
-            deadline_seconds=settings.reasoning.deadline_seconds,
-        ),
-        short_name=settings.person.short_name,
-    )
 
 
 def create_app(services: Services | None = None, *, origins: list[str] | None = None) -> FastAPI:

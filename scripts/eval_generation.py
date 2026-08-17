@@ -45,6 +45,11 @@ from myscholar.adapters.persistence.repository import (  # noqa: E402
     PostgresStore,
     create_engine,
 )
+from myscholar.assembly import (  # noqa: E402
+    build_engine,
+    build_retriever,
+    build_router,
+)
 from myscholar.config import load_settings  # noqa: E402
 from myscholar.container import build_container  # noqa: E402
 from myscholar.domain.answers import Refusal  # noqa: E402
@@ -52,13 +57,7 @@ from myscholar.domain.documents import ContextBlock  # noqa: E402
 from myscholar.evaluation.baseline import NaivePipeline, declines  # noqa: E402
 from myscholar.evaluation.faithfulness import FaithfulnessJudge  # noqa: E402
 from myscholar.generation import citations  # noqa: E402
-from myscholar.generation.answerer import Answerer  # noqa: E402
-from myscholar.query.classifier import QueryClassifier  # noqa: E402
-from myscholar.query.planner import QueryPlanner  # noqa: E402
-from myscholar.query.router import QueryRouter  # noqa: E402
-from myscholar.query.transforms import QueryTransformer  # noqa: E402
 from myscholar.reasoning.engine import Engine  # noqa: E402
-from myscholar.reasoning.graph import Budget  # noqa: E402
 from myscholar.retrieval.retriever import HybridRetriever, RetrievalMode  # noqa: E402
 
 TEST_SET = Path("tests/eval/adversarial_set.yaml")
@@ -142,53 +141,21 @@ class ConfigResult:
 
 
 async def _build(settings: Any) -> tuple[Any, HybridRetriever, PostgresStore, Engine]:
+    """Assembled through myscholar.assembly, exactly as the API assembles it.
+
+    This used to duplicate the wiring, which meant the evaluation could measure
+    an arrangement that never shipped — and would report nothing unusual while
+    doing it.
+    """
     container = build_container(settings)
     store = PostgresStore(create_engine(settings.database.url))
     documents = await store.list_documents()
 
-    retriever = HybridRetriever(
-        store=store,
-        embedder=container.embedder,
-        reranker=container.reranker,
-        top_k=settings.retrieval.top_k,
-        rerank_k=settings.retrieval.rerank_k,
-        window=settings.retrieval.window,
-        dense_weight=settings.retrieval.dense_weight,
-        lexical_weight=settings.retrieval.lexical_weight,
-        rrf_k=settings.retrieval.rrf_k,
-        max_span_chunks=settings.retrieval.max_span_chunks,
+    retriever = build_retriever(settings, container, store)
+    router = build_router(
+        settings, container, store, retriever=retriever, titles=[d.title for d in documents]
     )
-    engine = Engine(
-        router=QueryRouter(
-            classifier=QueryClassifier(
-                container.utility,
-                titles=[d.title for d in documents],
-                person_name=settings.person.name,
-            ),
-            planner=QueryPlanner(
-                top_k=settings.retrieval.top_k,
-                rerank_k=settings.retrieval.rerank_k,
-                person_name=settings.person.name,
-            ),
-            transformer=QueryTransformer(container.utility),
-            retriever=retriever,
-            store=store,
-        ),
-        answerer=Answerer(
-            generator=container.generator,
-            utility=container.utility,
-            person_name=settings.person.name,
-            short_name=settings.person.short_name,
-        ),
-        budget=Budget(
-            max_steps=settings.reasoning.max_steps,
-            max_retrieval_rounds=settings.reasoning.max_retrieval_rounds,
-            max_regenerations=settings.reasoning.max_regenerations,
-            deadline_seconds=settings.reasoning.deadline_seconds,
-        ),
-        short_name=settings.person.short_name,
-    )
-    return container, retriever, store, engine
+    return container, retriever, store, build_engine(settings, container, store, router=router)
 
 
 async def _score_all(

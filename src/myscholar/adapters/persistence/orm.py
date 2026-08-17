@@ -67,6 +67,13 @@ class Document(Base):
     #: different claim from zero and is reported differently.
     cited_by: Mapped[int | None] = mapped_column(Integer, default=None)
 
+    #: True when the paper surveys other researchers' work rather than
+    #: proposing its own. Retrieval cannot tell the difference from a passage,
+    #: and the consequence is the worst error this system can make: the
+    #: assistant credited Haseeb with inventing GGAP-RBF, an algorithm his
+    #: survey merely described.
+    is_review: Mapped[bool] = mapped_column(default=False)
+
     #: Which registry the bibliographic fields came from, empty when they were
     #: read off the page. Stored so an answer's provenance is inspectable
     #: rather than assumed.
@@ -173,6 +180,37 @@ class ChunkEmbedding(Base):
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
 
     chunk: Mapped[Chunk] = relationship(back_populates="embeddings")
+
+
+class DocumentSummary(Base):
+    """A paper described in one paragraph, embedded separately.
+
+    Retrieval over chunks answers "which passage says X". It cannot answer
+    "which of these papers is about X", because a paper rarely describes itself
+    in the words a reader would use. The fault-detection work calls its methods
+    LFBLSTM, AFL-1DCNN and a GBM meta-learner and never says "machine
+    learning"; a survey *about* learning algorithms says it on every page. Ask
+    for the machine learning work and the survey wins every chunk-level query,
+    and the papers that actually do it are not retrieved at all.
+
+    A summary is written in the vocabulary a reader would use, so a document
+    can be found by what it *is* rather than by what a passage happens to say.
+    Cross-paper synthesis selects documents here first, then searches within
+    them.
+    """
+
+    __tablename__ = "document_summaries"
+
+    document_id: Mapped[UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True
+    )
+    model_id: Mapped[str] = mapped_column(String(120), primary_key=True)
+
+    text: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class ConversationTurn(Base):

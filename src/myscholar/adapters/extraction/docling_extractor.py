@@ -124,6 +124,42 @@ _MIN_REPEAT_CHARS = 20
 #: the real one, so a duplicate follows its original within a few items.
 _REPEAT_WINDOW = 6
 
+#: Fraction of repeated text above which a document is treated as damaged.
+#:
+#: Measured across the corpus: nineteen papers repeat 0-3% of their text, one
+#: repeats 52%. Nothing lands between, so the threshold is not a tuned
+#: parameter — it separates two populations that do not overlap.
+#:
+#: The gate exists because document-wide deduplication is not free on a healthy
+#: paper. Docling emits a table's caption twice, once as a caption and once
+#: with the table, so removing every repeat cost seven captions in one paper
+#: and moved the right document off rank 1 for eight of thirty-seven retrieval
+#: questions. Legitimate repetition and a broken text layer are different
+#: problems and only the second one is worth that.
+_DAMAGED_ABOVE = 0.15
+
+#: Kinds exempt from deduplication even in a damaged document. A table's rows
+#: repeat by nature, and its caption is emitted alongside it by design.
+_DEDUP_EXEMPT = frozenset({ChunkKind.TABLE, ChunkKind.CAPTION})
+
+
+def repetition_ratio(blocks: list[ExtractedBlock]) -> float:
+    """Fraction of the document's characters that restate an earlier line."""
+    seen: set[str] = set()
+    repeated = total = 0
+    for block in blocks:
+        for line in block.text.split("\n"):
+            total += len(line)
+            key = _dedup_key(line)
+            if len(key) < _MIN_REPEAT_CHARS:
+                continue
+            if key in seen:
+                repeated += len(line)
+            else:
+                seen.add(key)
+    return repeated / total if total else 0.0
+
+
 _ALPHANUMERIC = re.compile(r"[^a-z0-9]+")
 
 
@@ -194,6 +230,11 @@ def drop_repeated(blocks: list[ExtractedBlock]) -> tuple[list[ExtractedBlock], i
     block nearby says the same thing — no prose is ever edited, so a citation
     can still be verified against text that appears exactly as extracted.
     """
+    # Document-wide line deduplication is applied only to documents that are
+    # actually damaged. On a healthy paper it removes real content — see
+    # _DAMAGED_ABOVE — and there is nothing for it to gain there anyway.
+    damaged = repetition_ratio(blocks) > _DAMAGED_ABOVE
+
     kept: list[ExtractedBlock] = []
     seen: dict[str, int] = {}  # key -> index in kept
     recent: list[tuple[str, int]] = []  # (key, index in kept), for containment
@@ -201,10 +242,10 @@ def drop_repeated(blocks: list[ExtractedBlock]) -> tuple[list[ExtractedBlock], i
     dropped = 0
 
     for original in blocks:
-        # Tables are left alone: a column of repeated values is data, not an
-        # artefact, and the table was exported as one unit already.
+        # Tables and captions are left alone: a column of repeated values is
+        # data, and Docling emits a caption twice by design.
         block = original
-        if block.kind is not ChunkKind.TABLE:
+        if damaged and block.kind not in _DEDUP_EXEMPT:
             collapsed = collapse_repeated_lines(block.text, seen_lines)
             if not collapsed.strip():
                 # Everything in it had already been said elsewhere.

@@ -105,6 +105,19 @@ class HybridRetriever:
         self._rrf_k = rrf_k
         self._max_span_chunks = max_span_chunks
 
+    @property
+    def model_id(self) -> str:
+        """Which embedder built the vectors this searches.
+
+        Exposed so document-level selection can ask for summaries embedded by
+        the same model — comparing across models returns ranked nonsense, which
+        is the defect this project's schema exists to prevent.
+        """
+        return self._embedder.model_id
+
+    async def embed_query(self, text: str) -> list[float]:
+        return await self._embedder.embed_query(text)
+
     async def retrieve(
         self,
         query: str,
@@ -250,7 +263,7 @@ class HybridRetriever:
         context = await self._store.span_context(span.section_id)
         if context is None:
             return None
-        document_title, section_heading, page_start, page_end, document_kind = context
+        document_title, section_heading, page_start, page_end, document_kind, is_review = context
 
         return ContextBlock(
             label=f"C{label_index}",
@@ -263,6 +276,7 @@ class HybridRetriever:
             page_end=page_end,
             score=span.max_score,
             document_kind=document_kind,
+            is_review=is_review,
         )
 
 

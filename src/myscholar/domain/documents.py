@@ -112,6 +112,16 @@ class ContextBlock:
     page_end: int
     score: float = 0.0
 
+    is_review: bool = False
+    """True when the source paper surveys other researchers' work.
+
+    Rendered into the prompt because a passage cannot show it. A survey's
+    methods section describes what other people built, and without this the
+    assistant credited Haseeb with inventing GGAP-RBF — an algorithm his review
+    merely summarised. Attributing a stranger's work to the corpus owner is the
+    worst error a portfolio assistant can make, and it reads as authoritative.
+    """
+
     document_kind: str = ""
     """Paper, CV or site page.
 
@@ -123,7 +133,8 @@ class ContextBlock:
 
     def render(self) -> str:
         """Format for inclusion in a prompt."""
+        review = " [REVIEW: describes other researchers' work]" if self.is_review else ""
         return (
-            f"[{self.label}] {self.document_title} — {self.section_heading} "
+            f"[{self.label}]{review} {self.document_title} — {self.section_heading} "
             f"(p. {self.page_start}-{self.page_end})\n{self.text}"
         )

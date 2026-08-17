@@ -154,9 +154,9 @@
   {
     "question": "How are weighting factors tuned in predictive torque control?",
     "expected": "methodological",
-    "actual": "single_paper_factual",
+    "actual": "methodological",
     "decided_by": "model",
-    "correct": false,
+    "correct": true,
     "papers": []
   },
   {

@@ -66,7 +66,12 @@ class QueryRouter:
         """Corpus titles, for entity linking and for resolving filters."""
         documents = await self._store.list_documents()
         if not self._titles_loaded:
-            self._classifier.set_titles([d.title for d in documents])
+            titles = [d.title for d in documents]
+            self._classifier.set_titles(titles)
+            # The transformer needs them too: an ungrounded hypothetical
+            # passage invents a research area the corpus does not contain, and
+            # then retrieves against it.
+            self._transformer.set_titles(titles)
             self._titles_loaded = True
         return {d.title: d.id for d in documents}
 
@@ -111,6 +116,24 @@ class QueryRouter:
             timings_ms=timings,
         )
 
+    async def _select_documents(self, queries: list[SearchQuery], plan: Plan) -> frozenset[UUID]:
+        """Documents whose summaries match, for classes that need breadth.
+
+        Empty for every other class, and empty when no summaries exist — in
+        which case the search behaves exactly as it did before, which is what
+        makes this safe to add to a corpus that has not been summarised.
+        """
+        if plan.max_chunks_per_document is None or not queries:
+            return frozenset()
+        try:
+            embedding = await self._retriever.embed_query(queries[0].text)
+            matches = await self._store.search_summaries(
+                embedding, model_id=self._retriever.model_id, limit=plan.select_documents
+            )
+        except Exception:  # noqa: BLE001 - selection is an optimisation, not a requirement
+            return frozenset()
+        return frozenset(document_id for document_id, _ in matches)
+
     async def _search(
         self,
         queries: list[SearchQuery],
@@ -126,6 +149,23 @@ class QueryRouter:
         document_ids = frozenset(
             title_to_id[title] for title in plan.filter_document_titles if title in title_to_id
         )
+
+        # Cross-paper questions choose their documents before their passages.
+        #
+        # Chunk search answers "which passage says X" and cannot answer "which
+        # paper is about X", because a paper rarely describes itself in a
+        # reader's words. Asked about machine learning, the six papers that
+        # apply it — calling their methods LFBLSTM, AFL-1DCNN, feature fusion —
+        # lose every slot to the one survey that discusses the phrase itself.
+        # Five transform combinations were tried and none of them fixed it: the
+        # gap is between the corpus's vocabulary and the question's, not
+        # between two phrasings.
+        #
+        # Summaries are written in a reader's vocabulary, so selecting on them
+        # first decides breadth by what each paper *is*.
+        summary_ids = await self._select_documents(queries, plan)
+        if summary_ids:
+            document_ids = document_ids | summary_ids
 
         # The baseline search: document filter (if the entity linker resolved
         # one) but no section restriction.

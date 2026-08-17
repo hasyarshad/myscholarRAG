@@ -1,6 +1,6 @@
 # Evaluation
 
-Generated 2026-08-10 10:34 UTC by `make eval`.
+Generated 2026-08-10 12:01 UTC by `make eval`.
 
 ## The comparison
 
@@ -23,7 +23,7 @@ Part of what separates the rows is style rather than retrieval: the adaptive sys
 | Stage | measures | status | took |
 |---|---|---|---|
 | [judge](./judge.md) | can the faithfulness judge be trusted | ok | 8s |
-| [retrieval](./retrieval.md) | is the right document found | ok | 63s |
+| [retrieval](./retrieval.md) | is the right document found | ok | 415s |
 | [routing](./routing.md) | is the right strategy chosen | ok | 12s |
 | [generation](./generation.md) | is the answer supported, and does it decline what it cannot answer | skipped | 0s |
 
@@ -40,10 +40,10 @@ The faithfulness numbers above are only as good as the model producing them, so 
 
 | Configuration | hit@1 | hit@3 | MRR | n |
 |---|---|---|---|---|
-| dense | 0.81 | 0.89 | 0.851 | 37 |
-| hybrid | 0.84 | 0.89 | 0.872 | 37 |
-| full | 0.81 | 0.92 | 0.867 | 37 |
-| routed | 0.78 | 0.89 | 0.840 | 37 |
+| dense | 0.81 | 0.92 | 0.865 | 37 |
+| hybrid | 0.84 | 0.95 | 0.887 | 37 |
+| full | 0.65 | 0.89 | 0.764 | 37 |
+| routed | 0.62 | 0.89 | 0.744 | 37 |
 
 ## Reading these
 

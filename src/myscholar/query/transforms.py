@@ -101,21 +101,49 @@ Example: "what loss function does he use for imbalanced data?" steps back to
 
 Question: "{question}\""""
 
-_HYDE_PROMPT = """Write a short passage, as it might appear in a research paper,
-that answers this question.
+#: HyDE, grounded in what the corpus actually contains.
+#:
+#: Ungrounded, it invents a different research area. Asked to rate Haseeb's
+#: contribution to machine learning it wrote a passage about "a lightweight
+#: convolutional neural network for real-time object detection in low-bandwidth
+#: environments" — fluent, plausible, and describing a paper that does not
+#: exist in any corpus, let alone this one. The retrieved passages were
+#: correspondingly wrong.
+#:
+#: The titles fix that for the same reason they fix entity linking in the
+#: classifier: twenty of them is a few hundred tokens, and it turns "guess what
+#: a paper on this might say" into "guess which of these papers says it". The
+#: hypothetical is still invented — that is the technique — but it is invented
+#: in the corpus's own vocabulary, which is the vocabulary being searched.
+_HYDE_PROMPT = """Write one paragraph of a research paper. Do not answer, judge
+or comment on the question — write the paragraph.
 
-Write in the style of an academic methods or results section. Invented specifics
-are fine — this text is used only to search for real passages, and is never
-shown to anyone.
+These are the papers in the collection. Use their vocabulary: the specific
+methods, models and techniques their titles imply.
 
-Question: "{question}\""""
+{titles}
+
+The paragraph should read like a methods or results section that would contain
+the answer to this question. Invented numbers and details are fine; this text is
+never shown to anyone and is used only to find real passages by similarity. If
+the question is evaluative, write about the work itself rather than about how
+good it is.
+
+Question: "{question}"
+
+Paragraph:"""
 
 
 class QueryTransformer:
     """Applies the transforms a plan asks for."""
 
-    def __init__(self, model: ChatModel | None = None) -> None:
+    def __init__(self, model: ChatModel | None = None, *, titles: list[str] | None = None) -> None:
         self._model = model
+        self._titles = titles or []
+
+    def set_titles(self, titles: list[str]) -> None:
+        """Refresh the corpus titles used to ground hypothetical passages."""
+        self._titles = titles
 
     async def apply(
         self,
@@ -185,7 +213,13 @@ class QueryTransformer:
         return result.question.strip() if result else None
 
     async def _hypothetical(self, question: str) -> str | None:
-        result = await self._structured(_HYDE_PROMPT.format(question=question), Hypothetical)
+        result = await self._structured(
+            _HYDE_PROMPT.format(
+                question=question,
+                titles="\n".join(f"- {t}" for t in self._titles) or "(unknown)",
+            ),
+            Hypothetical,
+        )
         return result.passage.strip() if result else None
 
     async def _structured[T: BaseModel](self, prompt: str, schema: type[T]) -> T | None:

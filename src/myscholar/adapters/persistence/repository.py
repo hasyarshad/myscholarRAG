@@ -24,6 +24,7 @@ from myscholar.adapters.persistence.orm import (
     ChunkEmbedding,
     ConversationTurn,
     Document,
+    DocumentSummary,
     Section,
 )
 from myscholar.domain.enums import DocumentKind
@@ -102,6 +103,7 @@ class PostgresStore(VectorStore):
     #: much to demand for one added column.
     _ADDED_COLUMNS = (
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS cited_by INTEGER",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_review BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS metadata_source VARCHAR(40) "
         "NOT NULL DEFAULT ''",
     )
@@ -183,6 +185,97 @@ class PostgresStore(VectorStore):
                     (Document.content_sha256 == content_sha256)
                     | (Document.source_path == source_path)
                 )
+            )
+
+    # -- document summaries ------------------------------------------------
+
+    async def documents_needing_summary(self, model_id: str) -> list[tuple[UUID, str, str]]:
+        """Papers with no summary for this embedder, with text to summarise from.
+
+        Keyed on the embedder because a summary is stored with its vector, and
+        a vector from a different model is not comparable — the same rule the
+        chunk index already enforces.
+        """
+        async with self.session() as session:
+            existing = await session.scalars(
+                select(DocumentSummary.document_id).where(DocumentSummary.model_id == model_id)
+            )
+            done = set(existing.all())
+
+            rows = await session.execute(
+                select(Document.id, Document.title, Chunk.text)
+                .join(Chunk, Chunk.document_id == Document.id)
+                .join(Section, Section.id == Chunk.section_id)
+                .order_by(Document.id, Section.ordinal, Chunk.ordinal_in_section)
+            )
+
+        by_document: dict[UUID, list[str]] = {}
+        titles: dict[UUID, str] = {}
+        for document_id, title, chunk_text in rows:
+            if document_id in done:
+                continue
+            titles[document_id] = title
+            by_document.setdefault(document_id, []).append(chunk_text)
+
+        return [(did, titles[did], "\n\n".join(texts)) for did, texts in by_document.items()]
+
+    async def store_summaries(
+        self, summaries: Sequence[tuple[UUID, str, Vector]], *, model_id: str
+    ) -> None:
+        async with self.session() as session, session.begin():
+            for document_id, text, embedding in summaries:
+                await session.execute(
+                    delete(DocumentSummary).where(
+                        (DocumentSummary.document_id == document_id)
+                        & (DocumentSummary.model_id == model_id)
+                    )
+                )
+                session.add(
+                    DocumentSummary(
+                        document_id=document_id,
+                        model_id=model_id,
+                        text=text,
+                        embedding=embedding,
+                    )
+                )
+
+    async def mark_reviews(self, document_ids: Sequence[UUID]) -> None:
+        """Flag papers that survey other researchers' work."""
+        async with self.session() as session, session.begin():
+            await session.execute(
+                update(Document).where(Document.id.in_(list(document_ids))).values(is_review=True)
+            )
+
+    async def search_summaries(
+        self, embedding: Vector, *, model_id: str, limit: int = 6
+    ) -> list[tuple[UUID, float]]:
+        """The documents whose summaries are closest to a query.
+
+        Document-level selection, run before chunk retrieval on cross-paper
+        questions so that breadth is decided by what each paper *is* rather
+        than by which one repeats the question's words most often.
+        """
+        async with self.session() as session:
+            rows = await session.execute(
+                select(
+                    DocumentSummary.document_id,
+                    DocumentSummary.embedding.cosine_distance(embedding).label("distance"),
+                )
+                .where(DocumentSummary.model_id == model_id)
+                .order_by("distance")
+                .limit(limit)
+            )
+            return [(document_id, 1.0 - float(distance)) for document_id, distance in rows]
+
+    async def summary_count(self, model_id: str) -> int:
+        async with self.session() as session:
+            return int(
+                await session.scalar(
+                    select(func.count(DocumentSummary.document_id)).where(
+                        DocumentSummary.model_id == model_id
+                    )
+                )
+                or 0
             )
 
     # -- conversations -----------------------------------------------------
@@ -410,7 +503,7 @@ class PostgresStore(VectorStore):
             )
             return {section_id: int(count) for section_id, count in rows.all()}
 
-    async def span_context(self, section_id: UUID) -> tuple[str, str, int, int, str] | None:
+    async def span_context(self, section_id: UUID) -> tuple[str, str, int, int, str, bool] | None:
         """Title, heading, page range and document kind for a section.
 
         The kind rides along with the citation fields because it is needed at
@@ -426,6 +519,7 @@ class PostgresStore(VectorStore):
                         Section.page_start,
                         Section.page_end,
                         Document.kind,
+                        Document.is_review,
                     )
                     .join(Document, Document.id == Section.document_id)
                     .where(Section.id == section_id)
@@ -433,7 +527,14 @@ class PostgresStore(VectorStore):
             ).first()
         if row is None:
             return None
-        return (row.title, row.heading, int(row.page_start), int(row.page_end), row.kind)
+        return (
+            row.title,
+            row.heading,
+            int(row.page_start),
+            int(row.page_end),
+            row.kind,
+            bool(row.is_review),
+        )
 
     # -- statistics --------------------------------------------------------
 

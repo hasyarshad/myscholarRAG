@@ -32,29 +32,15 @@ def ask(
 ) -> None:
     """Answer a question, with citations, or refuse."""
     from myscholar.domain.answers import Refusal
-    from myscholar.generation.answerer import Answerer
-    from myscholar.reasoning.engine import Engine
-    from myscholar.reasoning.graph import Budget
 
     settings = load_settings()
     container = build_container(settings)
 
-    engine = Engine(
-        router=_build_router(settings),
-        answerer=Answerer(
-            generator=container.generator,
-            utility=container.utility,
-            person_name=settings.person.name,
-            short_name=settings.person.short_name,
-        ),
-        budget=Budget(
-            max_steps=settings.reasoning.max_steps,
-            max_retrieval_rounds=settings.reasoning.max_retrieval_rounds,
-            max_regenerations=settings.reasoning.max_regenerations,
-            deadline_seconds=settings.reasoning.deadline_seconds,
-        ),
-        short_name=settings.person.short_name,
-    )
+    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
+    from myscholar.assembly import build_engine
+
+    store = PostgresStore(create_engine(settings.database.url))
+    engine = build_engine(settings, container, store)
 
     response, loop_trace = asyncio.run(engine.answer_with_trace(question))
 
@@ -490,6 +476,16 @@ def papers_show(
 # ---------------------------------------------------------------------------
 
 
+def _build_router(settings: Any) -> Any:
+    """The routed pipeline, assembled exactly as the API assembles it."""
+    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
+    from myscholar.assembly import build_router
+
+    container = build_container(settings)
+    store = PostgresStore(create_engine(settings.database.url))
+    return build_router(settings, container, store)
+
+
 def _build_retriever(settings: Any, *, with_reranker: bool = True) -> Any:
     from myscholar.adapters.persistence.repository import PostgresStore, create_engine
     from myscholar.retrieval.retriever import HybridRetriever
@@ -562,41 +558,6 @@ def search(
             console.print(f"{block.text[:500]}{'…' if len(block.text) > 500 else ''}\n")
         else:
             console.print(f"[dim]{block.text[:160].replace(chr(10), ' ')}…[/dim]\n")
-
-
-def _build_router(settings: Any) -> Any:
-    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
-    from myscholar.query.classifier import QueryClassifier
-    from myscholar.query.planner import QueryPlanner
-    from myscholar.query.router import QueryRouter
-    from myscholar.query.transforms import QueryTransformer
-    from myscholar.retrieval.retriever import HybridRetriever
-
-    container = build_container(settings)
-    store = PostgresStore(create_engine(settings.database.url))
-
-    return QueryRouter(
-        classifier=QueryClassifier(container.utility, person_name=settings.person.name),
-        planner=QueryPlanner(
-            top_k=settings.retrieval.top_k,
-            rerank_k=settings.retrieval.rerank_k,
-            person_name=settings.person.name,
-        ),
-        transformer=QueryTransformer(container.utility),
-        retriever=HybridRetriever(
-            store=store,
-            embedder=container.embedder,
-            reranker=container.reranker,
-            top_k=settings.retrieval.top_k,
-            rerank_k=settings.retrieval.rerank_k,
-            window=settings.retrieval.window,
-            dense_weight=settings.retrieval.dense_weight,
-            lexical_weight=settings.retrieval.lexical_weight,
-            rrf_k=settings.retrieval.rrf_k,
-            max_span_chunks=settings.retrieval.max_span_chunks,
-        ),
-        store=store,
-    )
 
 
 @app.command()
@@ -909,3 +870,69 @@ def sync(
         console.print(f"\n[green]applied[/green] {applied} correction(s)")
     elif result.corrections:
         console.print("\n[dim]dry run — re-run with --apply to write these[/dim]")
+
+
+@ingest_app.command("summarise")
+def ingest_summarise(
+    force: Annotated[bool, typer.Option("--force", help="Rewrite existing summaries.")] = False,
+) -> None:
+    """Describe each paper in the words a reader would use.
+
+    Chunk retrieval answers "which passage says X"; it cannot answer "which
+    paper is about X". Six papers here apply machine learning and none of them
+    says so — they say LFBLSTM, AFL-1DCNN, gradient-boosted meta-learner — so
+    the one document that *is* about learning algorithms won every slot and the
+    applied work was never retrieved.
+
+    A summary names the techniques twice, specifically and ordinarily, which is
+    what lets a document be found for what it is.
+    """
+    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
+    from myscholar.ingest.summaries import Summariser
+
+    settings = load_settings()
+
+    async def _run() -> Any:
+        container = build_container(settings)
+        store = PostgresStore(create_engine(settings.database.url))
+        await store.create_schema()
+
+        model_id = container.embedder.model_id
+        if force:
+            async with store.session() as session, session.begin():
+                from sqlalchemy import delete as sql_delete
+
+                from myscholar.adapters.persistence.orm import DocumentSummary
+
+                await session.execute(
+                    sql_delete(DocumentSummary).where(DocumentSummary.model_id == model_id)
+                )
+
+        pending = await store.documents_needing_summary(model_id)
+        if not pending:
+            return 0, await store.summary_count(model_id)
+
+        summariser = Summariser(model=container.utility, embedder=container.embedder)
+        written: list[tuple[Any, str, list[float]]] = []
+        reviews: list[Any] = []
+        for index, (document_id, title, text) in enumerate(pending, 1):
+            console.print(f"  [{index}/{len(pending)}] {title[:64]}")
+            if result := await summariser.summarise(title=title, text=text):
+                summary, is_review = result
+                written.append((document_id, summary, []))
+                if is_review:
+                    reviews.append(document_id)
+                    console.print("        [yellow]review — its methods are not his[/yellow]")
+
+        if written:
+            vectors = await summariser.embed([s for _, s, _ in written])
+            await store.store_summaries(
+                [(d, s, v) for (d, s, _), v in zip(written, vectors, strict=True)],
+                model_id=model_id,
+            )
+        if reviews:
+            await store.mark_reviews(reviews)
+        return len(written), await store.summary_count(model_id)
+
+    written, total = asyncio.run(_run())
+    console.print(f"\n[green]summarised[/green] {written} document(s); {total} in total")
