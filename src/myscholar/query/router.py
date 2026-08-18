@@ -163,9 +163,12 @@ class QueryRouter:
         #
         # Summaries are written in a reader's vocabulary, so selecting on them
         # first decides breadth by what each paper *is*.
-        summary_ids = await self._select_documents(queries, plan)
-        if summary_ids:
-            document_ids = document_ids | summary_ids
+        # Only when the entity linker resolved nothing. Union-ing the two would
+        # *widen* an explicit filter — a question that named one paper would be
+        # searched across nine — which is the opposite of what naming a paper
+        # is for. The linker is the more specific signal and wins.
+        if not document_ids and (summary_ids := await self._select_documents(queries, plan)):
+            document_ids = summary_ids
 
         # The baseline search: document filter (if the entity linker resolved
         # one) but no section restriction.
