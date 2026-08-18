@@ -22,6 +22,7 @@ from myscholar.query.planner import Plan, QueryPlanner
 from myscholar.query.transforms import QueryTransformer, SearchQuery
 from myscholar.retrieval.fusion import reciprocal_rank_fusion
 from myscholar.retrieval.retriever import HybridRetriever, RetrievalMode
+from myscholar.retrieval.selection import DocumentSelector
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,9 +54,11 @@ class QueryRouter:
         transformer: QueryTransformer,
         retriever: HybridRetriever,
         store: PostgresStore,
+        selector: DocumentSelector,
         mode: RetrievalMode = RetrievalMode.FULL,
     ) -> None:
         self._mode = mode
+        self._selector = selector
         self._classifier = classifier
         self._planner = planner
         self._transformer = transformer
@@ -118,42 +121,6 @@ class QueryRouter:
             timings_ms=timings,
         )
 
-    async def _select_documents(self, queries: list[SearchQuery], plan: Plan) -> frozenset[UUID]:
-        """Documents whose summaries match, for classes that need breadth.
-
-        Empty for every other class, and empty when no summaries exist — in
-        which case the search behaves exactly as it did before, which is what
-        makes this safe to add to a corpus that has not been summarised.
-        """
-        if plan.max_chunks_per_document is None or not queries:
-            return frozenset()
-        try:
-            embedding = await self._retriever.embed_query(queries[0].text)
-            matches = await self._store.search_summaries(
-                # Over-fetch, because reviews are about to be pushed to the
-                # back and would otherwise consume slots on the way.
-                embedding,
-                model_id=self._retriever.model_id,
-                limit=plan.select_documents * 2,
-            )
-        except Exception:  # noqa: BLE001 - selection is an optimisation, not a requirement
-            return frozenset()
-
-        # Papers he wrote come before papers he reviewed.
-        #
-        # A survey matches "his contribution to machine learning" strongly —
-        # it is entirely about machine learning — and contributes nothing to
-        # the answer, because its methods are other people's. Selected on
-        # similarity alone it took the top slot and the assistant reported that
-        # he had developed OS-ELM and GGAP-RBF, which he had read about.
-        #
-        # Demoted rather than excluded: for "what does his work say about
-        # online sequential learning" the survey is the right document, and it
-        # is still reachable both here, when little else matches, and through
-        # the unfiltered branch that every search runs.
-        ordered = sorted(matches, key=lambda m: m[2])
-        return frozenset(document_id for document_id, _, _ in ordered[: plan.select_documents])
-
     async def _search(
         self,
         queries: list[SearchQuery],
@@ -166,29 +133,16 @@ class QueryRouter:
         over-confident entity link would otherwise return nothing at all, and
         an imperfect result beats an empty one.
         """
-        document_ids = frozenset(
-            title_to_id[title] for title in plan.filter_document_titles if title in title_to_id
+        # Scope is decided in one place, by one component, before any passage
+        # is fetched. See retrieval/selection.py — this used to be three
+        # partial policies in three modules that interacted by accident.
+        selection = await self._selector.select(
+            queries[0].text if queries else "",
+            titles=plan.filter_document_titles,
+            title_to_id=title_to_id,
+            limit=plan.select_documents,
         )
-
-        # Cross-paper questions choose their documents before their passages.
-        #
-        # Chunk search answers "which passage says X" and cannot answer "which
-        # paper is about X", because a paper rarely describes itself in a
-        # reader's words. Asked about machine learning, the six papers that
-        # apply it — calling their methods LFBLSTM, AFL-1DCNN, feature fusion —
-        # lose every slot to the one survey that discusses the phrase itself.
-        # Five transform combinations were tried and none of them fixed it: the
-        # gap is between the corpus's vocabulary and the question's, not
-        # between two phrasings.
-        #
-        # Summaries are written in a reader's vocabulary, so selecting on them
-        # first decides breadth by what each paper *is*.
-        # Only when the entity linker resolved nothing. Union-ing the two would
-        # *widen* an explicit filter — a question that named one paper would be
-        # searched across nine — which is the opposite of what naming a paper
-        # is for. The linker is the more specific signal and wins.
-        if not document_ids and (summary_ids := await self._select_documents(queries, plan)):
-            document_ids = summary_ids
+        document_ids = selection.document_ids
 
         # The baseline search: document filter (if the entity linker resolved
         # one) but no section restriction.

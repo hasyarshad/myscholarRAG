@@ -41,18 +41,16 @@ class Plan:
 
     top_k: int = 50
     rerank_k: int = 8
-    select_documents: int = 9
-    """How many documents to pre-select by summary, when a class does so.
+    select_documents: int = 0
+    """How many documents to choose by summary before searching passages.
 
-    Nine of twenty-five. Six was tighter and let the site pages squeeze the
-    papers out: the CV, the projects page and the home page all describe the
-    person broadly, so they match a broad question about him and took four of
-    six slots, leaving two for twenty papers.
+    Zero means no selection: search the whole corpus. That is the right
+    default and the right answer for a narrow factual question, where the
+    answer is one passage and it does not matter which paper holds it.
 
-    Widening costs nothing downstream — the per-document cap and rerank_k still
-    bound what reaches the generator — and the selection is still doing work at
-    nine of twenty-five. Only used where ``max_chunks_per_document`` is set,
-    which is the class that needs breadth.
+    Selection is for questions about the *corpus* — "what has he done in X" —
+    where the paper that repeats the question's words most often is usually
+    not the paper that answers it.
     """
 
     max_chunks_per_document: int | None = None
@@ -186,6 +184,12 @@ class QueryPlanner:
                     ),
                     top_k=self._top_k,
                     rerank_k=10,
+                    # Nine of twenty-five. Six was tighter and let the site
+                    # pages squeeze the papers out: the CV, the projects page
+                    # and the home page all describe the person broadly, so a
+                    # broad question about him matched them and they took four
+                    # of six slots, leaving two for twenty papers.
+                    select_documents=9,
                     max_chunks_per_document=2,
                 )
 
@@ -201,6 +205,11 @@ class QueryPlanner:
                     ),
                     top_k=self._top_k,
                     rerank_k=self._rerank_k,
+                    # A methodological question is about the corpus too — "how
+                    # does he tune weighting factors" spans whichever papers
+                    # tune them — but more narrowly than a synthesis question,
+                    # so it selects fewer documents and does not cap them.
+                    select_documents=6,
                     boost_sections=frozenset(
                         {SectionKind.METHODS, SectionKind.EXPERIMENTS, SectionKind.RESULTS}
                     ),

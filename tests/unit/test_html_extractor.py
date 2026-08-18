@@ -10,7 +10,22 @@ from __future__ import annotations
 
 import pytest
 
-from myscholar.adapters.extraction.html_extractor import _Reader, is_content
+from myscholar.adapters.extraction.html_extractor import (
+    _DATE_ONLY,
+    _Reader,
+    group_dated_entries,
+    is_content,
+)
+from myscholar.domain.enums import ChunkKind
+from myscholar.ports.extractor import ExtractedBlock
+
+
+def _prose(text: str) -> ExtractedBlock:
+    return ExtractedBlock(kind=ChunkKind.PROSE, text=text, page=1)
+
+
+def _heading(text: str) -> ExtractedBlock:
+    return ExtractedBlock(kind=ChunkKind.PROSE, text=text, page=1, heading=text)
 
 
 class TestWhatCountsAsContent:
@@ -94,3 +109,74 @@ class TestAwardsShapedMarkup:
 
         assert "Jun 2025" in texts
         assert "Best Paper Presentation Award" in texts
+
+
+class TestDatedEntries:
+    """A list where the date comes first is only readable while the line
+    breaks survive.
+
+    Concatenated into a chunk, "2022-23, 2025-26" reads as belonging to the
+    entry before it. Asked for his most recent award at the University of
+    Alberta, the assistant named the wrong scholarship — fluently, and citing a
+    passage that really did contain both strings.
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "2023–2025",  # noqa: RUF001 - the CV uses en dashes
+            "2022–23, 2025–26",  # noqa: RUF001 - as above
+            "since 2022",
+            "Jun 2025",
+            "Jan–Dec 2022",  # noqa: RUF001 - as above
+        ],
+    )
+    def test_a_bare_date_starts_an_entry(self, text: str) -> None:
+        assert _DATE_ONLY.match(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Alberta Innovates Graduate Student Scholarship",
+            "University of Alberta",
+            "$31,000 a year, held for two years.",
+            "MATH 101",
+        ],
+    )
+    def test_content_does_not(self, text: str) -> None:
+        assert not _DATE_ONLY.match(text)
+
+    def test_an_entry_becomes_one_block(self) -> None:
+        blocks = [
+            _prose("2023–2025"),  # noqa: RUF001 - the CV uses en dashes
+            _prose("Alberta Innovates Graduate Student Scholarship"),
+            _prose("University of Alberta"),
+            _prose("2022–23, 2025–26"),  # noqa: RUF001 - as above
+            _prose("Alberta Graduate Excellence Scholarship"),
+        ]
+
+        grouped = group_dated_entries(blocks)
+
+        assert len(grouped) == 2
+        assert grouped[0].text.startswith("2023")
+        assert "Alberta Innovates" in grouped[0].text
+        assert "Alberta Graduate Excellence" not in grouped[0].text
+
+    def test_each_entry_is_terminated(self) -> None:
+        """Entries are concatenated with a space between them, so without a
+        full stop the next date attaches to the previous entry."""
+        grouped = group_dated_entries([_prose("Jun 2025"), _prose("Best Paper Award")])
+
+        assert grouped[0].text.endswith(".")
+
+    def test_a_heading_never_joins_an_entry(self) -> None:
+        blocks = [_prose("Jun 2025"), _prose("Best Paper Award"), _heading("Education")]
+
+        grouped = group_dated_entries(blocks)
+
+        assert grouped[-1].heading == "Education"
+
+    def test_prose_before_any_date_is_untouched(self) -> None:
+        blocks = [_prose("A paragraph of ordinary prose about the work.")]
+
+        assert group_dated_entries(blocks) == blocks

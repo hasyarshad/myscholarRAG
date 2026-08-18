@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -156,6 +156,80 @@ class _Reader(HTMLParser):
             self.blocks.append(ExtractedBlock(kind=ChunkKind.PROSE, text=text, page=1))
 
 
+#: A block that is nothing but a date or a date range.
+#:
+#: The CV lists awards, roles and degrees with the date *first* and each part
+#: on its own line, so the extracted blocks arrive as
+#:
+#:     "2023-2025" / "Alberta Innovates Scholarship" / "University of Alberta"
+#:     "2022-23, 2025-26" / "Alberta Graduate Excellence Scholarship" / ...
+#:
+#: Concatenated, the boundaries vanish: "...held for two years. 2022-23,
+#: 2025-26 Alberta Graduate Excellence Scholarship...". Asked for his most
+#: recent award at the University of Alberta, the assistant read the 2025-26
+#: range as belonging to the entry before it and named the wrong scholarship —
+#: fluently, and with a valid citation to a passage that really does contain
+#: both strings.
+_DATE_ONLY = re.compile(
+    r"^\s*((since|from|until)\s+)?"
+    # Repeatable, so "Jan-Dec 2022" and "Sep-Dec 2025" match as well as
+    # "Jun 2025". A month range shares one year, printed once at the end.
+    r"((jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*[\-–—/]?\s*)*"  # noqa: RUF001
+    r"(19|20)\d{2}"
+    # En and em dashes are what the CV actually uses between years.
+    r"([\s\-–—/,]+((jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*)?"  # noqa: RUF001
+    r"((19|20)?\d{2}|present|now|date))*"
+    r"\s*$",
+    re.IGNORECASE,
+)
+
+
+def group_dated_entries(blocks: list[ExtractedBlock]) -> list[ExtractedBlock]:
+    """Fold each date-led run of blocks into one block.
+
+    A list where the date comes first is only readable while the line breaks
+    survive. Once the parts are concatenated into a chunk, the reader has to
+    guess which date belongs to which entry, and a model guesses wrong at the
+    boundaries.
+
+    Grouping restores the association explicitly: one block per entry, opening
+    with its own date. Blocks before the first date are left alone, so prose
+    sections are untouched.
+    """
+    grouped: list[ExtractedBlock] = []
+    entry: list[ExtractedBlock] = []
+
+    def flush() -> None:
+        if not entry:
+            return
+        head, *rest = entry
+        parts = [head.text.strip().rstrip(".,"), *(b.text.strip() for b in rest)]
+        text = " — ".join(p for p in parts if p)
+        # Terminated, because entries are concatenated into a chunk with only a
+        # space between them. Without a full stop the reader sees
+        # "...(ISIE) 2023-2025 - Alberta Innovates..." and attaches the date to
+        # the entry before it — which is exactly how the wrong scholarship got
+        # named as his most recent.
+        grouped.append(replace(head, text=text if text.endswith(".") else text + "."))
+        entry.clear()
+
+    for block in blocks:
+        if block.heading:
+            # A heading ends the previous entry and never joins one.
+            flush()
+            grouped.append(block)
+        elif _DATE_ONLY.match(block.text):
+            flush()
+            entry.append(block)
+        elif entry:
+            entry.append(block)
+        else:
+            grouped.append(block)
+
+    flush()
+    return grouped
+
+
 class HtmlExtractor(DocumentExtractor):
     """Fetches a URL and parses it into blocks."""
 
@@ -180,6 +254,8 @@ class HtmlExtractor(DocumentExtractor):
         reader = _Reader()
         reader.feed(response.text)
         reader.close()
+
+        reader.blocks = group_dated_entries(reader.blocks)
 
         if not reader.blocks:
             msg = (
