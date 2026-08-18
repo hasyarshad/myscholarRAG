@@ -191,8 +191,8 @@ why the baseline is deliberately made stronger than the original was.
 | Classification, grading | `qwen3:4b-instruct` | The `-instruct` suffix is load-bearing — see the config |
 | Embeddings | `bge-base-en-v1.5` | Same weights at index and query time, asserted at startup |
 | Reranking | `bge-reranker-base` | Cross-encoder over the top 50 |
-| Store | PostgreSQL + pgvector | Dense, lexical and relational in one system |
-| Framework | none | Hand-rolled, ~7,200 lines |
+| Store | PostgreSQL + pgvector | Dense, lexical, relational and document summaries in one system |
+| Framework | none | Hand-rolled, ~9,200 lines |
 
 No LangChain. The adaptive loop is a 140-line state machine, which is what makes
 its termination guarantee property-testable.

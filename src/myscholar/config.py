@@ -116,6 +116,34 @@ class RetrievalSettings(BaseModel):
     top_k: int = 50
     """Candidates fetched per branch before fusion."""
 
+    rerank: bool = False
+    """Whether the cross-encoder reorders the fused candidates.
+
+    Off, because on this corpus it makes retrieval worse. Measured over the
+    37-question set, hit@1 0.84 -> 0.65 and MRR 0.887 -> 0.766, and the damage
+    is concentrated where documents are near-identical:
+
+        kind             hybrid   reranked
+        confusable         1.00       0.50
+        topical            1.00       0.80
+        paraphrase         0.88       0.75
+        ambiguousdomain    0.75       1.00
+        deepcontent        1.00       1.00
+
+    It earns its place on vague questions and loses it everywhere else. That
+    is not a surprise in hindsight: a cross-encoder reads one query against one
+    passage with no view of the corpus, so among twenty papers that share a
+    vocabulary it cannot tell the passage that is *about* the subject from the
+    one that is the answer. Fusion order carries that corpus-level signal.
+
+    Blending the two orderings by reciprocal rank was tried first and recovered
+    almost nothing (MRR 0.766). The component stays, because a larger or more
+    heterogeneous corpus would likely flip this, and because the ablation is
+    part of the evaluation — but it is not on by default on the evidence here.
+
+    Turn on with MYSCHOLAR_RETRIEVAL__RERANK=true.
+    """
+
     rerank_k: int = 8
     """Candidates surviving the cross-encoder and passed to generation."""
 

@@ -35,6 +35,10 @@ class _Doc:
     year: int | None
     venue: str | None
     verified: bool
+    kind: str = "paper"
+    """The corpus endpoint reports papers only — it counted the CV and the
+    site pages too, and the widget then told visitors there were 25 papers."""
+
     sections: int = 1
     chunks: int = 10
 

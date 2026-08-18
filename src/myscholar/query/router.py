@@ -53,7 +53,9 @@ class QueryRouter:
         transformer: QueryTransformer,
         retriever: HybridRetriever,
         store: PostgresStore,
+        mode: RetrievalMode = RetrievalMode.FULL,
     ) -> None:
+        self._mode = mode
         self._classifier = classifier
         self._planner = planner
         self._transformer = transformer
@@ -128,11 +130,29 @@ class QueryRouter:
         try:
             embedding = await self._retriever.embed_query(queries[0].text)
             matches = await self._store.search_summaries(
-                embedding, model_id=self._retriever.model_id, limit=plan.select_documents
+                # Over-fetch, because reviews are about to be pushed to the
+                # back and would otherwise consume slots on the way.
+                embedding,
+                model_id=self._retriever.model_id,
+                limit=plan.select_documents * 2,
             )
         except Exception:  # noqa: BLE001 - selection is an optimisation, not a requirement
             return frozenset()
-        return frozenset(document_id for document_id, _ in matches)
+
+        # Papers he wrote come before papers he reviewed.
+        #
+        # A survey matches "his contribution to machine learning" strongly —
+        # it is entirely about machine learning — and contributes nothing to
+        # the answer, because its methods are other people's. Selected on
+        # similarity alone it took the top slot and the assistant reported that
+        # he had developed OS-ELM and GGAP-RBF, which he had read about.
+        #
+        # Demoted rather than excluded: for "what does his work say about
+        # online sequential learning" the survey is the right document, and it
+        # is still reachable both here, when little else matches, and through
+        # the unfiltered branch that every search runs.
+        ordered = sorted(matches, key=lambda m: m[2])
+        return frozenset(document_id for document_id, _, _ in ordered[: plan.select_documents])
 
     async def _search(
         self,
@@ -199,16 +219,14 @@ class QueryRouter:
             nonlocal degraded
             result = await self._retriever.retrieve(
                 text,
-                mode=RetrievalMode.FULL,
+                mode=self._mode,
                 filters=filters if not filters.is_empty else None,
                 limit=plan.rerank_k,
             )
             # An empty filtered result means the filter was wrong, not that the
             # corpus lacks an answer.
             if not result.blocks and not filters.is_empty:
-                result = await self._retriever.retrieve(
-                    text, mode=RetrievalMode.FULL, limit=plan.rerank_k
-                )
+                result = await self._retriever.retrieve(text, mode=self._mode, limit=plan.rerank_k)
             degraded = degraded or result.degraded
             return result.blocks
 

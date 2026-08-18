@@ -39,6 +39,7 @@ from myscholar.assembly import build_engine
 from myscholar.config import Settings, load_settings
 from myscholar.container import build_container
 from myscholar.domain.answers import Answer, Refusal, TraceEvent
+from myscholar.domain.enums import DocumentKind, Stage
 from myscholar.query.history import FollowUpResolver, Turn
 from myscholar.reasoning.engine import Engine
 
@@ -194,10 +195,14 @@ def create_app(services: Services | None = None, *, origins: list[str] | None = 
     async def corpus() -> CorpusInfo:
         """What the assistant covers, so the widget states it rather than guessing."""
         current = await get_services()
-        documents = await current.store.list_documents()
+        # Papers only. The widget renders this as "N papers, YYYY-YYYY", and
+        # counting the CV and the site pages made it claim twenty-five.
+        documents = [
+            d for d in await current.store.list_documents() if d.kind == DocumentKind.PAPER
+        ]
         counts = await current.store.counts()
         return CorpusInfo(
-            documents=counts.get("documents", 0),
+            documents=len(documents),
             chunks=counts.get("chunks", 0),
             years=sorted({d.year for d in documents if d.year}, reverse=True),
             suggestions=SUGGESTIONS,
@@ -274,7 +279,7 @@ async def _stream(
                 "stage",
                 # No detail: the widget already labels this stage, and repeating
                 # the label as its own detail read as a stutter.
-                StageEvent(stage="classifying"),
+                StageEvent(stage=Stage.CLASSIFYING.value),
             )
 
             # Each stage as the pipeline reaches it, not replayed afterwards.

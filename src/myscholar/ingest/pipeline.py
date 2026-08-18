@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -194,6 +194,14 @@ class IngestionPipeline:
             # human. The review file remains the path for anything without a
             # resolvable DOI — preprints, theses, work in submission.
             report.proposals.append(proposal)
+
+        # A page has no publication year, venue or DOI, and guessing one is
+        # worse than leaving it empty: the year extractor read an education
+        # date off the CV and reported the corpus as running from 2016, a year
+        # in which nothing was published.
+        if kind is not DocumentKind.PAPER:
+            metadata = replace(metadata, year=None, venue=None, doi=None)
+            resolved = None
 
         sections = await group_into_sections(
             extracted.blocks,

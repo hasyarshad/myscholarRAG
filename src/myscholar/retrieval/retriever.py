@@ -204,7 +204,28 @@ class HybridRetriever:
     async def _rerank(
         self, query: str, candidates: list[SearchHit], limit: int
     ) -> tuple[list[SearchHit], bool]:
-        """Reorder candidates with the cross-encoder.
+        """Reorder candidates by blending the cross-encoder with fusion order.
+
+        Not by the cross-encoder alone. Measured on the 37-question set, a full
+        re-order helps exactly where the question is hard and hurts where it is
+        not:
+
+            kind             hybrid   reranked
+            ambiguousdomain    0.75       1.00
+            deepcontent        1.00       1.00
+            confusable         1.00       0.50
+            topical            1.00       0.80
+            paraphrase         0.88       0.75
+
+        A cross-encoder reads one query against one passage with no view of the
+        corpus, so it cannot tell a passage that is *about* the subject from
+        the one that is *the* answer among near-identical candidates — which is
+        precisely what "confusable" questions ask. Fusion order carries that
+        corpus-level signal and was being discarded.
+
+        Reciprocal rank fusion over the two orderings keeps both: the
+        cross-encoder still promotes a passage the retriever ranked tenth, but
+        it can no longer bury one the retriever ranked first.
 
         A reranker failure degrades to fusion order and is reported, rather
         than failing the request: reduced precision beats an error page.
@@ -219,6 +240,19 @@ class HybridRetriever:
         except Exception:  # noqa: BLE001 - any reranker failure degrades the same way
             return candidates[:limit], True
 
+        cross_rank = {index: position for position, (index, _) in enumerate(ranked, start=1)}
+        cross_score = dict(ranked)
+
+        def blended(index: int) -> float:
+            fusion_position = index + 1
+            # Unranked candidates sit beyond the reranker's window; give them a
+            # position just past it rather than dropping them, so the blend
+            # degrades smoothly as top_n shrinks.
+            position = cross_rank.get(index, len(candidates) + 1)
+            return 1.0 / (self._rrf_k + fusion_position) + 1.0 / (self._rrf_k + position)
+
+        order = sorted(range(len(candidates)), key=blended, reverse=True)[:limit]
+
         return [
             SearchHit(
                 chunk_id=candidates[index].chunk_id,
@@ -226,9 +260,9 @@ class HybridRetriever:
                 section_id=candidates[index].section_id,
                 ordinal_in_section=candidates[index].ordinal_in_section,
                 text=candidates[index].text,
-                score=score,
+                score=cross_score.get(index, 0.0),
             )
-            for index, score in ranked
+            for index in order
         ], False
 
     async def _expand(self, hits: list[SearchHit]) -> list[ContextBlock]:

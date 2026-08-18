@@ -28,7 +28,7 @@ from myscholar.query.router import QueryRouter
 from myscholar.query.transforms import QueryTransformer
 from myscholar.reasoning.engine import Engine
 from myscholar.reasoning.graph import Budget
-from myscholar.retrieval.retriever import HybridRetriever
+from myscholar.retrieval.retriever import HybridRetriever, RetrievalMode
 
 
 def build_retriever(
@@ -74,6 +74,7 @@ def build_router(
         transformer=QueryTransformer(container.utility, titles=titles),
         retriever=retriever or build_retriever(settings, container, store),
         store=store,
+        mode=RetrievalMode.FULL if settings.retrieval.rerank else RetrievalMode.HYBRID,
     )
 
 
