@@ -50,6 +50,20 @@ def _stem(source: Path | str) -> str:
     return Path(source).stem
 
 
+#: Chunks per page beyond which a document is probably damaged.
+#:
+#: Measured across this corpus, healthy papers produce 8-20 chunks per page.
+#: One produced 132 — a stacked PDF text layer repeating every line — and it
+#: sat in the index for four phases, flooding unrelated searches with garbled
+#: fragments. Nothing noticed, because a document with eight hundred chunks
+#: ingests exactly as cleanly as one with eighty.
+#:
+#: Set well above the observed maximum, so this only fires on something plainly
+#: wrong. A warning rather than an error: a genuinely dense document should not
+#: be rejected, it should be looked at.
+_SUSPICIOUS_CHUNKS_PER_PAGE = 40
+
+
 def _merge(proposed: PaperMetadata, resolved: ResolvedMetadata) -> PaperMetadata:
     """Registry fields win, except where the registry has nothing to say.
 
@@ -295,6 +309,17 @@ class IngestionPipeline:
         if not payload:
             report.failed.append((_label(path), "no indexable content after sectioning"))
             return
+
+        # A corpus defect is invisible at the document level and obvious in the
+        # ratio, so the ratio is what gets checked.
+        indexed_chunks = sum(len(rows) for _, rows in payload)
+        pages = max(extracted.page_count, 1)
+        if indexed_chunks / pages > _SUSPICIOUS_CHUNKS_PER_PAGE:
+            report.warnings.append(
+                f"{_label(path)}: {indexed_chunks} chunks over {pages} page(s) — "
+                f"{indexed_chunks // pages} per page against 8-20 for a normal paper. "
+                f"Check the PDF's text layer for repeated lines."
+            )
 
         await self._store.add_document(document, payload, model_id=self._embedder.model_id)
         report.documents += 1

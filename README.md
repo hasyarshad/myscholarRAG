@@ -19,7 +19,7 @@ Measured on this corpus, reproducible from `scripts/`.
 | Citation validity | — | **100%** | 0 dangling markers — enforced in code, not by prompting |
 | Query classification | — | 91.3% | 46 questions; **95.5%** on the classes where a misroute fabricates |
 | Retrieval MRR | 0.865 | 0.869 | 37 questions, document-level, over the blocks a generator receives |
-| Tests | — | 584 | unit + integration, including property tests |
+| Tests | — | 591 | unit + integration, including property tests |
 
 `naive` is a baseline of dense-only retrieval and one ungrounded call, run against the *same* index,
 embedder, generator and corpus, so the difference is pipeline design and
