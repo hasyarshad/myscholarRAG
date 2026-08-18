@@ -54,7 +54,11 @@ from myscholar.config import load_settings  # noqa: E402
 from myscholar.container import build_container  # noqa: E402
 from myscholar.domain.answers import Refusal  # noqa: E402
 from myscholar.domain.documents import ContextBlock  # noqa: E402
-from myscholar.evaluation.baseline import NaivePipeline, declines  # noqa: E402
+from myscholar.evaluation.baseline import (  # noqa: E402
+    NaivePipeline,
+    contradicts,
+    declines,
+)
 from myscholar.evaluation.faithfulness import FaithfulnessJudge  # noqa: E402
 from myscholar.generation import citations  # noqa: E402
 from myscholar.reasoning.engine import Engine  # noqa: E402
@@ -81,6 +85,7 @@ class Outcome:
     kind: str
     expected: str
     declined: bool
+    contradicted: bool
     text: str
     seconds: float
     claims_judged: int = 0
@@ -99,7 +104,17 @@ class Outcome:
 
     @property
     def correct(self) -> bool:
-        return self.declined == self.should_refuse
+        """Refusing is not the only right answer to a false premise.
+
+        On a question that should be declined, either declining or explicitly
+        contradicting the premise counts — the second is the better answer. On
+        an answerable question, only declining is wrong; contradiction is
+        irrelevant there and deliberately not consulted, so that an answer
+        which happens to say "instead" is never scored as a refusal.
+        """
+        if self.should_refuse:
+            return self.declined or self.contradicted
+        return not self.declined
 
 
 @dataclass
@@ -202,6 +217,7 @@ async def run_naive(
             kind=case["kind"],
             expected=case["expect"],
             declined=declines(answer.text),
+            contradicted=contradicts(answer.text),
             text=answer.text,
             seconds=time.monotonic() - started,
         )
@@ -247,6 +263,7 @@ async def run_adaptive(
             kind=case["kind"],
             expected=case["expect"],
             declined=declined,
+            contradicted=contradicts(response.text),
             text=response.text,
             seconds=time.monotonic() - started,
             markers=markers,

@@ -16,7 +16,7 @@ import pytest
 
 from myscholar.adapters.fakes import FakeChatModel
 from myscholar.domain.documents import ContextBlock
-from myscholar.evaluation.baseline import NaivePipeline, declines
+from myscholar.evaluation.baseline import NaivePipeline, contradicts, declines
 from myscholar.evaluation.faithfulness import ClaimVerdict, FaithfulnessJudge, FaithfulnessResult
 
 
@@ -171,3 +171,37 @@ class TestNaivePipeline:
         assert prompt.startswith("<|content_start>")
         assert "<|content_end> what was used?" in prompt
         assert len(model.calls[0]) == 1, "the baseline sends no system message"
+
+
+class TestContradiction:
+    """Refusing is not the only right answer to a false premise."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Instead, it used NSGA-II to optimise the weighting factors.",
+            "In fact, chaotic SVPWM reduces EMI by spreading harmonics.",
+            "The excerpts do not conclude that current sensors outperform acoustic sensing.",
+            "However, the paper emphasises acoustic signals as a viable alternative.",
+        ],
+    )
+    def test_a_correction_counts(self, text: str) -> None:
+        assert contradicts(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "He used NSGA-II with TOPSIS to select weighting factors.",
+            "The framework reached 98.5% accuracy on held-out recordings.",
+        ],
+    )
+    def test_an_ordinary_answer_does_not(self, text: str) -> None:
+        assert not contradicts(text)
+
+    def test_contradiction_is_not_refusal(self) -> None:
+        """Kept separate so a good answer that happens to say "instead" is
+        never counted toward over-refusal."""
+        text = "Instead, it used NSGA-II to optimise the weighting factors."
+
+        assert contradicts(text)
+        assert not declines(text)

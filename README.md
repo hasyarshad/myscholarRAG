@@ -13,18 +13,24 @@ Measured on this corpus, reproducible from `scripts/`.
 
 | Metric | naive | adaptive | Basis |
 |---|---|---|---|
-| **Unsupported claims** | 65.4% | **12.8%** | factual sentences the retrieved passages do not support |
-| **Correct refusal** | 52.4% | **71.4%** | 21 questions the corpus cannot answer, incl. 12 false premises |
-| Over-refusal | 18.8% | 12.5% | 16 answerable controls, incl. CV and bibliographic |
+| **Unsupported claims** | 57.3% | **11.4%** | factual sentences the retrieved passages do not support |
+| **Correct refusal** | 47.6% | **61.9%** | 21 questions the corpus cannot answer, incl. 12 false premises |
+| Over-refusal | 12.5% | **6.2%** | 16 answerable controls, incl. CV and bibliographic |
 | Citation validity | — | **100%** | 0 dangling markers — enforced in code, not by prompting |
-| Query classification | — | 93.5% | 46 questions; **100%** on the classes where a misroute fabricates |
-| Retrieval MRR | 0.851 | 0.867 | 37 questions, document-level, over the blocks a generator receives |
-| Tests | — | 380 | unit + integration, including property tests |
+| Query classification | — | 91.3% | 46 questions; **95.5%** on the classes where a misroute fabricates |
+| Retrieval MRR | 0.865 | 0.869 | 37 questions, document-level, over the blocks a generator receives |
+| Tests | — | 584 | unit + integration, including property tests |
 
 `naive` is a baseline of dense-only retrieval and one ungrounded call, run against the *same* index,
 embedder, generator and corpus, so the difference is pipeline design and
-nothing else. Full table, including the retrieval-only middle configuration,
-in [results/report.md](results/report.md).
+nothing else.
+
+**Retrieval alone moved the unsupported-claim rate by 1.1 points. The
+verification loop moved it by 44.8.** That is the finding worth taking from
+this project: hybrid search, reranking and parent expansion are what most RAG
+tutorials spend their time on, and on this corpus they bought almost nothing in
+groundedness. Without the third configuration in the middle, the loop's share
+would have been credited to them.
 
 **Read these as smoke tests with numbers attached.** Every one rests on fewer
 than 50 examples, so a single question is two to eight percentage points. They
@@ -32,10 +38,10 @@ are enough to catch a broken component and not enough to rank two good ones.
 
 The faithfulness figures come from a 4B judge, which is itself measured before
 it is trusted — 16 cases where the right answer is not in doubt, 100% in both
-directions ([results/judge.md](results/judge.md)). An earlier, uncalibrated
-version of that judge reported 57% of the adaptive system's claims as
-unsupported when the sampled failures were all correct and cited. That is worth
-stating: the instrument needed debugging more than the system did.
+directions ([results/judge.md](results/judge.md)). Three separate measurement
+bugs were found and fixed during this phase, each of which would have published
+a wrong number; they are written up in
+[docs/learning/06-evaluating-rag.md](docs/learning/06-evaluating-rag.md).
 
 The exception is citation validity, which is 100% *by construction* rather than
 by sampling — every marker is checked against the retrieved set in code. If it

@@ -131,11 +131,37 @@ def headline() -> list[str]:
         "adaptive system's prompt requires every factual sentence to carry a "
         "citation, which shapes what it is willing to write. That is a design "
         "choice being measured, not a confound — but it is why the middle row "
-        "matters. Better retrieval alone moved the rate by 0.4 points. The "
-        "verification loop moved it by 52.",
+        "matters.",
+        "",
+        _attribution(generation),
+        "",
+        "`retrieved` keeps the cross-encoder, which the shipped configuration "
+        "no longer uses — it measured worse on this corpus (see "
+        "[retrieval](./retrieval.md)). The row is an ablation of retrieval "
+        "quality, not a description of what runs.",
         "",
     ]
     return lines
+
+
+def _attribution(generation: dict[str, Any]) -> str:
+    """State which stage earned the improvement, in the run's own numbers."""
+    rates = {
+        name: config.get("unsupported_claims")
+        for name, config in generation.items()
+        if config.get("unsupported_claims") is not None
+    }
+    if not {"naive", "retrieved", "adaptive"} <= rates.keys():
+        return ""
+    retrieval_delta = (rates["naive"] - rates["retrieved"]) * 100
+    loop_delta = (rates["retrieved"] - rates["adaptive"]) * 100
+    return (
+        f"Retrieval alone moved the unsupported-claim rate by "
+        f"{retrieval_delta:.1f} points. The verification loop moved it by "
+        f"{loop_delta:.1f}. Whatever else the retrieval work bought, it was "
+        f"not groundedness — and without the middle row the loop's share would "
+        f"have been credited to it."
+    )
 
 
 def compose(ran: dict[str, tuple[bool, float]]) -> str:

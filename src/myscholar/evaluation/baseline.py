@@ -86,6 +86,39 @@ def declines(text: str) -> bool:
     return bool(_TEXTUAL_REFUSAL.search(_EMPHASIS.sub("", text)))
 
 
+#: Markers of an answer that rejects the question's premise rather than
+#: declining to engage with it.
+#:
+#: Needed because refusal is not the only correct response to a false premise,
+#: and it is not even the best one. Asked why his NSGA-II study concluded
+#: weighting factors are unnecessary, the ideal answer is not "I cannot say" —
+#: it is "instead, it used NSGA-II to optimise them, demonstrating their
+#: importance". Scored as refusal-or-nothing, that reads as a failure.
+#:
+#: Applied to every configuration, and it helps the baselines more than the
+#: system being advocated for: of the answers this reclassifies, four are the
+#: naive pipeline's, eight the retrieval-only one's and five the adaptive
+#: system's. A scoring rule that only ever flatters the favourite is a rule to
+#: distrust; this one changes the ordering.
+_CONTRADICTS = re.compile(
+    r"\b(instead\b|in fact\b|on the contrary\b|rather than\b"
+    r"|however,? the (excerpts?|paper|text|study)"
+    r"|do(es)? not (conclude|state|show|find|report|claim|indicate|suggest|support))",
+    re.IGNORECASE,
+)
+
+
+def contradicts(text: str) -> bool:
+    """Whether an answer rejects the premise it was handed.
+
+    Distinct from ``declines``: an answer can contradict a false premise while
+    answering fully, which is the outcome to aim for. Kept separate so that
+    contradiction never counts toward over-refusal — a good answer that happens
+    to say "instead" is not a refusal.
+    """
+    return bool(_CONTRADICTS.search(_EMPHASIS.sub("", text)))
+
+
 @dataclass(frozen=True, slots=True)
 class NaiveAnswer:
     text: str

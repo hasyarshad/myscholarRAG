@@ -122,9 +122,9 @@
   {
     "question": "What optimisation algorithm does the weighting factors paper use?",
     "expected": "single_paper_factual",
-    "actual": "single_paper_factual",
+    "actual": "methodological",
     "decided_by": "model",
-    "correct": true,
+    "correct": false,
     "papers": []
   },
   {
@@ -250,9 +250,9 @@
   {
     "question": "Give me a count of his 2021 output",
     "expected": "bibliographic",
-    "actual": "biographical",
+    "actual": "bibliographic",
     "decided_by": "model",
-    "correct": false,
+    "correct": true,
     "papers": []
   },
   {
