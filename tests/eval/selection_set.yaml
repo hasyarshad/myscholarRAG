@@ -1,0 +1,87 @@
+# Document selection test set.
+#
+# The other evaluations ask "which passage answers this". This one asks "which
+# papers is this question about", which is a different question and the one the
+# summariser exists to answer.
+#
+# It needed writing because nothing measured the stage. The retrieval set was
+# written in Phase 2 and is 27 single-paper questions, 9 methodological and no
+# cross-paper synthesis at all — so the class selection was built for, and the
+# class Haseeb's own questions fall into, was entirely unmeasured.
+#
+# `expect` lists the documents a good answer would have to draw on. Scoring is
+# recall: of those, how many does selection put in scope. Precision is
+# deliberately not scored — selecting nine of twenty-five and being wrong about
+# two costs a little context, while missing the paper that answers the question
+# costs the answer.
+#
+# Slugs, so a title correction cannot silently invalidate a case.
+# Run: uv run python scripts/eval_selection.py
+
+- question: "What has he contributed to machine learning?"
+  kind: field
+  expect:
+    - leveraging-meta-learner-based-stacking-framework-for-stator-winding-inter-turn-fault-detection-of-lspmsm
+    - rotor-imbalance-fault-classification-through-unified-feature-fusion-combining-statistical-signal-processing-with-adaptiv
+    - packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training
+
+- question: "What deep learning models has he built?"
+  kind: field
+  expect:
+    - leveraging-meta-learner-based-stacking-framework-for-stator-winding-inter-turn-fault-detection-of-lspmsm
+    - rotor-imbalance-fault-classification-through-unified-feature-fusion-combining-statistical-signal-processing-with-adaptiv
+    - packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training
+
+- question: "How has his model predictive control work developed?"
+  kind: evolution
+  expect:
+    - computationally-efficient-data-driven-model-predictive-control-for-modular-multilevel-converters
+    - data-driven-model-predictive-control-for-modular-multilevel-converters-with-reduced-computational-complexity
+    - weighting-factors-optimization-of-model-predictive-torque-control-of-induction-motor-using-nsga-ii-with-topsis-decision-
+    - neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-
+
+- question: "What fault detection work has he done?"
+  kind: theme
+  expect:
+    - leveraging-meta-learner-based-stacking-framework-for-stator-winding-inter-turn-fault-detection-of-lspmsm
+    - rotor-imbalance-fault-classification-through-unified-feature-fusion-combining-statistical-signal-processing-with-adaptiv
+
+- question: "Which of his work uses optimisation algorithms to tune controllers?"
+  kind: method
+  expect:
+    - weighting-factors-optimization-of-model-predictive-torque-control-of-induction-motor-using-nsga-ii-with-topsis-decision-
+    - neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-
+    - artificial-bee-colony-optimized-self-tuning-pi-speed-controller-for-fcs-mpcc-of-permanent-magnet-synchronous-machines
+    - genetic-algorithm-tuned-adaptive-discrete-time-sliding-mode-controller-for-grid-connected-inverter-with-an-lcl-filter
+
+- question: "What has he published outside power electronics?"
+  kind: crossdomain
+  expect:
+    - exploring-crowdsourced-content-moderation-through-lens-of-reddit-during-covid-19
+    - revisiting-media-literacy-measurement-development-and-validation-of-3-factor-media-literacy-scale
+    - packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training
+
+- question: "What inverter work has he done?"
+  kind: theme
+  expect:
+    - a-chaos-based-svpwm-technique-for-b4-inverter-fed-two-phase-symmetric-induction-motor-for-thd-emi-improvement-at-low-mod
+    - robust-control-of-grid-tied-inverter-with-lc-filter-via-adaptive-fcs-mpc-cost-function-optimization
+    - neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-
+
+- question: "What has he done on sensorless control?"
+  kind: theme
+  expect:
+    - implications-of-the-sensorless-predictive-control-for-line-start-permanent-magnet-synchronous-machine
+
+- question: "Which work studies chaotic systems?"
+  kind: theme
+  expect:
+    - a-simple-technique-for-studying-chaos-using-jerk-equation-with-discrete-time-sine-map
+    - a-chaos-based-svpwm-technique-for-b4-inverter-fed-two-phase-symmetric-induction-motor-for-thd-emi-improvement-at-low-mod
+
+- question: "What control work has he done on motors?"
+  kind: theme
+  expect:
+    - advanced-direct-torque-control-of-four-switch-fed-two-phase-symmetric-induction-motor
+    - comparison-of-dynamic-performance-of-field-oriented-control-and-model-predictive-control-for-line-start-permanent-magnet
+    - hierarchical-control-of-dc-motor-coupled-with-cuk-converter-combining-differential-flatness-and-sliding-mode-control

@@ -42,7 +42,12 @@ STAGES: dict[str, tuple[str, str, str]] = {
         "can the faithfulness judge be trusted",
         "~1 min",
     ),
-    "retrieval": ("scripts/eval_retrieval.py", "is the right document found", "~1 min"),
+    "selection": (
+        "scripts/eval_selection.py",
+        "are the right papers brought into scope",
+        "~1 min",
+    ),
+    "retrieval": ("scripts/eval_retrieval.py", "is the right document found", "~3 min"),
     "routing": ("scripts/eval_routing.py", "is the right strategy chosen", "~1 min"),
     "generation": (
         "scripts/eval_generation.py",
@@ -198,6 +203,24 @@ def compose(ran: dict[str, tuple[bool, float]]) -> str:
             f"{sum(bool(r['correct']) for r in supported) / max(len(supported), 1):.0%} |",
             f"| Catches an unsupported claim | "
             f"{sum(bool(r['correct']) for r in unsupported) / max(len(unsupported), 1):.0%} |",
+        ]
+
+    if selection := _load("selection"):
+        recall = sum(float(r["recall"]) for r in selection) / max(len(selection), 1)
+        complete = sum(1 for r in selection if not r["missing"]) / max(len(selection), 1)
+        lines += [
+            "",
+            "## Document selection",
+            "",
+            "Which papers a cross-paper question is about, decided before any "
+            "passage is fetched. The retrieval set below cannot measure this — "
+            "it is 27 single-paper questions and 9 methodological ones, with no "
+            "synthesis at all.",
+            "",
+            "| Measure | Value |",
+            "|---|---|",
+            f"| Recall of needed documents | {recall:.0%} |",
+            f"| Questions with nothing missing | {complete:.0%} |",
         ]
 
     if retrieval := _load("retrieval"):

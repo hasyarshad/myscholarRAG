@@ -374,6 +374,14 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=0, help="Run only the first N questions.")
     parser.add_argument(
+        "--rerank",
+        action="store_true",
+        help="Turn the cross-encoder on for the adaptive configuration.",
+    )
+    parser.add_argument(
+        "--suffix", default="", help="Appended to the output filenames, to keep runs apart."
+    )
+    parser.add_argument(
         "--configs",
         default="naive,retrieved,adaptive",
         help="Comma-separated subset to run.",
@@ -418,7 +426,7 @@ async def main() -> None:
         results.append(await run_adaptive(cases, engine=engine, judge=judge))
 
     RESULTS.mkdir(exist_ok=True)
-    (RESULTS / "generation.md").write_text(report(results, cases), "utf-8")
+    (RESULTS / f"generation{args.suffix}.md").write_text(report(results, cases), "utf-8")
 
     by_config: dict[str, Any] = defaultdict(dict)
     for r in results:
@@ -441,10 +449,10 @@ async def main() -> None:
                 for o in r.outcomes
             ],
         }
-    (RESULTS / "generation.json").write_text(json.dumps(by_config, indent=2), "utf-8")
+    (RESULTS / f"generation{args.suffix}.json").write_text(json.dumps(by_config, indent=2), "utf-8")
 
     print("\n" + "\n".join(report(results, cases).splitlines()[:14]))
-    print(f"\nwritten to {RESULTS / 'generation.md'}")
+    print(f"\nwritten to {RESULTS / f'generation{args.suffix}.md'}")
 
 
 if __name__ == "__main__":

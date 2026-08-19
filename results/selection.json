@@ -1,0 +1,116 @@
+[
+  {
+    "question": "What has he contributed to machine learning?",
+    "kind": "field",
+    "expected": [
+      "leveraging-meta-learner-based-stacking-framework-for-stator-winding-inter-turn-fault-detection-of-lspmsm",
+      "packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training",
+      "rotor-imbalance-fault-classification-through-unified-feature-fusion-combining-statistical-signal-processing-with-adaptiv"
+    ],
+    "missing": [],
+    "recall": 1.0
+  },
+  {
+    "question": "What deep learning models has he built?",
+    "kind": "field",
+    "expected": [
+      "leveraging-meta-learner-based-stacking-framework-for-stator-winding-inter-turn-fault-detection-of-lspmsm",
+      "packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training",
+      "rotor-imbalance-fault-classification-through-unified-feature-fusion-combining-statistical-signal-processing-with-adaptiv"
+    ],
+    "missing": [],
+    "recall": 1.0
+  },
+  {
+    "question": "How has his model predictive control work developed?",
+    "kind": "evolution",
+    "expected": [
+      "computationally-efficient-data-driven-model-predictive-control-for-modular-multilevel-converters",
+      "data-driven-model-predictive-control-for-modular-multilevel-converters-with-reduced-computational-complexity",
+      "neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-",
+      "weighting-factors-optimization-of-model-predictive-torque-control-of-induction-motor-using-nsga-ii-with-topsis-decision-"
+    ],
+    "missing": [
+      "neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-"
+    ],
+    "recall": 0.75
+  },
+  {
+    "question": "What fault detection work has he done?",
+    "kind": "theme",
+    "expected": [
+      "leveraging-meta-learner-based-stacking-framework-for-stator-winding-inter-turn-fault-detection-of-lspmsm",
+      "rotor-imbalance-fault-classification-through-unified-feature-fusion-combining-statistical-signal-processing-with-adaptiv"
+    ],
+    "missing": [],
+    "recall": 1.0
+  },
+  {
+    "question": "Which of his work uses optimisation algorithms to tune controllers?",
+    "kind": "method",
+    "expected": [
+      "artificial-bee-colony-optimized-self-tuning-pi-speed-controller-for-fcs-mpcc-of-permanent-magnet-synchronous-machines",
+      "genetic-algorithm-tuned-adaptive-discrete-time-sliding-mode-controller-for-grid-connected-inverter-with-an-lcl-filter",
+      "neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-",
+      "weighting-factors-optimization-of-model-predictive-torque-control-of-induction-motor-using-nsga-ii-with-topsis-decision-"
+    ],
+    "missing": [],
+    "recall": 1.0
+  },
+  {
+    "question": "What has he published outside power electronics?",
+    "kind": "crossdomain",
+    "expected": [
+      "exploring-crowdsourced-content-moderation-through-lens-of-reddit-during-covid-19",
+      "packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training",
+      "revisiting-media-literacy-measurement-development-and-validation-of-3-factor-media-literacy-scale"
+    ],
+    "missing": [
+      "exploring-crowdsourced-content-moderation-through-lens-of-reddit-during-covid-19",
+      "packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training",
+      "revisiting-media-literacy-measurement-development-and-validation-of-3-factor-media-literacy-scale"
+    ],
+    "recall": 0.0
+  },
+  {
+    "question": "What inverter work has he done?",
+    "kind": "theme",
+    "expected": [
+      "a-chaos-based-svpwm-technique-for-b4-inverter-fed-two-phase-symmetric-induction-motor-for-thd-emi-improvement-at-low-mod",
+      "neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-",
+      "robust-control-of-grid-tied-inverter-with-lc-filter-via-adaptive-fcs-mpc-cost-function-optimization"
+    ],
+    "missing": [],
+    "recall": 1.0
+  },
+  {
+    "question": "What has he done on sensorless control?",
+    "kind": "theme",
+    "expected": [
+      "implications-of-the-sensorless-predictive-control-for-line-start-permanent-magnet-synchronous-machine"
+    ],
+    "missing": [],
+    "recall": 1.0
+  },
+  {
+    "question": "Which work studies chaotic systems?",
+    "kind": "theme",
+    "expected": [
+      "a-chaos-based-svpwm-technique-for-b4-inverter-fed-two-phase-symmetric-induction-motor-for-thd-emi-improvement-at-low-mod",
+      "a-simple-technique-for-studying-chaos-using-jerk-equation-with-discrete-time-sine-map"
+    ],
+    "missing": [],
+    "recall": 1.0
+  },
+  {
+    "question": "What control work has he done on motors?",
+    "kind": "theme",
+    "expected": [
+      "advanced-direct-torque-control-of-four-switch-fed-two-phase-symmetric-induction-motor",
+      "comparison-of-dynamic-performance-of-field-oriented-control-and-model-predictive-control-for-line-start-permanent-magnet",
+      "hierarchical-control-of-dc-motor-coupled-with-cuk-converter-combining-differential-flatness-and-sliding-mode-control"
+    ],
+    "missing": [],
+    "recall": 1.0
+  }
+]

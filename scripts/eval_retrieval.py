@@ -226,15 +226,23 @@ def render(results: dict[str, list[Outcome]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-async def evaluate_routed(cases: list[dict[str, Any]]) -> list[Outcome]:
-    """The full Phase 3 path: classify, plan, transform, retrieve, fuse.
+async def evaluate_routed(cases: list[dict[str, Any]], *, rerank: bool) -> list[Outcome]:
+    """The full shipped path: classify, plan, select documents, retrieve, fuse.
 
     Compared against `full` this isolates what routing adds on content
     questions. The bibliographic and out-of-scope classes are excluded here
     because they bypass retrieval entirely — their improvement is measured in
     the routing evaluation, not this one.
+
+    ``rerank`` is a parameter rather than a setting because the cross-encoder's
+    value is now an open question again. It was measured as harmful when it
+    re-ordered the whole corpus; it now runs *after* document selection, which
+    is a different and better-posed task — choosing passages within papers
+    already known to be relevant, rather than deciding which paper is relevant.
+    The two rows answer that directly.
     """
     settings = load_settings()
+    settings.retrieval.rerank = rerank
     container = build_container(settings)
     store = PostgresStore(create_engine(settings.database.url))
     documents = await store.list_documents()
@@ -289,14 +297,15 @@ async def main() -> int:
             f"hit@5={m.hit_at[5]:.2f} MRR={m.mrr:.3f} ctx-prec={m.context_precision:.3f}"
         )
 
-    routed = await evaluate_routed(cases)
-    results["routed"] = routed
-    m = Metrics.of(routed)
-    print(
-        f"{'routed':8s} hit@1={m.hit_at[1]:.2f} hit@3={m.hit_at[3]:.2f} "
-        f"hit@5={m.hit_at[5]:.2f} MRR={m.mrr:.3f} ctx-prec={m.context_precision:.3f} "
-        f"bypassed={m.bypassed}"
-    )
+    for name, rerank in (("routed", False), ("routed+rerank", True)):
+        outcomes = await evaluate_routed(cases, rerank=rerank)
+        results[name] = outcomes
+        m = Metrics.of(outcomes)
+        print(
+            f"{name:13s} hit@1={m.hit_at[1]:.2f} hit@3={m.hit_at[3]:.2f} "
+            f"hit@5={m.hit_at[5]:.2f} MRR={m.mrr:.3f} ctx-prec={m.context_precision:.3f} "
+            f"bypassed={m.bypassed}"
+        )
 
     RESULTS.mkdir(exist_ok=True)
     (RESULTS / "retrieval.md").write_text(render(results), "utf-8")
