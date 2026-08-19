@@ -97,12 +97,20 @@ def headline() -> list[str]:
         "| Configuration | unsupported claims | correct refusal | over-refusal |",
         "|---|---|---|---|",
     ]
+    must_refuse = {"unanswerable", "false_premise", "injection"}
     for name in ("naive", "retrieved", "adaptive"):
         if (config := generation.get(name)) is None:
             continue
+        # Recomputed from the per-question outcomes rather than read from the
+        # stored summary, so the headline cannot disagree with the by-kind
+        # table underneath it.
+        refusing = [o for o in config["outcomes"] if o["kind"] in must_refuse]
+        answering = [o for o in config["outcomes"] if o["kind"] not in must_refuse]
+        correct_refusal = sum(o["correct"] for o in refusing) / max(len(refusing), 1)
+        over_refusal = sum(o["declined"] for o in answering) / max(len(answering), 1)
         lines.append(
             f"| {name} | {_pct(config['unsupported_claims'])} "
-            f"| {_pct(config['correct_refusal'])} | {_pct(config['over_refusal'])} |"
+            f"| {_pct(correct_refusal)} | {_pct(over_refusal)} |"
         )
     counts = {
         name: (
@@ -169,6 +177,57 @@ def _attribution(generation: dict[str, Any]) -> str:
     )
 
 
+def _ranking(baseline: dict[str, Any], reranked: dict[str, Any]) -> str:
+    """The two runs side by side, and what they mean together.
+
+    Retrieval says the cross-encoder hurts; generation says it changes nothing.
+    Both can be true, and the reason is the more useful finding than either
+    number.
+    """
+    must = {"unanswerable", "false_premise", "injection"}
+
+    def row(name: str, config: dict[str, Any]) -> str:
+        outcomes = config["outcomes"]
+        refusing = [o for o in outcomes if o["kind"] in must]
+        claims = sum(o["claims_judged"] for o in outcomes)
+        return (
+            f"| {name} | {_pct(config['unsupported_claims'])} "
+            f"| {sum(o['correct'] for o in refusing) / max(len(refusing), 1) * 100:.1f}% "
+            f"| {config['mean_seconds']:.1f}s | {claims} |"
+        )
+
+    return "\n".join(
+        [
+            "| adaptive | unsupported claims | correct refusal | latency | claims judged |",
+            "|---|---|---|---|---|",
+            row("without reranking", baseline["adaptive"]),
+            row("with reranking", reranked["adaptive"]),
+            "",
+            "Nothing separates them end to end — one claim in forty-seven, and "
+            "identical refusal behaviour — while reranking costs about two "
+            "seconds a question.",
+            "",
+            "That sits against a retrieval measurement where the cross-encoder "
+            "costs 0.09 MRR and 17 points of hit@1. Both are true, and the "
+            "reconciliation is the interesting part: **the loop does not care "
+            "much where in the top ten the right passage sits.** Grading "
+            "filters what came back, parent expansion hands the generator "
+            "generous context, and an answer is built from several blocks. "
+            "Rank 1 against rank 3 barely moves an answer.",
+            "",
+            "So hit@1 and MRR, the numbers this field optimises, are weak "
+            "proxies for answer quality in a system with a verification loop "
+            "behind them. Worth knowing before spending a week on a reranker.",
+            "",
+            "The decision is still to leave it off: it is measurably worse at "
+            "ranking, indistinguishable at answering, and slower. But the "
+            "honest caveat is that 37 questions and 47 judged claims cannot "
+            "detect a small difference, so this rules out a large effect "
+            "rather than proving no effect.",
+        ]
+    )
+
+
 def compose(ran: dict[str, tuple[bool, float]]) -> str:
     lines = [
         "# Evaluation",
@@ -204,6 +263,9 @@ def compose(ran: dict[str, tuple[bool, float]]) -> str:
             f"| Catches an unsupported claim | "
             f"{sum(bool(r['correct']) for r in unsupported) / max(len(unsupported), 1):.0%} |",
         ]
+
+    if (baseline := _load("generation")) and (reranked := _load("generation_rerank")):
+        lines += ["", "## Does the cross-encoder earn its place?", "", _ranking(baseline, reranked)]
 
     if selection := _load("selection"):
         recall = sum(float(r["recall"]) for r in selection) / max(len(selection), 1)

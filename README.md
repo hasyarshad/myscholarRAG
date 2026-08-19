@@ -13,9 +13,10 @@ Measured on this corpus, reproducible from `scripts/`.
 
 | Metric | naive | adaptive | Basis |
 |---|---|---|---|
-| **Unsupported claims** | 57.3% | **11.4%** | factual sentences the retrieved passages do not support |
-| **Correct refusal** | 47.6% | **61.9%** | 21 questions the corpus cannot answer, incl. 12 false premises |
+| **Unsupported claims** | 55.4% | **8.5%** | factual sentences the retrieved passages do not support |
+| **Correct refusal** | 61.9% | **76.2%** | 21 questions the corpus cannot answer, incl. 12 false premises |
 | Over-refusal | 12.5% | **6.2%** | 16 answerable controls, incl. CV and bibliographic |
+| Document selection | — | 88% | recall of the papers a cross-paper answer needs, over 10 questions |
 | Citation validity | — | **100%** | 0 dangling markers — enforced in code, not by prompting |
 | Query classification | — | 91.3% | 46 questions; **95.5%** on the classes where a misroute fabricates |
 | Retrieval MRR | 0.865 | 0.869 | 37 questions, document-level, over the blocks a generator receives |
@@ -25,8 +26,8 @@ Measured on this corpus, reproducible from `scripts/`.
 embedder, generator and corpus, so the difference is pipeline design and
 nothing else.
 
-**Retrieval alone moved the unsupported-claim rate by 1.1 points. The
-verification loop moved it by 44.8.** That is the finding worth taking from
+**Retrieval alone moved the unsupported-claim rate by 3.0 points. The
+verification loop moved it by 43.9.** That is the finding worth taking from
 this project: hybrid search, reranking and parent expansion are what most RAG
 tutorials spend their time on, and on this corpus they bought almost nothing in
 groundedness. Without the third configuration in the middle, the loop's share
@@ -230,8 +231,17 @@ Stated plainly rather than discovered later.
 - **Over-refusal is 12.5%, and both cases are real.** One question about MMC
   control was declined with nearest-topics that name the very papers that
   answer it; another was sent back for clarification it did not need.
-- **Dense-only retrieval beats hybrid on context precision** — 0.883 against
-  0.66–0.71. The lexical branch earns its place on identifier queries such as
+- **The cross-encoder is off, on the evidence.** It costs 0.09 MRR and 17
+  points of hit@1 on this corpus, and changes nothing measurable end to end
+  while adding two seconds a question. Reconciling those two facts is the more
+  useful finding: the loop does not much care where in the top ten the right
+  passage sits, so hit@1 and MRR are weak proxies for answer quality here.
+- **Semantic selection cannot express negation.** "What has he published
+  outside power electronics?" retrieves power electronics, because the
+  embedding is dominated by the words present rather than the ones excluded.
+  0 of 3 on that question, 88% recall over the rest.
+- **Dense-only retrieval beats hybrid on context precision** — 0.840 against
+  0.71. The lexical branch earns its place on identifier queries such as
   `NSGA-II` and pays for it elsewhere.
 - **Every measurement uses fewer than 50 examples.** Enough to catch a broken
   component, not enough to rank two good ones.
