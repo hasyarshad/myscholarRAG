@@ -80,11 +80,24 @@ class BibliographicAnswer:
     """The raw numbers, so a generator can phrase them without recomputing."""
 
 
-def detect_intent(question: str) -> BibliographicIntent:
+def detect_intent(question: str) -> BibliographicIntent | None:
+    """What the question wants from the metadata, or None if nothing does.
+
+    Defaulting to LIST was a quiet trap. Asked "which of his papers covers wind
+    turbine pitch control?" the classifier answered `bibliographic`, no intent
+    pattern matched, the default fired, and the assistant printed all twenty
+    papers as the answer to a question about a topic the corpus does not cover.
+    Retrieval would have found nothing and refused, correctly.
+
+    A deterministic guard on a model decision, which is the pattern used
+    throughout: the classifier may say a question is bibliographic, but if
+    nothing about the question asks for a count, a date, a venue or a list,
+    then it is asking about content and belongs in retrieval.
+    """
     for pattern, intent in _INTENT_PATTERNS:
         if pattern.search(question):
             return intent
-    return BibliographicIntent.LIST
+    return None
 
 
 def extract_years(question: str) -> list[int]:
@@ -95,12 +108,16 @@ class BibliographicQuery:
     def __init__(self, store: PostgresStore) -> None:
         self._store = store
 
-    async def answer(self, question: str) -> BibliographicAnswer:
+    async def answer(self, question: str) -> BibliographicAnswer | None:
+        """The metadata answer, or None if the question does not want one."""
         # Papers only. The CV and the site pages are indexed documents but they
         # are not publications, and counting them would answer "how many
         # papers" with five too many. Until now they were excluded incidentally
         # by being unverified, which stops being true the moment anything marks
         # a page verified.
+        if (intent := detect_intent(question)) is None:
+            return None
+
         papers = [d for d in await self._store.list_documents() if d.kind == DocumentKind.PAPER]
         verified = [d for d in papers if d.verified]
         excluded = len(papers) - len(verified)
@@ -115,7 +132,6 @@ class BibliographicQuery:
                 unverified=excluded,
             )
 
-        intent = detect_intent(question)
         years = extract_years(question)
         scoped = [d for d in verified if d.year in years] if years else verified
 

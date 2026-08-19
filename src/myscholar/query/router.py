@@ -97,12 +97,19 @@ class QueryRouter:
             started = time.monotonic()
             answer = await self._bibliographic.answer(question)
             timings["sql"] = _elapsed(started)
-            return RoutedResult(
-                classification=classification,
-                plan=plan,
-                bibliographic=answer,
-                timings_ms=timings,
-            )
+            if answer is None:
+                # Classified bibliographic, but nothing in it asks for a count,
+                # a date, a venue or a list — so it is a question about content
+                # wearing a collection question's clothes. Retrieval answers it,
+                # or refuses on the evidence.
+                plan = replace(plan, use_sql=False)
+            if answer is not None:
+                return RoutedResult(
+                    classification=classification,
+                    plan=plan,
+                    bibliographic=answer,
+                    timings_ms=timings,
+                )
 
         started = time.monotonic()
         queries = await self._transformer.apply(question, plan.transforms)

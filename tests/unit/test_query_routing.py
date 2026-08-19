@@ -461,3 +461,61 @@ class TestOutOfScopeIsNotAModelDecision:
 
         assert result is not None
         assert result.query_class is QueryClass.OUT_OF_SCOPE
+
+
+class TestTerminalClassesAreNotModelDecisions:
+    """A class that ends the turn without retrieving cannot be recovered from.
+
+    Bibliographic answers from SQL and ambiguous answers with a canned
+    clarification; both skip retrieval entirely. A wrong route into either is
+    final, while a wrong route into a content class still searches and can
+    still refuse on the evidence. The costs are not symmetric, so the model is
+    not asked to make the call.
+    """
+
+    def test_ambiguous_is_not_offered_to_the_model(self) -> None:
+        """Asked "what accuracy did the acoustic fault detection framework
+        achieve?" — a specific framework and a specific quantity — the model
+        answered `ambiguous` and the visitor got "which paper do you mean?"."""
+        allowed = QueryClassification.model_json_schema()["properties"]["query_class"]["enum"]
+
+        assert QueryClass.AMBIGUOUS.value not in allowed
+        assert QueryClass.OUT_OF_SCOPE.value not in allowed
+
+    def test_a_genuinely_bare_reference_is_still_caught(self) -> None:
+        """By pattern, which is where that judgement belongs."""
+        result = QueryClassifier().classify_by_pattern("Tell me about the paper")
+
+        assert result is not None
+        assert result.query_class is QueryClass.AMBIGUOUS
+
+
+class TestBibliographicIntentGuard:
+    """A bibliographic classification with no intent is not bibliographic."""
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "Which of his papers covers wind turbine pitch control?",
+            "Which paper describes the acoustic fault detection method?",
+        ],
+    )
+    def test_a_topical_question_yields_no_intent(self, question: str) -> None:
+        """Defaulting to LIST printed all twenty papers as the answer to a
+        question about a topic the corpus does not cover."""
+        assert detect_intent(question) is None
+
+    @pytest.mark.parametrize(
+        ("question", "expected"),
+        [
+            ("How many papers in 2023?", BibliographicIntent.COUNT),
+            ("What is his most recent paper?", BibliographicIntent.MOST_RECENT),
+            ("List all his papers", BibliographicIntent.LIST),
+            ("Which journals has he published in?", BibliographicIntent.VENUES),
+            ("What was his first publication?", BibliographicIntent.EARLIEST),
+        ],
+    )
+    def test_a_real_collection_question_keeps_its_intent(
+        self, question: str, expected: BibliographicIntent
+    ) -> None:
+        assert detect_intent(question) is expected

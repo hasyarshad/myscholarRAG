@@ -210,12 +210,20 @@ class QueryClassification(BaseModel):
     constrained to this schema, so leaving it out does not merely discourage
     the class — it makes it unreachable.
 
-    That is the point. Out-of-scope was the model's most attractive wrong
-    answer, and each mistake was a hard refusal: "how many awards has Haseeb
-    won?" and "does he know PyTorch?" were both declined outright, with the
-    answers sitting in the indexed CV. The model was being asked to predict
-    whether an answer exists, which is a retrieval question, and it was
-    guessing.
+    ``ambiguous`` is absent for the same reason, and it was the same failure:
+    asked "what accuracy did the acoustic fault detection framework achieve?",
+    a question naming a specific framework and a specific quantity, the model
+    answered `ambiguous` and the visitor got "which paper do you mean?".
+
+    Both classes are terminal — they end the turn without retrieving — so a
+    wrong route into either is unrecoverable, while a wrong route into a
+    content class still searches and can still refuse on the evidence. The
+    model was being asked to predict whether an answer exists, which is a
+    retrieval question, and it was guessing.
+
+    Genuinely referenceless questions are still caught: ``_BARE_REFERENCE``
+    matches "tell me about the paper" and "what did it find?" by pattern,
+    deterministically, which is where that judgement belongs.
 
     Nothing is lost. A genuinely unanswerable question now takes the content
     path, retrieves nothing relevant, and is refused by the grader with
@@ -231,7 +239,6 @@ class QueryClassification(BaseModel):
         QueryClass.CROSS_PAPER_SYNTHESIS,
         QueryClass.METHODOLOGICAL,
         QueryClass.BIOGRAPHICAL,
-        QueryClass.AMBIGUOUS,
     ]
     entities: QueryEntities = Field(default_factory=QueryEntities)
     reasoning: str = Field(default="", max_length=200)
@@ -274,14 +281,14 @@ Classes:
   supervision; peer review and service; certificates, skills and languages;
   availability and contact. The list is not exhaustive. If a question is about
   the person rather than about the research, it belongs here.
-- ambiguous: contains no distinguishing content at all — "tell me about the
-  paper", "what did it find?". A question naming a method, a topic or a
-  finding is never ambiguous, however it is phrased: "which work uses Lyapunov
-  exponents?" is answerable and is not this class.
+Every question gets one of these classes. There is no "out of scope" or
+"ambiguous" option here, and you should not try to judge whether an answer
+exists — pick the class that describes what is being asked and let the search
+find out.
 
-Every question gets one of these classes. There is no "out of scope" option
-here, and you should not try to judge whether an answer exists — pick the class
-that describes what is being asked and let the search find out.
+- bibliographic is about the collection *as a collection*. "Which of his papers
+  covers wind turbine pitch control?" names a topic and needs the papers read,
+  so it is single_paper_factual however it is phrased.
 
 Also list any titles from above that the question refers to. Use the exact title
 text. Leave the list empty if the question names no particular paper."""
