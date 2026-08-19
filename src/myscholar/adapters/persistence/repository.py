@@ -249,15 +249,16 @@ class PostgresStore(VectorStore):
 
     async def search_summaries(
         self, embedding: Vector, *, model_id: str, limit: int = 6
-    ) -> list[tuple[UUID, float, bool]]:
+    ) -> list[tuple[UUID, float, bool, str]]:
         """The documents whose summaries are closest to a query.
 
         Document-level selection, run before chunk retrieval on cross-paper
         questions so that breadth is decided by what each paper *is* rather
         than by which one repeats the question's words most often.
 
-        Each result carries whether its document is a review, because the
-        caller has to rank those differently and cannot tell from a score.
+        Each result carries whether its document is a review and what kind of
+        document it is, because the caller ranks on both and neither is
+        recoverable from a similarity score.
         """
         async with self.session() as session:
             rows = await session.execute(
@@ -265,6 +266,7 @@ class PostgresStore(VectorStore):
                     DocumentSummary.document_id,
                     DocumentSummary.embedding.cosine_distance(embedding).label("distance"),
                     Document.is_review,
+                    Document.kind,
                 )
                 .join(Document, Document.id == DocumentSummary.document_id)
                 .where(DocumentSummary.model_id == model_id)
@@ -272,8 +274,8 @@ class PostgresStore(VectorStore):
                 .limit(limit)
             )
             return [
-                (document_id, 1.0 - float(distance), bool(is_review))
-                for document_id, distance, is_review in rows
+                (document_id, 1.0 - float(distance), bool(is_review), str(kind))
+                for document_id, distance, is_review, kind in rows
             ]
 
     async def summary_count(self, model_id: str) -> int:

@@ -114,7 +114,7 @@
   {
     "question": "What is the capital of France?",
     "expected": "content",
-    "actual": "ambiguous",
+    "actual": "bibliographic",
     "decided_by": "model",
     "correct": false,
     "papers": []
@@ -322,9 +322,9 @@
   {
     "question": "How is switching loss reduced in these converters?",
     "expected": "methodological",
-    "actual": "cross_paper_synthesis",
+    "actual": "methodological",
     "decided_by": "model",
-    "correct": false,
+    "correct": true,
     "papers": []
   },
   {

@@ -44,9 +44,14 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from myscholar.adapters.persistence.repository import PostgresStore
+from myscholar.domain.enums import DocumentKind
 from myscholar.ports.embedding import Embedder
 
 logger = logging.getLogger(__name__)
+
+#: Slots reserved for the CV and the site pages, so a research question keeps
+#: its papers and a biographical one still reaches the CV.
+_PAGE_SLOTS = 2
 
 #: Questions that are asking for a review, in which case demoting reviews is
 #: exactly backwards.
@@ -130,5 +135,39 @@ class DocumentSelector:
             # Stable, so similarity order survives within each group.
             matches = sorted(matches, key=lambda match: match[2])
 
-        chosen = frozenset(document_id for document_id, _, _ in matches[:limit])
+        chosen = self._quota(matches, limit)
         return Selection(document_ids=chosen, reason=f"{len(chosen)} document(s) by summary")
+
+    @staticmethod
+    def _quota(matches: list[tuple[UUID, float, bool, str]], limit: int) -> frozenset[UUID]:
+        """Fill from papers and pages separately, so neither crowds the other.
+
+        The corpus holds two populations with different roles: twenty papers,
+        which are the primary sources, and five site pages that describe the
+        same work secondhand. A page matches a broad question about the person
+        very strongly — the CV and the projects page are *about* him — so on
+        similarity alone they take slots from the papers that contain the
+        answer.
+
+        Measured: giving the pages summaries, which was itself a fix, dropped
+        selection recall from 88% to 76% and complete answers from 80% to 50%.
+        Papers were displaced by pages describing them.
+
+        A page is still worth having in scope — biographical questions are
+        answered from the CV — so this reserves a couple of slots rather than
+        excluding them. Either side gives up its unused slots to the other, so
+        a corpus of only papers behaves exactly as before.
+        """
+        papers = [m for m in matches if m[3] == DocumentKind.PAPER]
+        others = [m for m in matches if m[3] != DocumentKind.PAPER]
+
+        reserved = min(_PAGE_SLOTS, len(others), max(limit - 1, 0))
+        chosen = [m[0] for m in papers[: limit - reserved]]
+        chosen += [m[0] for m in others[:reserved]]
+
+        # Backfill from whichever side still has candidates, so a short list on
+        # one side never leaves the selection smaller than it should be.
+        if len(chosen) < limit:
+            picked = set(chosen)
+            chosen += [m[0] for m in matches if m[0] not in picked][: limit - len(chosen)]
+        return frozenset(chosen)

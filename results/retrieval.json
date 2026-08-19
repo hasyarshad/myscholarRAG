@@ -844,7 +844,7 @@
       "kind": "paraphrase",
       "expected": "implications-of-the-sensorless-predictive-control-for-line-start-permanent-magnet-synchronous-machine",
       "rank": 2,
-      "context_precision": 0.5
+      "context_precision": 0.625
     },
     {
       "question": "How were volunteers moderating an online forum studied during the pandemic?",
@@ -1105,7 +1105,7 @@
       "kind": "paraphrase",
       "expected": "implications-of-the-sensorless-predictive-control-for-line-start-permanent-magnet-synchronous-machine",
       "rank": 3,
-      "context_precision": 0.25
+      "context_precision": 0.5
     },
     {
       "question": "How were volunteers moderating an online forum studied during the pandemic?",
@@ -1119,7 +1119,7 @@
       "kind": "paraphrase",
       "expected": "an-overview-of-sequential-learning-algorithms-for-single-hidden-layer-networks-current-issues-future-trends",
       "rank": 1,
-      "context_precision": 0.875
+      "context_precision": 1.0
     },
     {
       "question": "How is unbalanced rotation in rotating machinery detected automatically?",
@@ -1154,7 +1154,7 @@
       "kind": "paraphrase",
       "expected": "a-simple-technique-for-studying-chaos-using-jerk-equation-with-discrete-time-sine-map",
       "rank": 1,
-      "context_precision": 0.625
+      "context_precision": 0.75
     },
     {
       "question": "Direct torque control of a four switch two-phase induction motor",
@@ -1181,7 +1181,7 @@
       "question": "Data-driven predictive control that is computationally efficient",
       "kind": "topical",
       "expected": "computationally-efficient-data-driven-model-predictive-control-for-modular-multilevel-converters",
-      "rank": 2,
+      "rank": 4,
       "context_precision": 0.375
     },
     {

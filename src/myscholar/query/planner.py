@@ -184,12 +184,11 @@ class QueryPlanner:
                     ),
                     top_k=self._top_k,
                     rerank_k=10,
-                    # Nine of twenty-five. Six was tighter and let the site
-                    # pages squeeze the papers out: the CV, the projects page
-                    # and the home page all describe the person broadly, so a
-                    # broad question about him matched them and they took four
-                    # of six slots, leaving two for twenty papers.
-                    select_documents=9,
+                    # Eleven of twenty-five: nine papers plus the two slots
+                    # the selector reserves for the CV and the site pages. Set
+                    # at nine, the reservation came out of the papers' share
+                    # and selection recall fell from 88% to 79%.
+                    select_documents=11,
                     max_chunks_per_document=2,
                 )
 
@@ -209,7 +208,8 @@ class QueryPlanner:
                     # does he tune weighting factors" spans whichever papers
                     # tune them — but more narrowly than a synthesis question,
                     # so it selects fewer documents and does not cap them.
-                    select_documents=6,
+                    # Six papers plus the two reserved slots.
+                    select_documents=8,
                     boost_sections=frozenset(
                         {SectionKind.METHODS, SectionKind.EXPERIMENTS, SectionKind.RESULTS}
                     ),

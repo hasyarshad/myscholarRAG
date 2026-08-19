@@ -10,8 +10,8 @@ expanded context blocks the generator would receive.
 | dense | 0.81 | 0.92 | 0.92 | 0.865 | 0.840 | 34/37 | 0 |
 | hybrid | 0.81 | 0.95 | 0.95 | 0.869 | 0.718 | 35/37 | 0 |
 | full | 0.65 | 0.89 | 0.95 | 0.773 | 0.577 | 36/37 | 0 |
-| routed | 0.78 | 0.95 | 0.95 | 0.856 | 0.743 | 35/37 | 0 |
-| routed+rerank | 0.65 | 0.92 | 0.95 | 0.776 | 0.586 | 36/37 | 0 |
+| routed | 0.78 | 0.95 | 0.95 | 0.856 | 0.746 | 35/37 | 0 |
+| routed+rerank | 0.65 | 0.89 | 0.95 | 0.769 | 0.599 | 36/37 | 0 |
 
 ## hit@3 by question kind
 
@@ -21,7 +21,7 @@ expanded context blocks the generator would receive.
 | hybrid | 0.75 | 1.00 | 1.00 | 1.00 | 1.00 | 0.88 | 1.00 |
 | full | 1.00 | 0.50 | 1.00 | 1.00 | 1.00 | 0.75 | 0.80 |
 | routed | 0.75 | 1.00 | 1.00 | 1.00 | 1.00 | 0.88 | 1.00 |
-| routed+rerank | 1.00 | 0.50 | 1.00 | 1.00 | 1.00 | 0.88 | 0.80 |
+| routed+rerank | 1.00 | 0.50 | 1.00 | 1.00 | 1.00 | 0.88 | 0.60 |
 
 ## Questions no configuration answered
 

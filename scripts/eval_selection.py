@@ -53,7 +53,7 @@ RESULTS = Path("results")
 #: What a cross-paper synthesis question selects. Matching the planner rather
 #: than sweeping: this measures the shipped setting, and a sweep that reported
 #: a better number for a value nothing uses would be misleading.
-SELECT_DOCUMENTS = 9
+SELECT_DOCUMENTS = 11
 
 
 async def main() -> None:

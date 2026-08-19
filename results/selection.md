@@ -1,6 +1,6 @@
 # Document selection
 
-10 cross-paper questions, selecting 9 of 25 documents.
+10 cross-paper questions, selecting 11 of 25 documents.
 
 | Measure | Value |
 |---|---|

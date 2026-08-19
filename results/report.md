@@ -1,24 +1,24 @@
 # Evaluation
 
-Generated 2026-08-10 15:17 UTC by `make eval`.
+Generated 2026-08-10 16:40 UTC by `make eval`.
 
 ## The comparison
 
 | Configuration | unsupported claims | correct refusal | over-refusal |
 |---|---|---|---|
-| naive | 55.4% | 61.9% | 12.5% |
-| retrieved | 52.4% | 71.4% | 12.5% |
-| adaptive | 8.5% | 76.2% | 6.2% |
+| naive | 53.6% | 60.0% | 5.9% |
+| retrieved | 52.8% | 55.0% | 5.9% |
+| adaptive | 8.7% | 75.0% | 0.0% |
 
 `naive` is the pipeline this project replaces, reimplemented against the same index, the same embedder and the same generator — so the difference is pipeline design and nothing else. `retrieved` keeps the one-shot generation and swaps in hybrid retrieval, reranking and parent expansion. `adaptive` is the full system.
 
-Basis: naive 231 claims over 28 answers, retrieved 229 claims over 27 answers, adaptive 47 claims over 26 answers.
+Basis: naive 250 claims over 28 answers, retrieved 250 claims over 29 answers, adaptive 46 claims over 25 answers.
 
 The denominators differ because the configurations write differently. That does not mechanically move the *rate*, which is per sentence — but it does mean the adaptive figure rests on far fewer judgements, so each one is worth about two and a half points. Read the direction, not the decimal.
 
 Part of what separates the rows is style rather than retrieval: the adaptive system's prompt requires every factual sentence to carry a citation, which shapes what it is willing to write. That is a design choice being measured, not a confound — but it is why the middle row matters.
 
-Retrieval alone moved the unsupported-claim rate by 3.0 points. The verification loop moved it by 43.9. Whatever else the retrieval work bought, it was not groundedness — and without the middle row the loop's share would have been credited to it.
+Retrieval alone moved the unsupported-claim rate by 0.8 points. The verification loop moved it by 44.1. Whatever else the retrieval work bought, it was not groundedness — and without the middle row the loop's share would have been credited to it.
 
 `retrieved` keeps the cross-encoder, which the shipped configuration no longer uses — it measured worse on this corpus (see [retrieval](./retrieval.md)). The row is an ablation of retrieval quality, not a description of what runs.
 
@@ -26,11 +26,11 @@ Retrieval alone moved the unsupported-claim rate by 3.0 points. The verification
 
 | Stage | measures | status | took |
 |---|---|---|---|
-| [judge](./judge.md) | can the faithfulness judge be trusted | ok | 8s |
-| [selection](./selection.md) | are the right papers brought into scope | skipped | 0s |
-| [retrieval](./retrieval.md) | is the right document found | skipped | 0s |
-| [routing](./routing.md) | is the right strategy chosen | skipped | 0s |
-| [generation](./generation.md) | is the answer supported, and does it decline what it cannot answer | skipped | 0s |
+| [judge](./judge.md) | can the faithfulness judge be trusted | ok | 9s |
+| [selection](./selection.md) | are the right papers brought into scope | ok | 6s |
+| [retrieval](./retrieval.md) | is the right document found | ok | 803s |
+| [routing](./routing.md) | is the right strategy chosen | ok | 13s |
+| [generation](./generation.md) | is the answer supported, and does it decline what it cannot answer | ok | 1863s |
 
 ## Judge calibration
 
@@ -45,7 +45,7 @@ The faithfulness numbers above are only as good as the model producing them, so 
 
 | adaptive | unsupported claims | correct refusal | latency | claims judged |
 |---|---|---|---|---|
-| without reranking | 8.5% | 76.2% | 19.7s | 47 |
+| without reranking | 8.7% | 75.0% | 30.4s | 46 |
 | with reranking | 8.3% | 76.2% | 21.8s | 48 |
 
 Nothing separates them end to end — one claim in forty-seven, and identical refusal behaviour — while reranking costs about two seconds a question.
@@ -62,8 +62,8 @@ Which papers a cross-paper question is about, decided before any passage is fetc
 
 | Measure | Value |
 |---|---|
-| Recall of needed documents | 88% |
-| Questions with nothing missing | 80% |
+| Recall of needed documents | 76% |
+| Questions with nothing missing | 50% |
 
 ## Retrieval
 
@@ -72,8 +72,8 @@ Which papers a cross-paper question is about, decided before any passage is fetc
 | dense | 0.81 | 0.92 | 0.865 | 37 |
 | hybrid | 0.81 | 0.95 | 0.869 | 37 |
 | full | 0.65 | 0.89 | 0.773 | 37 |
-| routed | 0.76 | 0.89 | 0.815 | 37 |
-| routed+rerank | 0.59 | 0.86 | 0.726 | 37 |
+| routed | 0.78 | 0.95 | 0.856 | 37 |
+| routed+rerank | 0.65 | 0.89 | 0.769 | 37 |
 
 ## Reading these
 

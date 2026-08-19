@@ -58,9 +58,25 @@ _TEXTUAL_REFUSAL = re.compile(
     r"|unable to (answer|determine|find)"
     r"|i (don'?t|do not) (have|know)"
     r"|there is no (mention|information|reference|evidence)"
-    r"|the (excerpts?|context|provided text|passages?) (do|does) not)",
+    r"|the (excerpts?|context|provided text|passages?) (do|does) not"
+    # "None of the cited papers reference photovoltaic systems" is as explicit
+    # a refusal as exists, and was being scored as a hallucination. Adopted
+    # because it is balanced — one answer each for the naive pipeline and the
+    # adaptive one — rather than because it improved the favourite.
+    r"|none of (the|his|these)\b[^.?!]{0,60}"
+    r"\b(reference|mention|discuss|cover|address|study|examine)"
+    r"|no (paper|study|work|excerpt)s? (of his )?(reference|mention|discuss|cover|address))",
     re.IGNORECASE,
 )
+
+# Deliberately *not* matched: "the excerpts focus on [other topics]".
+#
+# It is arguably a refusal — listing what the corpus does cover, in place of
+# what was asked — and it is the behaviour the nearest-topics design aims for.
+# It is left out because it reclassifies one answer, and that answer is the
+# adaptive system's: a scoring change that only ever helps the configuration
+# being advocated for is one to decline, however good the argument for it.
+# The reported refusal rate is therefore conservative.
 
 
 #: Markdown emphasis, stripped before matching.
