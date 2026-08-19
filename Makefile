@@ -100,6 +100,9 @@ eval-judge:  ## Check the faithfulness judge against known cases
 eval-refusal:  ## Just the adaptive system's refusal behaviour, no baselines
 	uv run python scripts/eval_generation.py --configs adaptive
 
+corpus-check:  ## Assert the invariants a healthy corpus satisfies
+	uv run myscholar papers check
+
 papers:  ## List what is indexed
 	uv run myscholar papers list
 	@echo

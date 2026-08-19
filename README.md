@@ -177,7 +177,9 @@ uv run python scripts/eval_generation.py    # naive vs retrieved vs adaptive
 uv run python scripts/eval_retrieval.py     # dense vs hybrid vs rerank vs routed
 uv run python scripts/eval_routing.py       # classification accuracy
 uv run python scripts/eval_generation.py --configs adaptive   # refusal only, faster
+uv run python scripts/eval_selection.py     # which papers a question is about
 uv run python scripts/check_extraction.py   # PDF extraction sanity, ~20s
+uv run myscholar papers check               # corpus invariants, instant
 ```
 
 Results land in `results/` as markdown and JSON. `results/report.md` is the

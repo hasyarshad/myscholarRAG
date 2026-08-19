@@ -10,8 +10,8 @@ expanded context blocks the generator would receive.
 | dense | 0.81 | 0.92 | 0.92 | 0.865 | 0.840 | 34/37 | 0 |
 | hybrid | 0.81 | 0.95 | 0.95 | 0.869 | 0.718 | 35/37 | 0 |
 | full | 0.65 | 0.89 | 0.95 | 0.773 | 0.577 | 36/37 | 0 |
-| routed | 0.78 | 0.92 | 0.92 | 0.838 | 0.711 | 33/36 | 1 |
-| routed+rerank | 0.61 | 0.89 | 0.92 | 0.746 | 0.578 | 34/36 | 1 |
+| routed | 0.78 | 0.95 | 0.95 | 0.856 | 0.743 | 35/37 | 0 |
+| routed+rerank | 0.65 | 0.92 | 0.95 | 0.776 | 0.586 | 36/37 | 0 |
 
 ## hit@3 by question kind
 
@@ -20,8 +20,8 @@ expanded context blocks the generator would receive.
 | dense | 0.75 | 1.00 | 1.00 | 0.83 | 1.00 | 0.88 | 1.00 |
 | hybrid | 0.75 | 1.00 | 1.00 | 1.00 | 1.00 | 0.88 | 1.00 |
 | full | 1.00 | 0.50 | 1.00 | 1.00 | 1.00 | 0.75 | 0.80 |
-| routed | 0.75 | 1.00 | 1.00 | 1.00 | 1.00 | 0.75 | 1.00 |
-| routed+rerank | 1.00 | 0.50 | 1.00 | 1.00 | 1.00 | 0.75 | 0.80 |
+| routed | 0.75 | 1.00 | 1.00 | 1.00 | 1.00 | 0.88 | 1.00 |
+| routed+rerank | 1.00 | 0.50 | 1.00 | 1.00 | 1.00 | 0.88 | 0.80 |
 
 ## Questions no configuration answered
 
@@ -32,13 +32,10 @@ expanded context blocks the generator would receive.
 - 2 -> 1  (identifier) Which paper uses NSGA-II with TOPSIS for weighting factor selection?
 - 3 -> 1  (identifier) Which paper concerns LSPMSM stator winding inter-turn faults?
 - 4 -> 2  (paraphrase) How is torque ripple reduced without using a speed sensor?
-- 1 -> —  (paraphrase) What survey reviews algorithms that learn incrementally from streaming data?
 - 6 -> 2  (topical) Comparing field oriented control against model predictive control
-- 2 -> 1  (topical) Data-driven predictive control that is computationally efficient
 - 2 -> 1  (crossdomain) Which paper validates a three-factor measurement scale?
 - 2 -> 1  (identifier) Which work applies artificial bee colony optimisation?
 - 5 -> 1  (confusable) Which multilevel converter paper appeared in an IET journal?
-- 1 -> —  (deepcontent) Which work uses Lyapunov exponents and bifurcation diagrams as evidence?
 - 1 -> 3  (deepcontent) Which paper reduces electromagnetic interference by varying the switching frequency?
 - 3 -> 1  (ambiguousdomain) Which control paper avoids needing a mechanical position measurement?
 - 3 -> —  (ambiguousdomain) Which inverter paper deals with the DC-link capacitor voltages staying balanced?

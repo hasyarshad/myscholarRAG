@@ -857,8 +857,8 @@
       "question": "What survey reviews algorithms that learn incrementally from streaming data?",
       "kind": "paraphrase",
       "expected": "an-overview-of-sequential-learning-algorithms-for-single-hidden-layer-networks-current-issues-future-trends",
-      "rank": null,
-      "context_precision": 0.0
+      "rank": 1,
+      "context_precision": 1.0
     },
     {
       "question": "How is unbalanced rotation in rotating machinery detected automatically?",
@@ -920,8 +920,8 @@
       "question": "Data-driven predictive control that is computationally efficient",
       "kind": "topical",
       "expected": "computationally-efficient-data-driven-model-predictive-control-for-modular-multilevel-converters",
-      "rank": 1,
-      "context_precision": 0.625
+      "rank": 2,
+      "context_precision": 0.5
     },
     {
       "question": "What did the Reddit study find about moderator behaviour?",
@@ -983,8 +983,8 @@
       "question": "Which work uses Lyapunov exponents and bifurcation diagrams as evidence?",
       "kind": "deepcontent",
       "expected": "a-simple-technique-for-studying-chaos-using-jerk-equation-with-discrete-time-sine-map",
-      "rank": null,
-      "context_precision": 0.0
+      "rank": 1,
+      "context_precision": 1.0
     },
     {
       "question": "Which paper reduces electromagnetic interference by varying the switching frequency?",
@@ -1104,8 +1104,8 @@
       "question": "How is torque ripple reduced without using a speed sensor?",
       "kind": "paraphrase",
       "expected": "implications-of-the-sensorless-predictive-control-for-line-start-permanent-magnet-synchronous-machine",
-      "rank": 2,
-      "context_precision": 0.375
+      "rank": 3,
+      "context_precision": 0.25
     },
     {
       "question": "How were volunteers moderating an online forum studied during the pandemic?",
@@ -1118,8 +1118,8 @@
       "question": "What survey reviews algorithms that learn incrementally from streaming data?",
       "kind": "paraphrase",
       "expected": "an-overview-of-sequential-learning-algorithms-for-single-hidden-layer-networks-current-issues-future-trends",
-      "rank": null,
-      "context_precision": 0.0
+      "rank": 1,
+      "context_precision": 0.875
     },
     {
       "question": "How is unbalanced rotation in rotating machinery detected automatically?",
@@ -1147,14 +1147,14 @@
       "kind": "paraphrase",
       "expected": "linear-quadratic-gaussian-control-for-uavs-with-improved-state-estimation-against-gyroscope-and-accelerometer-biases",
       "rank": 1,
-      "context_precision": 0.625
+      "context_precision": 0.375
     },
     {
       "question": "How is deterministic chaos generated and analysed with a simple equation?",
       "kind": "paraphrase",
       "expected": "a-simple-technique-for-studying-chaos-using-jerk-equation-with-discrete-time-sine-map",
       "rank": 1,
-      "context_precision": 0.875
+      "context_precision": 0.625
     },
     {
       "question": "Direct torque control of a four switch two-phase induction motor",
@@ -1182,7 +1182,7 @@
       "kind": "topical",
       "expected": "computationally-efficient-data-driven-model-predictive-control-for-modular-multilevel-converters",
       "rank": 2,
-      "context_precision": 0.5
+      "context_precision": 0.375
     },
     {
       "question": "What did the Reddit study find about moderator behaviour?",
@@ -1244,8 +1244,8 @@
       "question": "Which work uses Lyapunov exponents and bifurcation diagrams as evidence?",
       "kind": "deepcontent",
       "expected": "a-simple-technique-for-studying-chaos-using-jerk-equation-with-discrete-time-sine-map",
-      "rank": null,
-      "context_precision": 0.0
+      "rank": 1,
+      "context_precision": 0.75
     },
     {
       "question": "Which paper reduces electromagnetic interference by varying the switching frequency?",

@@ -402,6 +402,48 @@ def papers_import_metadata(
         console.print(f"[dim]{skipped} entry(ies) not marked verified, left unchanged[/dim]")
 
 
+@papers_app.command("check")
+def papers_check() -> None:
+    """Check the index against the invariants a healthy corpus satisfies.
+
+    Ingestion is where this project has gone wrong most often, and every time
+    it went wrong quietly — a text layer repeating every line, a year read off
+    an education date, a title taken from a publisher banner. All produced an
+    index that loaded cleanly and answered plausibly.
+
+    These are invariants rather than accuracy measurements: statements true of
+    every well-formed document here, so a violation means something upstream
+    broke even where nobody can say what the right answer was.
+    """
+    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
+    from myscholar.ingest.health import Severity, check
+
+    settings = load_settings()
+
+    async def _run() -> Any:
+        store = PostgresStore(create_engine(settings.database.url))
+        stats = await store.corpus_stats()
+        return stats, check(stats)
+
+    stats, findings = asyncio.run(_run())
+    failures = [f for f in findings if f.severity is Severity.FAIL]
+    warnings = [f for f in findings if f.severity is Severity.WARN]
+
+    console.print(f"checked [bold]{len(stats)}[/bold] document(s)")
+    for finding in failures:
+        console.print(f"[red]FAIL[/red] {finding.document[:52]}\n     {finding.message}")
+    for finding in warnings:
+        console.print(f"[yellow]warn[/yellow] {finding.document[:52]}\n     {finding.message}")
+
+    if not findings:
+        console.print("[green]every invariant holds[/green]")
+    else:
+        console.print(f"\n{len(failures)} failure(s), {len(warnings)} warning(s)")
+
+    if failures:
+        raise typer.Exit(1)
+
+
 @papers_app.command("show")
 def papers_show(
     slug: Annotated[str, typer.Argument(help="Document slug, or any part of the title.")],
@@ -778,6 +820,12 @@ def sync(
         console.print("[bold]indexing new sources[/bold]")
         ingest_run()
         ingest_web()
+        # Re-ingesting replaces the document row, and the summary goes with it.
+        # Left to a separate command that nobody remembers to run, the corpus
+        # sits half-summarised and the un-summarised documents are invisible to
+        # document selection — silently, which is how the CV and every site
+        # page dropped out of scope after a routine page re-ingest.
+        ingest_summarise()
         console.print()
 
     async def _run() -> Any:

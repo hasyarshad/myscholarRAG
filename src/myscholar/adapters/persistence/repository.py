@@ -28,6 +28,7 @@ from myscholar.adapters.persistence.orm import (
     Section,
 )
 from myscholar.domain.enums import DocumentKind
+from myscholar.ingest.health import DocumentStats
 from myscholar.ingest.sync import IndexedDocument
 from myscholar.ports.embedding import Vector
 from myscholar.ports.store import SearchFilters, SearchHit, VectorStore
@@ -285,6 +286,44 @@ class PostgresStore(VectorStore):
                 )
                 or 0
             )
+
+    async def corpus_stats(self) -> list[DocumentStats]:
+        """What the index actually holds, per document, for the health check."""
+        async with self.session() as session:
+            rows = await session.execute(
+                text("""
+                select d.title, d.kind, d.page_count, d.metadata_verified, d.doi,
+                       count(distinct s.id)                                    as sections,
+                       count(distinct s.id) filter (where s.kind = 'other')    as unclassified,
+                       count(distinct s.id) filter (
+                           where s.kind in ('references', 'acknowledgements'))  as excluded,
+                       count(c.id)                                             as chunks,
+                       count(c.id) filter (where length(trim(c.text)) = 0)     as empty_chunks,
+                       count(distinct ds.document_id)                          as summaries
+                from documents d
+                left join sections s on s.document_id = d.id
+                left join chunks c on c.section_id = s.id
+                left join document_summaries ds on ds.document_id = d.id
+                group by d.id
+                order by d.title
+                """)
+            )
+            return [
+                DocumentStats(
+                    title=row.title,
+                    kind=row.kind,
+                    pages=int(row.page_count or 0),
+                    chunks=int(row.chunks or 0),
+                    sections=int(row.sections or 0),
+                    unclassified_sections=int(row.unclassified or 0),
+                    excluded_sections=int(row.excluded or 0),
+                    empty_chunks=int(row.empty_chunks or 0),
+                    has_summary=bool(row.summaries),
+                    verified=bool(row.metadata_verified),
+                    doi=row.doi,
+                )
+                for row in rows
+            ]
 
     # -- conversations -----------------------------------------------------
 

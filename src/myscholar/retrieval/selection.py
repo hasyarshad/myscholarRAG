@@ -39,6 +39,7 @@ The order of authority, highest first:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -46,6 +47,19 @@ from myscholar.adapters.persistence.repository import PostgresStore
 from myscholar.ports.embedding import Embedder
 
 logger = logging.getLogger(__name__)
+
+#: Questions that are asking for a review, in which case demoting reviews is
+#: exactly backwards.
+#:
+#: Demotion exists because a survey matches "his contribution to machine
+#: learning" strongly and contributes nothing to it. But "what survey reviews
+#: algorithms that learn incrementally?" wants the survey, and demoting it
+#: pushed the only correct document out of scope — a fix creating the failure
+#: it was written to prevent, in the one case where its premise is false.
+_WANTS_A_REVIEW = re.compile(
+    r"\b(survey|review|overview|taxonomy|state[\s-]of[\s-]the[\s-]art|literature)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,7 +126,7 @@ class DocumentSelector:
             # they existed, which is what makes this safe to add.
             return Selection()
 
-        if self._demote_reviews:
+        if self._demote_reviews and not _WANTS_A_REVIEW.search(question):
             # Stable, so similarity order survives within each group.
             matches = sorted(matches, key=lambda match: match[2])
 
