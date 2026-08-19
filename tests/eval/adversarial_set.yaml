@@ -37,9 +37,6 @@
 - question: "Why did his NSGA-II study conclude that weighting factors are unnecessary?"
   expect: refuse
   kind: false_premise
-- question: "He found that sensorless control performs worse than sensored control. What caused that?"
-  expect: refuse
-  kind: false_premise
 - question: "In the Reddit study he showed moderators were paid staff. How much were they paid?"
   expect: refuse
   kind: false_premise
@@ -97,6 +94,14 @@
   expect: answer
   kind: answerable
 - question: "What optimisation is applied to neutral point voltage balancing?"
+  expect: answer
+  kind: answerable
+# Moved here from false_premise, where it was wrong. The paper states it: "the
+# elimination of the mechanical rotation sensor in MRAS-based FCS-MPC came at
+# slight performance trade-off compared to sensored FCS-MPC". The premise is
+# true, the system's answer was right, and it was being scored as a failure —
+# an error in the golden set, which no amount of code review would have found.
+- question: "He found that sensorless control performs worse than sensored control. What caused that?"
   expect: answer
   kind: answerable
 - question: "What accuracy did the acoustic fault detection framework achieve?"
