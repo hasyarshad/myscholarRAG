@@ -73,13 +73,47 @@ cmd_start() {
     # five idle minutes, and the next question pays a multi-second reload that
     # is easy to misread as a slow pipeline.
     #
-    # MAX_LOADED_MODELS=3 lets the generator, the utility model and (later) the
-    # reranker stay resident together. There is 64GB of VRAM across two cards,
-    # so nothing needs to be evicted to make room.
+    # MAX_LOADED_MODELS=2 for the generator and the utility model. Both must be
+    # resident at once, because one question alternates between them several
+    # times — route and grade on the small one, generation on the large one.
+    #
+    # NUM_PARALLEL=1, and this is the setting that matters. It was 4, which
+    # allocates four KV-cache slots per model at full context and inflated both
+    # models about fourfold: `ollama ps` reported qwen3:14b at 38GB and
+    # qwen3:4b-instruct at 22GB. That is 60GB of the 64GB across two cards, so
+    # the two could not be resident together and every generate-then-grade
+    # transition forced a 38GB eviction and a 22GB load. Measured with curl
+    # alone, no application code involved: the 14b request returned in 9.2s and
+    # an identical 4b request sent immediately afterwards had still not returned
+    # after 200 seconds. The same request took 1.8s when the model was already
+    # resident.
+    #
+    # In the pipeline this surfaced as an intermittent wrong answer rather than
+    # as a slow one: the stalled call blew the 90s reasoning deadline, the graph
+    # took its budget_exhausted edge, and the question came back "I don't have
+    # anything on that in these papers" — for a question the corpus answers, on
+    # every second attempt. Nothing in the retrieval or generation code was
+    # involved and no error was logged.
+    #
+    # Four parallel slots buy nothing here: this is a single-user development
+    # box serving one question at a time. Concurrency belongs in production,
+    # which runs against Groq and never loads a model locally at all.
+    # CONTEXT_LENGTH caps the window both models are loaded with. Without it,
+    # dropping NUM_PARALLEL to 1 had the opposite effect to the one intended:
+    # Ollama stopped rationing context between slots and gave qwen3:4b-instruct
+    # its full 262144-token window, which weighs 45GB and no longer fitted, so
+    # `ollama ps` showed it running 5%/95% CPU/GPU. Trading a stall for a
+    # partial CPU offload is not a fix.
+    #
+    # 16384 is set from the measured prompts rather than guessed: the largest
+    # request the pipeline sends is about 23,000 characters, roughly 6,000
+    # tokens, and generation adds a few hundred more. That leaves both models
+    # wholly on the GPU with room over.
     OLLAMA_HOST="127.0.0.1:$PORT" \
     OLLAMA_KEEP_ALIVE=-1 \
-    OLLAMA_MAX_LOADED_MODELS=3 \
-    OLLAMA_NUM_PARALLEL=4 \
+    OLLAMA_MAX_LOADED_MODELS=2 \
+    OLLAMA_NUM_PARALLEL=1 \
+    OLLAMA_CONTEXT_LENGTH=16384 \
         nohup "$BIN" serve >"$LOGFILE" 2>&1 &
     echo $! >"$PIDFILE"
 

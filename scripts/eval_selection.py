@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import yaml
@@ -56,6 +57,23 @@ RESULTS = Path("results")
 SELECT_DOCUMENTS = 11
 
 
+@dataclass(frozen=True, slots=True)
+class Row:
+    """One question's selection result.
+
+    A record rather than a dict because every read of a ``dict[str, object]``
+    comes back as ``object``: ``sum(float(r["recall"]) ...)`` type-checks only
+    by casting, and ``r["missing"]`` needed a ``type: ignore`` to be joined.
+    Naming the five fields removes the casts and the suppression together.
+    """
+
+    question: str
+    kind: str
+    expected: tuple[str, ...]
+    missing: tuple[str, ...]
+    recall: float
+
+
 async def main() -> None:
     cases = [c for c in yaml.safe_load(TEST_SET.read_text("utf-8")) if isinstance(c, dict)]
     settings = load_settings()
@@ -66,7 +84,7 @@ async def main() -> None:
     slug_by_id = {d.id: d.slug for d in documents}
     selector = DocumentSelector(store=store, embedder=container.embedder)
 
-    rows: list[dict[str, object]] = []
+    rows: list[Row] = []
     for case in cases:
         selection = await selector.select(
             case["question"], titles=(), title_to_id={}, limit=SELECT_DOCUMENTS
@@ -75,23 +93,23 @@ async def main() -> None:
         expected = set(case["expect"])
         found = expected & chosen
         rows.append(
-            {
-                "question": case["question"],
-                "kind": case["kind"],
-                "expected": sorted(expected),
-                "missing": sorted(expected - chosen),
-                "recall": len(found) / len(expected),
-            }
+            Row(
+                question=case["question"],
+                kind=case["kind"],
+                expected=tuple(sorted(expected)),
+                missing=tuple(sorted(expected - chosen)),
+                recall=len(found) / len(expected),
+            )
         )
-        mark = "OK " if not rows[-1]["missing"] else "GAP"
+        mark = "OK " if not rows[-1].missing else "GAP"
         print(f"  {mark} {len(found)}/{len(expected)}  {case['question'][:58]}", flush=True)
 
-    recall = sum(float(r["recall"]) for r in rows) / max(len(rows), 1)
-    complete = sum(1 for r in rows if not r["missing"]) / max(len(rows), 1)
+    recall = sum(r.recall for r in rows) / max(len(rows), 1)
+    complete = sum(1 for r in rows if not r.missing) / max(len(rows), 1)
 
-    by_kind: dict[str, list[dict[str, object]]] = {}
+    by_kind: dict[str, list[Row]] = {}
     for row in rows:
-        by_kind.setdefault(str(row["kind"]), []).append(row)
+        by_kind.setdefault(row.kind, []).append(row)
 
     lines = [
         "# Document selection",
@@ -116,20 +134,23 @@ async def main() -> None:
         "|---|---|---|",
     ]
     for kind, group in sorted(by_kind.items()):
-        hit = sum(float(r["recall"]) for r in group) / len(group)
+        hit = sum(r.recall for r in group) / len(group)
         lines.append(f"| `{kind}` | {hit:.0%} | {len(group)} |")
 
-    if gaps := [r for r in rows if r["missing"]]:
+    if gaps := [r for r in rows if r.missing]:
         lines += ["", "## Documents selection did not reach", ""]
         lines += [
-            f"- **{r['question']}**\n  - missing: {', '.join(str(m)[:52] for m in r['missing'])}"  # type: ignore[union-attr]
-            for r in gaps
+            f"- **{r.question}**\n  - missing: {', '.join(m[:52] for m in r.missing)}" for r in gaps
         ]
     lines.append("")
 
     RESULTS.mkdir(exist_ok=True)
     (RESULTS / "selection.md").write_text("\n".join(lines), "utf-8")
-    (RESULTS / "selection.json").write_text(json.dumps(rows, indent=2), "utf-8")
+    # asdict, because Row is a dataclass and json.dumps cannot serialise one.
+    # The stored shape is unchanged: the same five keys the dict carried.
+    (RESULTS / "selection.json").write_text(
+        json.dumps([asdict(r) for r in rows], indent=2), "utf-8"
+    )
 
     print(f"\nrecall {recall:.0%} | complete {complete:.0%}")
     print(f"written to {RESULTS / 'selection.md'}")

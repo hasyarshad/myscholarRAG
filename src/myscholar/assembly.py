@@ -38,9 +38,8 @@ def build_retriever(
     return HybridRetriever(
         store=store,
         embedder=container.embedder,
-        reranker=container.reranker,
         top_k=settings.retrieval.top_k,
-        rerank_k=settings.retrieval.rerank_k,
+        context_blocks=settings.retrieval.context_blocks,
         window=settings.retrieval.window,
         dense_weight=settings.retrieval.dense_weight,
         lexical_weight=settings.retrieval.lexical_weight,
@@ -69,14 +68,14 @@ def build_router(
         ),
         planner=QueryPlanner(
             top_k=settings.retrieval.top_k,
-            rerank_k=settings.retrieval.rerank_k,
+            context_blocks=settings.retrieval.context_blocks,
             person_name=settings.person.name,
         ),
         transformer=QueryTransformer(container.utility, titles=titles),
         retriever=retriever or build_retriever(settings, container, store),
         store=store,
         selector=DocumentSelector(store=store, embedder=container.embedder),
-        mode=RetrievalMode.FULL if settings.retrieval.rerank else RetrievalMode.HYBRID,
+        mode=RetrievalMode.HYBRID,
     )
 
 
@@ -93,7 +92,6 @@ def build_budget(settings: Settings) -> Budget:
     return Budget(
         max_steps=settings.reasoning.max_steps,
         max_retrieval_rounds=settings.reasoning.max_retrieval_rounds,
-        max_regenerations=settings.reasoning.max_regenerations,
         deadline_seconds=settings.reasoning.deadline_seconds,
     )
 

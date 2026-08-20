@@ -14,9 +14,11 @@ from hypothesis import strategies as st
 
 from myscholar.domain.documents import ContextBlock
 from myscholar.generation.citations import (
+    CitationIssue,
     drop_unsupported,
     is_factual,
     parse_markers,
+    rejoin,
     strip_markers,
     verify,
 )
@@ -218,3 +220,113 @@ class TestVerificationProperties:
     @given(st.text(alphabet=st.characters(min_codepoint=32, max_codepoint=126), max_size=200))
     def test_stripping_markers_never_leaves_one(self, text: str) -> None:
         assert not parse_markers(strip_markers(text))
+
+
+class TestATopicSentenceMayNameSomethingWithADigitInIt:
+    """A digit inside a name is not a measurement.
+
+    The rule exempting a leading topic sentence once required the sentence to
+    contain no digit at all. That is right for "the framework reached 99.64%"
+    and wrong for "he has conducted research related to COVID-19", where the
+    digits belong to the name of the subject.
+
+    The cost was visible to a reader. Asked "has he done any work related to
+    COVID-19?", the model opened with the sentence that answers it, the checker
+    read "-19" as an uncited figure and deleted the opening, and what survived
+    began "Findings reveal that toxic content is widespread..." — an answer to
+    a question the reader could no longer see.
+    """
+
+    def test_a_name_containing_a_digit_is_still_a_topic_sentence(self) -> None:
+        opener = (
+            "Muhammad Haseeb Arshad has conducted research related to COVID-19, "
+            "focusing on content moderation on Reddit"
+        )
+
+        assert not is_factual(opener, leading=True), (
+            "the sentence that answers the question was treated as an uncited claim"
+        )
+
+    def test_a_stated_figure_still_needs_its_citation(self) -> None:
+        for claim in (
+            "His framework has reached 99.64% accuracy on the held-out set",
+            "He has published work in 2023 on predictive control",
+            "The study has analysed 1.8 million Reddit posts",
+        ):
+            assert is_factual(claim, leading=True), f"unchecked figure: {claim}"
+
+    def test_the_exemption_is_still_only_for_the_opening_sentence(self) -> None:
+        later = "He has conducted research related to COVID-19"
+
+        assert is_factual(later, leading=False)
+
+
+class TestWhatSurvivesDroppingReadsAsProse:
+    """Removing a sentence is invisible to the reader; its seams are not.
+
+    An answer is judged as prose. One that opens mid-comparison — "In another
+    work, MOPSO combined with Vikor was applied..." — reads as broken however
+    sound the surviving claims are, and the reader cannot tell that a sentence
+    was removed, only that the answer does not make sense.
+    """
+
+    def _issues(self, *sentences: str) -> list[CitationIssue]:
+        return [CitationIssue(kind="unsupported", detail="x", sentence=s) for s in sentences]
+
+    def test_a_backward_reference_left_at_the_front_is_lifted_off(self) -> None:
+        text = (
+            "Weighting factors are tuned by optimisation [C1]. "
+            "In another work, MOPSO with Vikor was applied [C2]."
+        )
+
+        kept = drop_unsupported(
+            text, self._issues("Weighting factors are tuned by optimisation [C1].")
+        )
+
+        assert kept == "MOPSO with Vikor was applied [C2]."
+
+    def test_a_backward_reference_further_in_still_has_something_to_refer_to(self) -> None:
+        text = "First [C1]. Second [C2]. In addition, third [C3]."
+
+        kept = drop_unsupported(text, self._issues("Second [C2]."))
+
+        assert kept == "First [C1]. In addition, third [C3]."
+
+    def test_doubled_terminal_punctuation_is_collapsed(self) -> None:
+        text = "A claim [C1]. The current exceeded its rated value [C4].."
+
+        kept = drop_unsupported(text, self._issues("A claim [C1]."))
+
+        assert kept == "The current exceeded its rated value [C4]."
+
+    def test_dropping_everything_returns_nothing_rather_than_punctuation(self) -> None:
+        assert drop_unsupported("Only one [C1].", self._issues("Only one [C1].")) == ""
+
+
+class TestBothDropPathsTidyTheirSeams:
+    """Two places remove sentences, and only one used to clean up after itself.
+
+    Citation salvage lifted an orphaned backward reference off the front and
+    collapsed doubled punctuation. The grounding drop in the reasoning loop
+    joined the survivors directly, so the same answer came back opening "In
+    another work, MOPSO with Vikor was applied..." with the work it was another
+    of already deleted. Shared now, so a fix to one is a fix to both.
+    """
+
+    def test_an_orphaned_opener_is_lifted_off(self) -> None:
+        kept = ["In another work, MOPSO with Vikor was applied [C2].", "It reduces ripple [C3]."]
+
+        assert rejoin(kept) == "MOPSO with Vikor was applied [C2]. It reduces ripple [C3]."
+
+    def test_doubled_terminal_punctuation_collapses(self) -> None:
+        assert rejoin(["The value exceeded its rating [C4].."]) == (
+            "The value exceeded its rating [C4]."
+        )
+
+    def test_nothing_surviving_returns_nothing(self) -> None:
+        assert rejoin([]) == ""
+
+    def test_a_backward_reference_further_in_is_left_alone(self) -> None:
+        kept = ["First [C1].", "In addition, second [C2]."]
+
+        assert rejoin(kept) == "First [C1]. In addition, second [C2]."

@@ -1,12 +1,18 @@
-# Packaging artifact only.
+# The whole system in containers: database plus API.
 #
-# The development workstation is a shared lab machine with no root access and
-# no docker group membership, so this file cannot be exercised there — local
-# Postgres runs via scripts/db.sh against a conda-provided binary instead.
+#   docker compose -f docker/compose.yaml up --build
 #
-# This exists so that someone else, on a machine where Docker is available, can
-# bring the system up without reproducing the userspace setup. It is verified
-# in Phase 7A, not before; until then treat it as untested.
+# Two things worth knowing before you run it.
+#
+# **The database here is separate from the development one.** Local development
+# uses Postgres from conda on port 5433 (`make db-up`), holding the real index.
+# This stack brings up its own empty Postgres on 5434 so the two cannot collide
+# and a container experiment can never touch the corpus. Load it with
+# `make compose-restore`.
+#
+# **The port offsets are deliberate.** 5434 rather than 5432 because a
+# developer machine usually already has something on 5432, and finding out by
+# way of a silent connection to the wrong database is a bad afternoon.
 
 name: myscholar
 
@@ -18,8 +24,7 @@ services:
       POSTGRES_PASSWORD: myscholar
       POSTGRES_DB: myscholar
     ports:
-      # 5433 on the host, so an existing local Postgres on 5432 is untouched.
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
@@ -28,6 +33,41 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      # 8001, not 8000: `myscholar serve` uses 8000 during development, and a
+      # container that silently fails to bind while a dev server answers on the
+      # same port is a genuinely confusing five minutes.
+      - "8001:8080"
+    environment:
+      # Service name, not localhost: inside a compose network, `db` resolves to
+      # the database container. `localhost` there means the API container
+      # itself, which is running no database.
+      MYSCHOLAR_DATABASE__URL: postgresql+asyncpg://myscholar:myscholar@db:5432/myscholar
+
+      # This stack is for exercising the container, not for answering questions,
+      # so generation defaults to the fake model — it needs no API key and no
+      # network. Override both to talk to a real one:
+      #
+      #   MYSCHOLAR_LLM__PROVIDER=groq
+      #   MYSCHOLAR_LLM__API_KEY=...
+      MYSCHOLAR_LLM__PROVIDER: ${MYSCHOLAR_LLM__PROVIDER:-fake}
+      MYSCHOLAR_LLM__API_KEY: ${MYSCHOLAR_LLM__API_KEY:-}
+
+      # The one place this differs from production: an empty database needs its
+      # schema, and there is no admin running migrations by hand here.
+      MYSCHOLAR_DATABASE__MIGRATE_ON_STARTUP: "true"
+    depends_on:
+      db:
+        # Not just "started": Postgres accepts TCP connections several seconds
+        # before it will answer queries, so waiting on the port alone produces
+        # an API that starts, fails its first query, and reports itself unready.
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

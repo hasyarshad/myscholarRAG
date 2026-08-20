@@ -1,0 +1,478 @@
+[
+  {
+    "question": "talk to me about his work related to chaos theory",
+    "kind": "probe",
+    "topic": "chaos",
+    "papers_on_topic": 2,
+    "expect": null,
+    "cls": "single_paper_factual",
+    "select_documents": 0,
+    "runs_selection": false,
+    "cap": null,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "single_paper_factual"
+    ]
+  },
+  {
+    "question": "tell me about his chaos work",
+    "kind": "probe",
+    "topic": "chaos",
+    "papers_on_topic": 2,
+    "expect": null,
+    "cls": "cross_paper_synthesis",
+    "select_documents": 11,
+    "runs_selection": true,
+    "cap": 2,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "cross_paper_synthesis"
+    ]
+  },
+  {
+    "question": "what has he done on chaos?",
+    "kind": "probe",
+    "topic": "chaos",
+    "papers_on_topic": 2,
+    "expect": null,
+    "cls": "single_paper_factual",
+    "select_documents": 0,
+    "runs_selection": false,
+    "cap": null,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "single_paper_factual"
+    ]
+  },
+  {
+    "question": "how has his work on chaos developed over time?",
+    "kind": "probe",
+    "topic": "chaos",
+    "papers_on_topic": 2,
+    "expect": null,
+    "cls": "cross_paper_synthesis",
+    "select_documents": 11,
+    "runs_selection": true,
+    "cap": 2,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "cross_paper_synthesis"
+    ]
+  },
+  {
+    "question": "talk to me about his work related to model predictive control",
+    "kind": "probe",
+    "topic": "mpc",
+    "papers_on_topic": 8,
+    "expect": null,
+    "cls": "cross_paper_synthesis",
+    "select_documents": 11,
+    "runs_selection": true,
+    "cap": 2,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "cross_paper_synthesis"
+    ]
+  },
+  {
+    "question": "tell me about his model predictive control work",
+    "kind": "probe",
+    "topic": "mpc",
+    "papers_on_topic": 8,
+    "expect": null,
+    "cls": "cross_paper_synthesis",
+    "select_documents": 11,
+    "runs_selection": true,
+    "cap": 2,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "cross_paper_synthesis"
+    ]
+  },
+  {
+    "question": "what has he done on model predictive control?",
+    "kind": "probe",
+    "topic": "mpc",
+    "papers_on_topic": 8,
+    "expect": null,
+    "cls": "cross_paper_synthesis",
+    "select_documents": 11,
+    "runs_selection": true,
+    "cap": 2,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "cross_paper_synthesis"
+    ]
+  },
+  {
+    "question": "how has his work on model predictive control developed over time?",
+    "kind": "probe",
+    "topic": "mpc",
+    "papers_on_topic": 8,
+    "expect": null,
+    "cls": "cross_paper_synthesis",
+    "select_documents": 11,
+    "runs_selection": true,
+    "cap": 2,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "cross_paper_synthesis"
+    ]
+  },
+  {
+    "question": "talk to me about his work related to fault detection",
+    "kind": "probe",
+    "topic": "fault-detection",
+    "papers_on_topic": 3,
+    "expect": null,
+    "cls": "cross_paper_synthesis",
+    "select_documents": 11,
+    "runs_selection": true,
+    "cap": 2,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "cross_paper_synthesis"
+    ]
+  },
+  {
+    "question": "tell me about his fault detection work",
+    "kind": "probe",
+    "topic": "fault-detection",
+    "papers_on_topic": 3,
+    "expect": null,
+    "cls": "cross_paper_synthesis",
+    "select_documents": 11,
+    "runs_selection": true,
+    "cap": 2,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "cross_paper_synthesis"
+    ]
+  },
+  {
+    "question": "what has he done on fault detection?",
+    "kind": "probe",
+    "topic": "fault-detection",
+    "papers_on_topic": 3,
+    "expect": null,
+    "cls": "single_paper_factual",
+    "select_documents": 0,
+    "runs_selection": false,
+    "cap": null,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "single_paper_factual"
+    ]
+  },
+  {
+    "question": "how has his work on fault detection developed over time?",
+    "kind": "probe",
+    "topic": "fault-detection",
+    "papers_on_topic": 3,
+    "expect": null,
+    "cls": "cross_paper_synthesis",
+    "select_documents": 11,
+    "runs_selection": true,
+    "cap": 2,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "cross_paper_synthesis"
+    ]
+  },
+  {
+    "question": "talk to me about his work related to grid-connected inverters",
+    "kind": "probe",
+    "topic": "grid-inverters",
+    "papers_on_topic": 2,
+    "expect": null,
+    "cls": "cross_paper_synthesis",
+    "select_documents": 11,
+    "runs_selection": true,
+    "cap": 2,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "cross_paper_synthesis"
+    ]
+  },
+  {
+    "question": "tell me about his grid-connected inverter work",
+    "kind": "probe",
+    "topic": "grid-inverters",
+    "papers_on_topic": 2,
+    "expect": null,
+    "cls": "cross_paper_synthesis",
+    "select_documents": 11,
+    "runs_selection": true,
+    "cap": 2,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "cross_paper_synthesis"
+    ]
+  },
+  {
+    "question": "what has he done on grid-connected inverters?",
+    "kind": "probe",
+    "topic": "grid-inverters",
+    "papers_on_topic": 2,
+    "expect": null,
+    "cls": "cross_paper_synthesis",
+    "select_documents": 11,
+    "runs_selection": true,
+    "cap": 2,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "cross_paper_synthesis"
+    ]
+  },
+  {
+    "question": "how has his work on grid-connected inverters developed over time?",
+    "kind": "probe",
+    "topic": "grid-inverters",
+    "papers_on_topic": 2,
+    "expect": null,
+    "cls": "cross_paper_synthesis",
+    "select_documents": 11,
+    "runs_selection": true,
+    "cap": 2,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "cross_paper_synthesis"
+    ]
+  },
+  {
+    "question": "talk to me about his work related to sliding mode control",
+    "kind": "probe",
+    "topic": "sliding-mode",
+    "papers_on_topic": 2,
+    "expect": null,
+    "cls": "methodological",
+    "select_documents": 8,
+    "runs_selection": true,
+    "cap": 3,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "methodological"
+    ]
+  },
+  {
+    "question": "tell me about his sliding mode control work",
+    "kind": "probe",
+    "topic": "sliding-mode",
+    "papers_on_topic": 2,
+    "expect": null,
+    "cls": "methodological",
+    "select_documents": 8,
+    "runs_selection": true,
+    "cap": 3,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "methodological"
+    ]
+  },
+  {
+    "question": "what has he done on sliding mode control?",
+    "kind": "probe",
+    "topic": "sliding-mode",
+    "papers_on_topic": 2,
+    "expect": null,
+    "cls": "cross_paper_synthesis",
+    "select_documents": 11,
+    "runs_selection": true,
+    "cap": 2,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "cross_paper_synthesis"
+    ]
+  },
+  {
+    "question": "how has his work on sliding mode control developed over time?",
+    "kind": "probe",
+    "topic": "sliding-mode",
+    "papers_on_topic": 2,
+    "expect": null,
+    "cls": "cross_paper_synthesis",
+    "select_documents": 11,
+    "runs_selection": true,
+    "cap": 2,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "cross_paper_synthesis"
+    ]
+  },
+  {
+    "question": "What optimisation algorithm does the weighting factors paper use?",
+    "kind": "control",
+    "topic": "",
+    "papers_on_topic": null,
+    "expect": "single_paper_factual",
+    "cls": "single_paper_factual",
+    "select_documents": 0,
+    "runs_selection": false,
+    "cap": null,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "single_paper_factual"
+    ]
+  },
+  {
+    "question": "In the Reddit moderation study, what platform was analysed?",
+    "kind": "control",
+    "topic": "",
+    "papers_on_topic": null,
+    "expect": "single_paper_factual",
+    "cls": "single_paper_factual",
+    "select_documents": 0,
+    "runs_selection": false,
+    "cap": null,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "single_paper_factual"
+    ]
+  },
+  {
+    "question": "What filter is used in the grid-tied inverter paper?",
+    "kind": "control",
+    "topic": "",
+    "papers_on_topic": null,
+    "expect": "single_paper_factual",
+    "cls": "single_paper_factual",
+    "select_documents": 0,
+    "runs_selection": false,
+    "cap": null,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "single_paper_factual"
+    ]
+  },
+  {
+    "question": "Which machine does the meta-learner stacking paper diagnose?",
+    "kind": "control",
+    "topic": "",
+    "papers_on_topic": null,
+    "expect": "single_paper_factual",
+    "cls": "single_paper_factual",
+    "select_documents": 0,
+    "runs_selection": false,
+    "cap": null,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "single_paper_factual"
+    ]
+  },
+  {
+    "question": "What sampling frequency does the LSPMSM fault study use?",
+    "kind": "control",
+    "topic": "",
+    "papers_on_topic": null,
+    "expect": "single_paper_factual",
+    "cls": "single_paper_factual",
+    "select_documents": 0,
+    "runs_selection": false,
+    "cap": null,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "single_paper_factual"
+    ]
+  },
+  {
+    "question": "In the UAV paper, which estimator is applied?",
+    "kind": "control",
+    "topic": "",
+    "papers_on_topic": null,
+    "expect": "single_paper_factual",
+    "cls": "single_paper_factual",
+    "select_documents": 0,
+    "runs_selection": false,
+    "cap": null,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "single_paper_factual"
+    ]
+  },
+  {
+    "question": "Give me a count of his 2021 output",
+    "kind": "control",
+    "topic": "",
+    "papers_on_topic": null,
+    "expect": "bibliographic",
+    "cls": "bibliographic",
+    "select_documents": 0,
+    "runs_selection": false,
+    "cap": null,
+    "titles_extracted": [],
+    "decided_by": "model",
+    "stable": true,
+    "all_classes": [
+      "bibliographic"
+    ]
+  },
+  {
+    "question": "How many journal articles has he written?",
+    "kind": "control",
+    "topic": "",
+    "papers_on_topic": null,
+    "expect": "bibliographic",
+    "cls": "bibliographic",
+    "select_documents": 0,
+    "runs_selection": false,
+    "cap": null,
+    "titles_extracted": [],
+    "decided_by": "pattern",
+    "stable": true,
+    "all_classes": [
+      "bibliographic"
+    ]
+  }
+]

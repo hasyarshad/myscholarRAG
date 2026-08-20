@@ -9,6 +9,8 @@ data/
 # Secrets
 .env
 .env.*
+# The template is the one that must be committed — it is the documentation for
+# every secret the project needs, and `.env.*` would otherwise swallow it.
 !.env.example
 
 # Python
@@ -43,3 +45,19 @@ npm-debug.log*
 
 # Screenshots dropped into the repo root while reporting a bug
 Screenshot*.png
+
+# Detached run logs
+logs/
+
+# Working notes kept locally: design journals, audits, session handovers and the
+# generated PDFs of them. The README carries what a reader of this repository
+# needs; these are for the author.
+docs/
+CHANGELOG.md
+
+# The toolchain that renders those notes to PDF, including its node_modules.
+scripts/pdf/
+
+# Superseded measurement runs. `results/` holds the numbers the README cites and
+# the fixture the rubric tests read; intermediate runs are not part of that.
+results/generation_superseded.*

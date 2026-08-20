@@ -10,8 +10,16 @@ needs real columns, human-verified.
 **Embeddings are keyed by ``(chunk_id, model_id)``.** The previous code indexed
 with one model and queried with another — arithmetically valid, semantically
 meaningless, and completely silent. Recording which model produced each vector
-makes the mismatch detectable, and allows two models to be indexed side by side
-for comparison without a rebuild.
+makes the mismatch detectable: the configured embedder is checked against the
+index at startup, so a mismatch is a refusal to boot rather than silently
+meaningless results.
+
+Exactly one model should be indexed at a time. The key makes a second one
+*storable*, which is not the same as searchable — the HNSW index covers the
+whole column and Postgres applies ``WHERE model_id`` only after the approximate
+scan, so a second model halves the effective search breadth of the first.
+Measured, that cost 0.07 MRR with no error anywhere. ``myscholar papers check``
+fails when more than one is present.
 
 **Chunks belong to sections, and ``(section_id, ordinal_in_section)`` is
 unique.** Parent expansion fetches contiguous ordinal ranges within one
@@ -245,9 +253,10 @@ class ConversationTurn(Base):
     2024?" against a turn that answered nothing produces a follow-up to a
     non-answer."""
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), index=True
-    )
+    # No index=True here: ix_turns_created above already covers this column,
+    # and declaring both produced two identical btree indexes — double the
+    # write cost and the storage for no read benefit.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 #: HNSW indexes are created after bulk loading rather than declared here.

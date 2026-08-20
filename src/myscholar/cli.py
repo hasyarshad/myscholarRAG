@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 app = typer.Typer(
     name="myscholar",
-    help="Adaptive RAG over a personal corpus of research papers.",
+    help="Adaptive RAG over a personal corpus: papers, CV and project write-ups.",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -90,8 +90,40 @@ def ask(
 
 ingest_app = typer.Typer(help="Build the index from source documents.", no_args_is_help=True)
 papers_app = typer.Typer(help="Inspect and curate the indexed corpus.", no_args_is_help=True)
+db_app = typer.Typer(help="Prepare and inspect the database.", no_args_is_help=True)
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(papers_app, name="papers")
+app.add_typer(db_app, name="db")
+
+
+@db_app.command("migrate")
+def db_migrate() -> None:
+    """Create extensions and tables. Run once, as an admin, before deploying.
+
+    Separate from the API because the role that serves traffic should not be
+    able to alter the schema it reads. Idempotent, so re-running is safe.
+    """
+    from sqlalchemy import text
+
+    settings = load_settings()
+    store = open_store(settings)
+
+    async def _run() -> list[str]:
+        await store.create_schema()
+        async with store.session() as session:
+            rows = await session.execute(
+                text(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_schema = 'public' ORDER BY table_name"
+                )
+            )
+            return [row[0] for row in rows]
+
+    tables = asyncio.run(_run())
+    host = settings.database.url.rsplit("@", 1)[-1]
+    console.print(f"schema ready on [bold]{host}[/bold]")
+    for name in tables:
+        console.print(f"  {name}")
 
 
 @app.command()
@@ -106,7 +138,6 @@ def config() -> None:
     table.add_row("embedding.provider", settings.embedding.provider.value)
     table.add_row("embedding.model_id", settings.embedding.model_id)
     table.add_row("embedding.dim", str(settings.embedding.dim))
-    table.add_row("reranker.provider", settings.reranker.provider.value)
     table.add_row("database.url", settings.database.url)
     console.print(table)
 
@@ -115,7 +146,6 @@ def config() -> None:
         f"\n[dim]resolved:[/dim] generator=[bold]{container.generator.model_id}[/bold] "
         f"embedder=[bold]{container.embedder.model_id}[/bold] "
         f"({container.embedder.dim}d) "
-        f"reranker=[bold]{container.reranker.model_id}[/bold]"
     )
 
 
@@ -435,7 +465,7 @@ def papers_check() -> None:
     async def _run() -> Any:
         store = open_store(settings)
         stats = await store.corpus_stats()
-        return stats, check(stats)
+        return stats, check(stats, model_ids=await store.indexed_model_ids())
 
     stats, findings = asyncio.run(_run())
     failures = [f for f in findings if f.severity is Severity.FAIL]
@@ -538,7 +568,7 @@ def _build_router(settings: Any) -> Any:
     return build_router(settings, container, store)
 
 
-def _build_retriever(settings: Any, *, with_reranker: bool = True) -> Any:
+def _build_retriever(settings: Any) -> Any:
     from myscholar.retrieval.retriever import HybridRetriever
 
     container = build_container(settings)
@@ -547,9 +577,8 @@ def _build_retriever(settings: Any, *, with_reranker: bool = True) -> Any:
     return HybridRetriever(
         store=store,
         embedder=container.embedder,
-        reranker=container.reranker if with_reranker else None,
         top_k=settings.retrieval.top_k,
-        rerank_k=settings.retrieval.rerank_k,
+        context_blocks=settings.retrieval.context_blocks,
         window=settings.retrieval.window,
         dense_weight=settings.retrieval.dense_weight,
         lexical_weight=settings.retrieval.lexical_weight,
@@ -582,7 +611,7 @@ def search(
         raise typer.Exit(1) from None
 
     async def _run() -> Any:
-        retriever = _build_retriever(settings, with_reranker=retrieval_mode is RetrievalMode.FULL)
+        retriever = _build_retriever(settings)
         return await retriever.retrieve(query, mode=retrieval_mode, limit=limit)
 
     result = asyncio.run(_run())
@@ -594,7 +623,6 @@ def search(
     timings = " · ".join(f"{stage} {ms}ms" for stage, ms in result.timings_ms.items())
     console.print(
         f"[dim]mode={result.mode.value} · {len(result.candidates)} candidates · {timings}"
-        + ("  [yellow](reranker unavailable)[/yellow]" if result.degraded else "")
         + "[/dim]\n"
     )
 
@@ -644,9 +672,7 @@ def route(
         routing.append("[bold]canned reply[/bold] — no retrieval, no generation")
     else:
         routing.append(f"transforms: {', '.join(t.value for t in plan.transforms) or 'none'}")
-        routing.append(f"top_k={plan.top_k} rerank_k={plan.rerank_k}")
-        if plan.filter_document_titles:
-            routing.append(f"filtered to: {plan.filter_document_titles[0][:60]}")
+        routing.append(f"top_k={plan.top_k} context_blocks={plan.context_blocks}")
         if plan.boost_sections:
             routing.append(f"sections: {', '.join(sorted(s.value for s in plan.boost_sections))}")
         if plan.max_chunks_per_document:

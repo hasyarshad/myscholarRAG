@@ -122,9 +122,9 @@
   {
     "question": "What optimisation algorithm does the weighting factors paper use?",
     "expected": "single_paper_factual",
-    "actual": "methodological",
+    "actual": "single_paper_factual",
     "decided_by": "model",
-    "correct": false,
+    "correct": true,
     "papers": []
   },
   {
@@ -154,9 +154,9 @@
   {
     "question": "How are weighting factors tuned in predictive torque control?",
     "expected": "methodological",
-    "actual": "methodological",
+    "actual": "single_paper_factual",
     "decided_by": "model",
-    "correct": true,
+    "correct": false,
     "papers": []
   },
   {

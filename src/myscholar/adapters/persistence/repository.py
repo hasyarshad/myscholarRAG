@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -27,7 +27,7 @@ from myscholar.adapters.persistence.orm import (
     DocumentSummary,
     Section,
 )
-from myscholar.domain.enums import DocumentKind
+from myscholar.domain.enums import DocumentKind, SectionKind
 from myscholar.ingest.health import DocumentStats
 from myscholar.ingest.sync import IndexedDocument
 from myscholar.ports.embedding import Vector
@@ -42,6 +42,48 @@ class IndexMismatchError(RuntimeError):
     plausible-looking, meaningless results — the exact failure mode of the code
     this project replaces, which went unnoticed because nothing checked.
     """
+
+
+def _source_url(doi: str | None, source_path: str | None) -> str:
+    """Where a citation should send a reader, or empty if nowhere.
+
+    A DOI wins for a paper, because it is the citation's canonical target and
+    stays correct when a publisher reorganises its site. No lookup is needed at
+    read time: the DOI is matched by regex against the literal first page during
+    ingestion and then resolved once against Crossref, so by the time an answer
+    cites the paper the identifier is already stored and verified. ``doi.org``
+    is itself the permanent redirect.
+
+    Site pages and the CV have no DOI and are simply the page they came from.
+    ``source_path`` also holds local filesystem paths for PDFs ingested from
+    disk, which is why the scheme is checked rather than assumed — linking a
+    visitor to ``/home/haseeb/papers/foo.pdf`` would be a broken link on every
+    machine but one.
+    """
+    if doi:
+        return f"https://doi.org/{doi}"
+    if source_path and source_path.startswith(("http://", "https://")):
+        return source_path
+    return ""
+
+
+@dataclass(frozen=True, slots=True)
+class SpanContext:
+    """What a retrieved span needs beyond its own text.
+
+    A record rather than the tuple this was, because it had grown to seven
+    fields unpacked positionally at the single call site, and adding the link
+    made eight. Two of them are adjacent strings.
+    """
+
+    document_title: str
+    section_heading: str
+    page_start: int
+    page_end: int
+    document_kind: str
+    is_review: bool
+    authors: list[str]
+    source_url: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +121,27 @@ def _to_hit(row: Any, *, score: float | None = None) -> SearchHit:
 
 
 def create_engine(url: str, *, echo: bool = False) -> AsyncEngine:
-    return create_async_engine(url, echo=echo, pool_pre_ping=True)
+    """Every connection sees ``public`` and then ``extensions``.
+
+    This is what lets pgvector live outside ``public``. Both the type and the
+    operators are schema-qualified once the extension moves, and neither of the
+    places that need them writes the qualification: SQLAlchemy emits
+    ``VECTOR(768)`` from the column definition, and the distance operator is
+    ``<=>``. Postgres resolves both through ``search_path``, so without this the
+    schema fails to create with ``type "vector" does not exist`` and every
+    similarity query fails with ``operator does not exist``.
+
+    Set on the connection rather than with ``ALTER DATABASE`` because it then
+    travels with the code. The production database is managed by Supabase and
+    reachable by other clients, and a setting the application depends on but
+    does not state is one a dashboard action can quietly revert.
+    """
+    return create_async_engine(
+        url,
+        echo=echo,
+        pool_pre_ping=True,
+        connect_args={"server_settings": {"search_path": "public,extensions"}},
+    )
 
 
 class PostgresStore(VectorStore):
@@ -109,10 +171,47 @@ class PostgresStore(VectorStore):
         "NOT NULL DEFAULT ''",
     )
 
+    #: Extensions belong in their own schema, not in ``public``.
+    #:
+    #: ``CREATE EXTENSION`` without a schema installs into the first entry of
+    #: ``search_path``, which is ``public``, and that is what these two did.
+    #: Supabase's linter flags it: everything in ``public`` is reachable by
+    #: every role and is what PostgREST exposes, so a function living there is
+    #: one an untrusted role can call and one a same-named local function can
+    #: shadow. The extension's own objects gain nothing from being there.
+    #:
+    #: pg_trgm is dropped rather than moved, because nothing has ever used it.
+    #: Lexical search is ``tsvector``/``ts_rank_cd`` over a GIN index; there is
+    #: no ``similarity()`` call, no ``%``, and no ``gin_trgm_ops`` index in the
+    #: schema. ``pg_depend`` agrees — zero dependent objects. It was enabled
+    #: alongside pgvector on the assumption that fuzzy matching would be wanted
+    #: later, and the assumption never came true.
+    #:
+    #: The move is conditional because ``CREATE EXTENSION IF NOT EXISTS`` does
+    #: nothing when the extension is already installed — including when it is
+    #: installed in the wrong schema — so it cannot correct an existing
+    #: database, while an unconditional ``ALTER`` fails once it has.
+    _EXTENSIONS = (
+        "CREATE SCHEMA IF NOT EXISTS extensions",
+        "CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions",
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM pg_extension e
+                  JOIN pg_namespace n ON n.oid = e.extnamespace
+                 WHERE e.extname = 'vector' AND n.nspname <> 'extensions'
+            ) THEN
+                ALTER EXTENSION vector SET SCHEMA extensions;
+            END IF;
+        END $$;
+        """,
+    )
+
     async def create_schema(self) -> None:
         async with self._engine.begin() as connection:
-            await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            await connection.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+            for statement in self._EXTENSIONS:
+                await connection.execute(text(statement))
             await connection.run_sync(Base.metadata.create_all)
             for statement in self._ADDED_COLUMNS:
                 await connection.execute(text(statement))
@@ -203,10 +302,38 @@ class PostgresStore(VectorStore):
             )
             done = set(existing.all())
 
+            # Abstract, methods, results and conclusion — not simply the
+            # first N characters in document order.
+            #
+            # Reading in order meant a summary was built from the abstract,
+            # the introduction and then *related work*, which is a survey of
+            # other researchers' work. A paper was therefore partly described
+            # by what other people did, and its own methods and findings often
+            # fell outside the character budget entirely. Since these summaries
+            # are what document selection searches, that shaped which papers
+            # could be found at all.
+            summary_sections = (
+                SectionKind.ABSTRACT.value,
+                SectionKind.METHODS.value,
+                SectionKind.RESULTS.value,
+                SectionKind.CONCLUSION.value,
+                SectionKind.DISCUSSION.value,
+            )
+            # Papers only. A CV and a web page have none of these section
+            # kinds, so filtering them the same way left them with no summary
+            # at all — and a document with no summary cannot be selected, which
+            # silently removed the CV and the projects page from every question
+            # that depends on selection.
             rows = await session.execute(
                 select(Document.id, Document.title, Chunk.text)
                 .join(Chunk, Chunk.document_id == Document.id)
                 .join(Section, Section.id == Chunk.section_id)
+                .where(
+                    or_(
+                        Document.kind != DocumentKind.PAPER.value,
+                        Section.kind.in_(summary_sections),
+                    )
+                )
                 .order_by(Document.id, Section.ordinal, Chunk.ordinal_in_section)
             )
 
@@ -552,12 +679,22 @@ class PostgresStore(VectorStore):
             )
             return {section_id: int(count) for section_id, count in rows.all()}
 
-    async def span_context(self, section_id: UUID) -> tuple[str, str, int, int, str, bool] | None:
-        """Title, heading, page range and document kind for a section.
+    async def span_context(self, section_id: UUID) -> SpanContext | None:
+        """Title, heading, page range, document kind, review flag, authors, link.
 
         The kind rides along with the citation fields because it is needed at
         the same moment and by the same caller: it is what lets the interface
         say whether a passage came from a paper or from the CV.
+
+        Authors ride along for a sharper reason. Authorship is *metadata*, and a
+        passage almost never states it — a related-work section is full of other
+        researchers' names and none of its own. Without this the generator
+        cannot tell whose work it is reading, so asked whether a paper is his it
+        answers from the only names it can see, which are everyone else's.
+
+        The link is resolved here rather than in the interface because this is
+        where both candidates are already in hand, and which one applies is a
+        property of the document, not a presentation choice.
         """
         async with self.session() as session:
             row = (
@@ -569,6 +706,9 @@ class PostgresStore(VectorStore):
                         Section.page_end,
                         Document.kind,
                         Document.is_review,
+                        Document.authors,
+                        Document.doi,
+                        Document.source_path,
                     )
                     .join(Document, Document.id == Section.document_id)
                     .where(Section.id == section_id)
@@ -576,13 +716,15 @@ class PostgresStore(VectorStore):
             ).first()
         if row is None:
             return None
-        return (
-            row.title,
-            row.heading,
-            int(row.page_start),
-            int(row.page_end),
-            row.kind,
-            bool(row.is_review),
+        return SpanContext(
+            document_title=row.title,
+            section_heading=row.heading,
+            page_start=int(row.page_start),
+            page_end=int(row.page_end),
+            document_kind=row.kind,
+            is_review=bool(row.is_review),
+            authors=list(row.authors or []),
+            source_url=_source_url(row.doi, row.source_path),
         )
 
     # -- statistics --------------------------------------------------------

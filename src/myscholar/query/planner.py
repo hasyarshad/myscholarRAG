@@ -4,8 +4,6 @@ The whole point of classifying is that different questions want different
 treatment. This module is that mapping, kept as data rather than scattered
 through the retrieval code, so what fires when is readable in one place and
 changeable without touching the retriever.
-
-See docs/learning/04-query-translation-and-routing.md.
 """
 
 from __future__ import annotations
@@ -40,7 +38,7 @@ class Plan:
     needs_clarification: bool = False
 
     top_k: int = 50
-    rerank_k: int = 8
+    context_blocks: int = 8
     select_documents: int = 0
     """How many documents to choose by summary before searching passages.
 
@@ -53,6 +51,33 @@ class Plan:
     not the paper that answers it.
     """
 
+    anchor_to_top_document: bool = False
+    """Bring the best-matching document's passages to the front.
+
+    For a question about one paper, and it is the inverse of the per-document
+    cap below: that one spreads context across papers for a question about the
+    corpus, this one concentrates it for a question about a paper.
+
+    The measurement that motivated it, on "How are weighting factors tuned in
+    FCS-MPTC paper?":
+
+        C1  0.0318  Weighting Factors Optimization of MPTC   <- the right paper
+        C2  0.0295  Neutral Point Voltage Balancing (MOPSO)
+        C3  0.0283  Neutral Point Voltage Balancing (MOPSO)
+        C4  0.0271  Neutral Point Voltage Balancing (MOPSO)
+        C5  0.0260  Weighting Factors Optimization of MPTC   <- the right paper
+
+    The top-ranked passage names the right paper; the *aggregate* score does
+    not, because the other paper contributed three passages to its two. Summing
+    rewards a paper for appearing often, which is a popularity signal rather
+    than a relevance one, so the anchor is the single best block's document.
+
+    A reorder rather than a filter, deliberately. Three of these papers are
+    substantially about FCS-MPTC, so the anchor is a guess about which one is
+    meant; making it a filter would turn a wrong guess into an answer with no
+    way back, while reordering leaves the alternatives in context behind it.
+    """
+
     max_chunks_per_document: int | None = None
     """Caps how much of the context one paper may occupy.
 
@@ -60,7 +85,6 @@ class Plan:
     silently becomes about that paper rather than about the corpus.
     """
 
-    filter_document_titles: tuple[str, ...] = ()
     boost_sections: frozenset[SectionKind] = frozenset()
     exclude_sections: frozenset[SectionKind] = field(default_factory=lambda: _ALWAYS_EXCLUDE)
 
@@ -93,16 +117,14 @@ class QueryPlanner:
         self,
         *,
         top_k: int = 50,
-        rerank_k: int = 8,
+        context_blocks: int = 8,
         person_name: str = "this researcher",
     ) -> None:
         self._top_k = top_k
-        self._rerank_k = rerank_k
+        self._context_blocks = context_blocks
         self._out_of_scope = out_of_scope_reply(person_name)
 
     def plan(self, classification: Classification) -> Plan:
-        titles = tuple(classification.entities.paper_titles)
-
         match classification.query_class:
             case QueryClass.OUT_OF_SCOPE:
                 # No retrieval, no generation. Retrieval would return the five
@@ -134,12 +156,20 @@ class QueryPlanner:
             case QueryClass.SINGLE_PAPER_FACTUAL:
                 # Narrow. The target is a specific fact, so expansion techniques
                 # add noise: HyDE would invent a different specific fact.
+                # There was a document-title filter here, wired from the
+                # classifier's extracted titles. It never fired once — not for
+                # "the FCS-MPTC paper", not for "the MMC paper", which is the
+                # design's own worked example — because neither string appears
+                # in any title and the classifier correctly declines to guess.
+                # Removed as never-implemented rather than as measured useless;
+                # nothing ever tested it, because nothing ever reached it.
+                # Anchoring covers the shorthand it was meant to.
                 return Plan(
                     query_class=QueryClass.SINGLE_PAPER_FACTUAL,
                     transforms=(TransformKind.NORMALISE,),
                     top_k=self._top_k,
-                    rerank_k=self._rerank_k,
-                    filter_document_titles=titles,
+                    context_blocks=self._context_blocks,
+                    anchor_to_top_document=True,
                 )
 
             case QueryClass.CROSS_PAPER_SYNTHESIS:
@@ -183,7 +213,7 @@ class QueryPlanner:
                         TransformKind.HYDE,
                     ),
                     top_k=self._top_k,
-                    rerank_k=10,
+                    context_blocks=10,
                     # Eleven of twenty-five: nine papers plus the two slots
                     # the selector reserves for the CV and the site pages. Set
                     # at nine, the reservation came out of the papers' share
@@ -203,13 +233,20 @@ class QueryPlanner:
                         TransformKind.HYDE,
                     ),
                     top_k=self._top_k,
-                    rerank_k=self._rerank_k,
+                    context_blocks=self._context_blocks,
                     # A methodological question is about the corpus too — "how
                     # does he tune weighting factors" spans whichever papers
                     # tune them — but more narrowly than a synthesis question,
-                    # so it selects fewer documents and does not cap them.
+                    # so it selects fewer documents.
                     # Six papers plus the two reserved slots.
                     select_documents=8,
+                    # Capped, which it was not. Without a cap one paper takes
+                    # every slot: asked about strengths in machine learning,
+                    # retrieval returned eight passages from a single paper and
+                    # the answer cited one source for work spanning several.
+                    # Three per document over eight slots still allows depth
+                    # while guaranteeing at least three papers are heard.
+                    max_chunks_per_document=3,
                     boost_sections=frozenset(
                         {SectionKind.METHODS, SectionKind.EXPERIMENTS, SectionKind.RESULTS}
                     ),
@@ -220,7 +257,7 @@ class QueryPlanner:
                     query_class=QueryClass.BIOGRAPHICAL,
                     transforms=(TransformKind.NORMALISE,),
                     top_k=self._top_k,
-                    rerank_k=self._rerank_k,
+                    context_blocks=self._context_blocks,
                     boost_sections=frozenset(
                         {
                             SectionKind.CV_SUMMARY,

@@ -1,0 +1,170 @@
+# Confusable questions — the set the relevance grader is actually for.
+#
+# Every other set in this repository measures whether the system finds *an*
+# answer and whether it invents things. None of them measures the case this
+# corpus is full of: **several papers on the same subject, one of which is
+# right**. Six of these papers apply predictive control to motor drives; two
+# tune weighting factors with a multi-objective optimiser; two use VIKOR; two
+# classify machine faults; two control a grid-connected inverter through a
+# filter. Retrieval returns the whole family. Choosing within it is the job the
+# grader exists to do, and until now nothing scored it.
+#
+# **The metric is attribution precision**, not refusal or unsupported claims:
+# did the answer cite `expect`, and did it avoid citing `decoys`? A rate of
+# unsupported claims cannot see this failure, because citing the wrong paper of
+# a near-identical pair produces sentences that are perfectly well supported —
+# by the wrong source.
+#
+# ## How these were written, and the biases in doing it that way
+#
+# Drafted from the papers' own conclusions and abstracts, so every `expect` is
+# a claim the source actually makes rather than one that sounded plausible.
+# Two biases follow, both deliberate to correct:
+#
+# 1. The document summaries that drive selection are built from abstracts and
+#    conclusions. Questions phrased in abstract vocabulary would therefore
+#    match the selection index unusually well and read as easy for a reason
+#    unrelated to the grader. So the *fact* comes from the paper and the
+#    *phrasing* is how a visitor would ask, and several answers sit in results
+#    or methods rather than the abstract.
+# 2. They were drafted by the same author as the system under test, which is
+#    the conflict the labelling rubric had. The mitigation is the same one:
+#    written and frozen **before any of them was run**, with the decoys named
+#    in advance, which forces a statement of what a wrong answer looks like
+#    before seeing what the system does.
+#
+# ## Reading the results
+#
+# Fifteen questions detect a large effect and nothing else. One or two
+# questions is noise. The decision rule fixed in advance: keep the grader only
+# if it moves attribution precision by **20 points or more**.
+#
+# ## The MMC pair is excluded deliberately, not overlooked
+#
+# The two modular multilevel converter papers are the closest in the corpus —
+# near-identical titles, overlapping authors, both applying data-driven MPC to
+# an MMC. They are also, per the author, substantively the same work on the
+# same test bed: one validates a SINDy-derived model and the other reports the
+# computational-time advantage over it.
+#
+# That makes them the wrong shape for this set. Every other pair here has a
+# right answer and a wrong one, so citing the decoy is an error a reader would
+# care about. For these two, either paper answers a question about MMC control
+# acceptably, and labelling one a decoy would score a correct-enough answer as
+# a failure — which would make the grader look worse than it is and push a
+# decision in the wrong direction.
+#
+# The honest statement is therefore that this set measures disambiguation where
+# disambiguation matters, and that the corpus contains one pair where it does
+# not. A question separating them would have to turn on SINDy validation versus
+# computational cost, and would be testing recall of a methods detail rather
+# than the grader's ability to choose between sources.
+
+- question: He tuned weighting factors with a multi-objective optimiser in more than one study. Which one used a particle swarm method?
+  kind: confusable
+  expect: neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-
+  decoys:
+    - weighting-factors-optimization-of-model-predictive-torque-control-of-induction-motor-using-nsga-ii-with-topsis-decision-
+    - artificial-bee-colony-optimized-self-tuning-pi-speed-controller-for-fcs-mpcc-of-permanent-magnet-synchronous-machines
+  why: Three papers optimise something in a predictive controller. Only one uses MOPSO.
+
+- question: In the induction motor torque control study, how was a single solution chosen from the Pareto front?
+  kind: confusable
+  expect: weighting-factors-optimization-of-model-predictive-torque-control-of-induction-motor-using-nsga-ii-with-topsis-decision-
+  decoys:
+    - neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-
+  why: Both papers produce a Pareto front and pick from it. One uses TOPSIS, the other VIKOR. The hardest pair in the set.
+
+- question: Which of his converter studies combined H-infinity robust control with predictive control?
+  kind: confusable
+  expect: robust-control-of-grid-tied-inverter-with-lc-filter-via-adaptive-fcs-mpc-cost-function-optimization
+  decoys:
+    - genetic-algorithm-tuned-adaptive-discrete-time-sliding-mode-controller-for-grid-connected-inverter-with-an-lcl-filter
+    - neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-
+  why: Two grid-connected inverter papers with filters; only one uses H-infinity, and it also uses VIKOR like the decoy.
+
+- question: What did the artificial bee colony algorithm actually tune in the speed loop?
+  kind: confusable
+  expect: artificial-bee-colony-optimized-self-tuning-pi-speed-controller-for-fcs-mpcc-of-permanent-magnet-synchronous-machines
+  decoys:
+    - weighting-factors-optimization-of-model-predictive-torque-control-of-induction-motor-using-nsga-ii-with-topsis-decision-
+  why: Every optimiser in this corpus tunes something inside a predictive controller. This one tunes PI gains, not weighting factors.
+
+- question: Which of his two grid-connected inverter papers used a sliding mode controller?
+  kind: confusable
+  expect: genetic-algorithm-tuned-adaptive-discrete-time-sliding-mode-controller-for-grid-connected-inverter-with-an-lcl-filter
+  decoys:
+    - robust-control-of-grid-tied-inverter-with-lc-filter-via-adaptive-fcs-mpc-cost-function-optimization
+  why: LCL versus LC, sliding mode versus FCS-MPC. The question names the discriminator explicitly.
+
+- question: One of his machine papers removed the mechanical position sensor. What did it use in its place?
+  kind: confusable
+  expect: implications-of-the-sensorless-predictive-control-for-line-start-permanent-magnet-synchronous-machine
+  decoys:
+    - comparison-of-dynamic-performance-of-field-oriented-control-and-model-predictive-control-for-line-start-permanent-magnet
+  why: Same machine, same authors, adjacent studies. Only one is sensorless.
+
+- question: Which study set field oriented control against model predictive control on the same machine?
+  kind: confusable
+  expect: comparison-of-dynamic-performance-of-field-oriented-control-and-model-predictive-control-for-line-start-permanent-magnet
+  decoys:
+    - implications-of-the-sensorless-predictive-control-for-line-start-permanent-magnet-synchronous-machine
+  why: The mirror of the previous question. If the system answers both with the same paper, it is not discriminating.
+
+- question: In the four-switch two-phase motor work, what was redesigned to cut torque ripple?
+  kind: confusable
+  expect: advanced-direct-torque-control-of-four-switch-fed-two-phase-symmetric-induction-motor
+  decoys:
+    - a-chaos-based-svpwm-technique-for-b4-inverter-fed-two-phase-symmetric-induction-motor-for-thd-emi-improvement-at-low-mod
+  why: Same inverter topology, same motor, same author. The answer is the vector selection table.
+
+- question: Which technique did he use to improve THD and EMI at low modulation indices?
+  kind: confusable
+  expect: a-chaos-based-svpwm-technique-for-b4-inverter-fed-two-phase-symmetric-induction-motor-for-thd-emi-improvement-at-low-mod
+  decoys:
+    - advanced-direct-torque-control-of-four-switch-fed-two-phase-symmetric-induction-motor
+    - neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-
+  why: Several papers report THD improvements. Only one is about low modulation indices, and only one uses chaotic SVPWM.
+
+- question: He has two papers involving chaos. Which one built an electronic circuit?
+  kind: confusable
+  expect: a-simple-technique-for-studying-chaos-using-jerk-equation-with-discrete-time-sine-map
+  decoys:
+    - a-chaos-based-svpwm-technique-for-b4-inverter-fed-two-phase-symmetric-induction-motor-for-thd-emi-improvement-at-low-mod
+  why: Chaos appears in a motor drive paper and in a nonlinear dynamics paper. Only the second is circuit work.
+
+- question: Which of his fault detection studies relies only on sound?
+  kind: confusable
+  expect: leveraging-meta-learner-based-stacking-framework-for-stator-winding-inter-turn-fault-detection-of-lspmsm
+  decoys:
+    - rotor-imbalance-fault-classification-through-unified-feature-fusion-combining-statistical-signal-processing-with-adaptiv
+  why: Two machine fault papers, both using ensembles. One is acoustic-only; the other uses vibration and signal processing.
+
+- question: Which fault classification study used wavelet decomposition together with gradient boosting?
+  kind: confusable
+  expect: rotor-imbalance-fault-classification-through-unified-feature-fusion-combining-statistical-signal-processing-with-adaptiv
+  decoys:
+    - leveraging-meta-learner-based-stacking-framework-for-stator-winding-inter-turn-fault-detection-of-lspmsm
+  why: Genuinely confusable — the decoy also uses a gradient boosting machine, as its meta-learner. Only one uses wavelets.
+
+- question: What share of failures in line-start permanent magnet machines are inter-turn short circuits?
+  kind: confusable
+  expect: leveraging-meta-learner-based-stacking-framework-for-stator-winding-inter-turn-fault-detection-of-lspmsm
+  decoys:
+    - implications-of-the-sensorless-predictive-control-for-line-start-permanent-magnet-synchronous-machine
+    - comparison-of-dynamic-performance-of-field-oriented-control-and-model-predictive-control-for-line-start-permanent-magnet
+  why: Three papers are about the same machine. Only one states a failure statistic, and a wrong attribution here is a well-supported sentence from the wrong source.
+
+- question: Which of his projects runs entirely in the browser with no server behind it?
+  kind: confusable
+  expect: roman-urdu-translator
+  decoys:
+    - myscholar-rag
+  why: Two project write-ups, both about models he built. Only one is client-side.
+
+- question: Which of his projects checks every sentence against the passage it came from?
+  kind: confusable
+  expect: myscholar-rag
+  decoys:
+    - roman-urdu-translator
+  why: The mirror of the previous question, and drawn from page content rather than the summary that drives selection.

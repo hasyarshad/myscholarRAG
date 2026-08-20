@@ -12,8 +12,7 @@ Two paths, in order:
 The fallback is not decoration. Measured on this corpus, a keyword matcher
 classified only 5 of 23 headings in one paper, because headings here are
 domain-specific rather than conventional — ``III. DISCRETE MODEL OF THREE PHASE
-INDUCTION MOTOR`` is a methods section and says none of the usual words. See
-docs/learning/01b-extraction-findings.md.
+INDUCTION MOTOR`` is a methods section and says none of the usual words.
 """
 
 from __future__ import annotations

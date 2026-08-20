@@ -30,10 +30,8 @@
       "neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-",
       "weighting-factors-optimization-of-model-predictive-torque-control-of-induction-motor-using-nsga-ii-with-topsis-decision-"
     ],
-    "missing": [
-      "neutral-point-voltage-balancing-using-mopso-based-weighting-factor-tuning-for-fcs-mptc-of-three-level-t-type-vsi-fed-im-"
-    ],
-    "recall": 0.75
+    "missing": [],
+    "recall": 1.0
   },
   {
     "question": "What fault detection work has he done?",

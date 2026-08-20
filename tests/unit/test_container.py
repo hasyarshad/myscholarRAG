@@ -13,7 +13,6 @@ def test_builds_fake_components_by_default() -> None:
 
     assert container.generator.model_id == "fake"
     assert container.embedder.dim == 768
-    assert container.reranker.model_id == "noop"
 
 
 def test_generator_and_utility_are_separate_instances() -> None:
@@ -59,18 +58,10 @@ def test_no_heavy_adapters_are_imported_for_fakes() -> None:
     """
     import sys
 
-    heavy = [
-        name
-        for name in sys.modules
-        if name.startswith(("myscholar.adapters.embedding", "myscholar.adapters.reranking"))
-    ]
+    heavy = [name for name in sys.modules if name.startswith("myscholar.adapters.embedding")]
     for name in heavy:
         del sys.modules[name]
 
     build_container(make_settings())
 
-    assert not [
-        name
-        for name in sys.modules
-        if name.startswith(("myscholar.adapters.embedding", "myscholar.adapters.reranking"))
-    ]
+    assert not [name for name in sys.modules if name.startswith("myscholar.adapters.embedding")]

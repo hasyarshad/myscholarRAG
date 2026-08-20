@@ -8,6 +8,7 @@ event ordering assertions matter most: the widget's rendering depends on
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
@@ -15,15 +16,23 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from myscholar.api.app import Services, create_app
-from myscholar.api.limits import Gate, Limits, OverloadedError, RateLimitedError, RateLimiter
+from myscholar.api.limits import (
+    SECRET_HEADER,
+    Gate,
+    Limits,
+    OverloadedError,
+    RateLimitedError,
+    RateLimiter,
+)
 from myscholar.api.schemas import MAX_QUESTION_CHARS
 from myscholar.api.sse import frame
-from myscholar.config import load_settings
 from myscholar.domain.answers import Answer, Citation, Refusal, TraceEvent
 from myscholar.domain.enums import RefusalReason, Stage
 from myscholar.query.history import FollowUpResolver, Turn
+from tests.conftest import make_settings
 
 
 @dataclass
@@ -131,7 +140,7 @@ def _answer(store: _Store) -> Answer:
 def _client(response: Answer | Refusal | None = None, *, store: _Store | None = None) -> TestClient:
     store = store or _Store()
     services = Services(
-        settings=load_settings(),
+        settings=make_settings(),
         engine=_Engine(response or _answer(store)),  # type: ignore[arg-type]
         store=store,  # type: ignore[arg-type]
         resolver=FollowUpResolver(None),
@@ -384,7 +393,7 @@ class TestCors:
 
         store = _Store()
         services = Services(
-            settings=load_settings(),
+            settings=make_settings(),
             engine=_Engine(_answer(store)),  # type: ignore[arg-type]
             store=store,  # type: ignore[arg-type]
             resolver=FollowUpResolver(None),
@@ -469,3 +478,138 @@ class TestConversations:
         events = parse_sse(client.post("/v1/ask", json={"question": "anything"}).text)
 
         assert [name for name, _ in events][-1] == "answer"
+
+
+class TestSharedSecret:
+    """CORS keeps a *page* on another origin out. This keeps everything else out.
+
+    The distinction is the whole point of the control: a browser honours CORS,
+    and `curl` has never heard of it. Without a secret the public URL is an open
+    LLM endpoint that anybody can bill work to.
+    """
+
+    @staticmethod
+    def _guarded() -> TestClient:
+        store = _Store()
+        settings = make_settings()
+        settings.api.shared_secret = SecretStr("correct-horse-battery-staple")
+        services = Services(
+            settings=settings,
+            engine=_Engine(_answer(store)),  # type: ignore[arg-type]
+            store=store,  # type: ignore[arg-type]
+            resolver=FollowUpResolver(None),
+            slugs={str(store.doc.id): store.doc.slug},
+            ready=True,
+        )
+        return TestClient(create_app(services))
+
+    def test_the_corpus_is_not_served_without_the_secret(self) -> None:
+        assert self._guarded().get("/v1/corpus").status_code == 401
+
+    def test_a_wrong_secret_is_refused(self) -> None:
+        response = self._guarded().get("/v1/corpus", headers={SECRET_HEADER: "hunter2"})
+        assert response.status_code == 401
+
+    def test_the_right_secret_passes(self) -> None:
+        response = self._guarded().get(
+            "/v1/corpus", headers={SECRET_HEADER: "correct-horse-battery-staple"}
+        )
+        assert response.status_code == 200
+
+    def test_asking_is_guarded_too(self) -> None:
+        """The expensive endpoint, and the one worth abusing."""
+        response = self._guarded().post("/v1/ask", json={"question": "what is MPC?"})
+        assert response.status_code == 401
+
+    def test_health_probes_stay_open(self) -> None:
+        """A host's monitor has no secret, and a probe that can 401 lies."""
+        assert self._guarded().get("/healthz").status_code == 200
+
+    def test_no_secret_configured_means_no_check(self) -> None:
+        """Development runs without one; a check people disable is worse."""
+        assert _client().get("/v1/corpus").status_code == 200
+
+
+class TestReadinessDetail:
+    """A stale startup note must not survive the condition it described.
+
+    Found by containerising: the API booted against an empty database, then the
+    index was loaded underneath it. Readiness correctly flipped to "ready" while
+    still reporting "no documents indexed" — the most misleading possible output
+    in exactly the situation someone is debugging.
+    """
+
+    def test_startup_notes_are_dropped_once_the_check_passes(self) -> None:
+        store = _Store()
+        services = Services(
+            settings=make_settings(),
+            engine=_Engine(_answer(store)),  # type: ignore[arg-type]
+            store=store,  # type: ignore[arg-type]
+            resolver=FollowUpResolver(None),
+            slugs={str(store.doc.id): store.doc.slug},
+            ready=True,
+            detail={"index": "no documents indexed"},  # left over from boot
+        )
+        body = TestClient(create_app(services)).get("/readyz").json()
+
+        assert body["checks"]["index"] is True
+        assert "index" not in body["detail"] or body["detail"]["index"] != "no documents indexed"
+
+    def test_notes_survive_while_the_check_still_fails(self) -> None:
+        """The explanation is exactly what you want when it is still true."""
+        store = _Store(chunks=0)
+        services = Services(
+            settings=make_settings(),
+            engine=_Engine(_answer(store)),  # type: ignore[arg-type]
+            store=store,  # type: ignore[arg-type]
+            resolver=FollowUpResolver(None),
+            detail={"index": "no documents indexed"},
+        )
+        body = TestClient(create_app(services)).get("/readyz").json()
+
+        assert body["checks"]["index"] is False
+        assert body["detail"]["index"] == "no documents indexed"
+
+
+class TestTheRateLimiterDoesNotGrowForever:
+    """The caller table is keyed by a header the client controls.
+
+    Each caller's window was pruned on the way past, but only for the caller
+    making the request; the table itself was never swept, and `forget` was
+    written and never called. Since the key comes from `X-Forwarded-For`, a
+    caller varying it per request allocated a permanent entry per request —
+    against a container sized in hundreds of megabytes.
+    """
+
+    def test_callers_that_stop_calling_are_forgotten(self) -> None:
+        limiter = RateLimiter()
+        stale = time.monotonic() - 7200
+        for i in range(500):
+            limiter._hits[f"10.0.0.{i}"].append(stale)  # noqa: SLF001
+        limiter._since_sweep = RateLimiter._SWEEP_EVERY - 1  # noqa: SLF001
+
+        limiter.check("live-caller")
+
+        assert limiter._hits.keys() == {"live-caller"}, (  # noqa: SLF001
+            "stale callers survived the sweep"
+        )
+
+    def test_an_active_caller_is_not_swept_away(self) -> None:
+        limiter = RateLimiter()
+        limiter.check("someone")
+        limiter._since_sweep = RateLimiter._SWEEP_EVERY - 1  # noqa: SLF001
+
+        limiter.check("someone-else")
+
+        assert "someone" in limiter._hits  # noqa: SLF001
+
+    def test_sweeping_does_not_reset_an_offender(self) -> None:
+        """The limit must still bite across a sweep."""
+        limiter = RateLimiter()
+        for _ in range(Limits().per_minute):
+            limiter.check("noisy")
+        limiter._since_sweep = RateLimiter._SWEEP_EVERY - 1  # noqa: SLF001
+        limiter.check("someone-else")
+
+        with pytest.raises(RateLimitedError):
+            limiter.check("noisy")

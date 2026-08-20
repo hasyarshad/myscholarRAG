@@ -35,8 +35,8 @@ class RoutedResult:
     bibliographic: BibliographicAnswer | None = None
     queries: tuple[SearchQuery, ...] = ()
     degraded: bool = False
-    """A component was unavailable — currently, reranking. Reported rather than
-    hidden, so a lower-quality answer is identifiable as one."""
+    """Set when the answer is known to be lower quality than usual, so the
+    interface can say so rather than presenting it as equivalent."""
 
     timings_ms: dict[str, int] = field(default_factory=dict)
 
@@ -55,7 +55,7 @@ class QueryRouter:
         retriever: HybridRetriever,
         store: PostgresStore,
         selector: DocumentSelector,
-        mode: RetrievalMode = RetrievalMode.FULL,
+        mode: RetrievalMode = RetrievalMode.HYBRID,
     ) -> None:
         self._mode = mode
         self._selector = selector
@@ -116,7 +116,7 @@ class QueryRouter:
         timings["transform"] = _elapsed(started)
 
         started = time.monotonic()
-        blocks, degraded = await self._search(queries, plan, title_to_id)
+        blocks = await self._search(queries, plan, title_to_id)
         timings["retrieve"] = _elapsed(started)
 
         return RoutedResult(
@@ -124,7 +124,6 @@ class QueryRouter:
             plan=plan,
             blocks=tuple(blocks),
             queries=tuple(queries),
-            degraded=degraded,
             timings_ms=timings,
         )
 
@@ -133,7 +132,7 @@ class QueryRouter:
         queries: list[SearchQuery],
         plan: Plan,
         title_to_id: dict[str, UUID],
-    ) -> tuple[list[ContextBlock], bool]:
+    ) -> list[ContextBlock]:
         """Retrieve for every query and fuse the results.
 
         A filtered branch is always accompanied by an unfiltered one. An
@@ -145,7 +144,7 @@ class QueryRouter:
         # partial policies in three modules that interacted by accident.
         selection = await self._selector.select(
             queries[0].text if queries else "",
-            titles=plan.filter_document_titles,
+            titles=(),
             title_to_id=title_to_id,
             limit=plan.select_documents,
         )
@@ -174,26 +173,24 @@ class QueryRouter:
             else None
         )
 
-        degraded = False
-
         async def run(text: str, filters: SearchFilters) -> tuple[ContextBlock, ...]:
-            nonlocal degraded
             result = await self._retriever.retrieve(
                 text,
                 mode=self._mode,
                 filters=filters if not filters.is_empty else None,
-                limit=plan.rerank_k,
+                limit=plan.context_blocks,
             )
             # An empty filtered result means the filter was wrong, not that the
             # corpus lacks an answer.
             if not result.blocks and not filters.is_empty:
-                result = await self._retriever.retrieve(text, mode=self._mode, limit=plan.rerank_k)
-            degraded = degraded or result.degraded
+                result = await self._retriever.retrieve(
+                    text, mode=self._mode, limit=plan.context_blocks
+                )
             return result.blocks
 
         # Every branch concurrently. A methodological question produces three
         # queries and, with the section boost, six searches — each embedding,
-        # querying twice and reranking. Run in sequence those dominate latency;
+        # querying twice. Run in sequence those dominate latency;
         # they are independent, so there is no reason to.
         plans: list[tuple[str, str, SearchFilters, float]] = []
         for index, query in enumerate(queries):
@@ -232,10 +229,13 @@ class QueryRouter:
             weights[name] = weight
 
         if not branches:
-            return [], degraded
+            return []
 
-        fused = reciprocal_rank_fusion(branches, weights=weights, limit=plan.rerank_k * 2)
+        fused = reciprocal_rank_fusion(branches, weights=weights, limit=plan.context_blocks * 2)
         ordered: list[ContextBlock] = [block_by_key[key] for key, _ in fused if key in block_by_key]
+
+        if plan.anchor_to_top_document:
+            ordered = _anchor_to_top_document(ordered)
 
         if plan.max_chunks_per_document is not None:
             ordered = _cap_per_document(ordered, plan.max_chunks_per_document)
@@ -249,8 +249,29 @@ class QueryRouter:
         # anything downstream saw it — silently, since a blank string is a
         # valid value. Only the label needs to change here.
         return [
-            replace(b, label=f"C{i}") for i, b in enumerate(ordered[: plan.rerank_k], start=1)
-        ], degraded
+            replace(b, label=f"C{i}") for i, b in enumerate(ordered[: plan.context_blocks], start=1)
+        ]
+
+
+def _anchor_to_top_document(blocks: list[ContextBlock]) -> list[ContextBlock]:
+    """Move the best-matching document's passages to the front.
+
+    A stable partition, so relative order is untouched within each group and the
+    other documents survive behind the anchor rather than being removed. The
+    reason not to filter is that the anchor is a guess: asked about "the
+    FCS-MPTC paper" when three papers are about FCS-MPTC, the top block is the
+    best evidence available for which one is meant, and it is still only
+    evidence. Reordering makes a wrong guess recoverable — the alternatives are
+    a few blocks further down — where a filter would make it final.
+
+    See Plan.anchor_to_top_document for the measurement.
+    """
+    if not blocks:
+        return blocks
+    anchor = blocks[0].document_id
+    return [b for b in blocks if b.document_id == anchor] + [
+        b for b in blocks if b.document_id != anchor
+    ]
 
 
 def _cap_per_document(blocks: list[ContextBlock], cap: int) -> list[ContextBlock]:

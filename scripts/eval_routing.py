@@ -65,8 +65,13 @@ async def main() -> int:
     container = build_container(settings)
     store = PostgresStore(create_engine(settings.database.url))
 
+    # `person_name` must match what assembly.py serves. The prompt interpolates
+    # it four times, and classifications change with it — omitting it here would
+    # measure a prompt the system never runs.
     classifier = QueryClassifier(
-        container.utility, titles=[d.title for d in await store.list_documents()]
+        container.utility,
+        titles=[d.title for d in await store.list_documents()],
+        person_name=settings.person.name,
     )
 
     rows = []

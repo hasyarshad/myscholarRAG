@@ -8,8 +8,6 @@ failure is systematic rather than random.
 
 The corpus titles go into the prompt. Twenty titles is a few hundred tokens and
 turns entity linking from a recall problem into a matching one.
-
-See docs/learning/04-query-translation-and-routing.md.
 """
 
 from __future__ import annotations
@@ -268,7 +266,10 @@ Classes:
   which year or venue something appeared in. The answer is not inside any paper.
 - single_paper_factual: a specific fact from one identifiable paper.
 - cross_paper_synthesis: requires combining several papers, or asks how
-  something developed across them.
+  something developed across them. Also choose this for questions about the
+  person rather than about a technique — their strengths, contributions,
+  experience or track record in some area. Those span everything they have
+  written, however the question is phrased.
 - methodological: about techniques, algorithms or how something was done,
   phrased about the method rather than about a particular paper. Choose this
   over single_paper_factual when no paper is identified, even if you can guess

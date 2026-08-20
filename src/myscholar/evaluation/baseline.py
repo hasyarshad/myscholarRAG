@@ -27,7 +27,7 @@ lose on ingestion quality alone.
 
 What remains is a comparison of *pipeline design*, which is the only
 interesting one. Every difference the report shows is attributable to hybrid
-retrieval, reranking, parent expansion, grading, citation verification,
+retrieval, parent expansion, grading, citation verification,
 grounding and refusal — not to a bigger model or a cleaner corpus.
 """
 
@@ -54,6 +54,14 @@ _TEXTUAL_REFUSAL = re.compile(
     r"\b(do(es)? not (mention|contain|provide|discuss|include|specify|address)"
     r"|no (information|mention|reference|evidence|indication) (of|about|that|regarding)"
     r"|not (mentioned|provided|discussed|specified|found|available|present) in"
+    # Passive voice of the active forms above. "is not addressed in the given
+    # materials" is as explicit a statement of absence as "does not address",
+    # and was scored as a hallucination because only the active form was
+    # listed. Added because the omission was an oversight in the original
+    # pattern, not because it rescues a particular answer — the test being: a
+    # rule worth adding is one you would have written without seeing the data.
+    r"|(is|was|are|were|has been|have been) (not|never) "
+    r"(addressed|mentioned|discussed|covered|found|reported|specified)"
     r"|cannot (answer|determine|find|be determined)"
     r"|unable to (answer|determine|find)"
     r"|i (don'?t|do not) (have|know)"
@@ -146,7 +154,7 @@ class NaivePipeline:
 
     ``mode`` selects which retrieval the naive generator is fed, which is what
     separates the report's first two rows: the same one-shot generation over
-    dense-only chunks, and then over hybrid, reranked and expanded context.
+    dense-only chunks, and then over hybrid and expanded context.
     Whatever changes between those rows is retrieval's contribution alone.
     """
 

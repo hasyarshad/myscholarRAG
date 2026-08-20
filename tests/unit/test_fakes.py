@@ -8,7 +8,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from myscholar.adapters.fakes import FakeChatModel, HashEmbedder, NoopReranker
+from myscholar.adapters.fakes import FakeChatModel, HashEmbedder
 from myscholar.adapters.fakes.store import InMemoryVectorStore, _Record
 from myscholar.ports.llm import Message, Role
 from myscholar.ports.store import SearchFilters
@@ -82,22 +82,6 @@ class TestHashEmbedder:
         vector = await embedder.embed_query(text)
 
         assert sum(v * v for v in vector) == pytest.approx(1.0, abs=1e-9)
-
-
-class TestNoopReranker:
-    async def test_preserves_order_and_respects_top_n(self) -> None:
-        reranker = NoopReranker()
-
-        results = await reranker.rerank("q", ["a", "b", "c", "d"], top_n=2)
-
-        assert [index for index, _ in results] == [0, 1]
-
-    async def test_handles_fewer_passages_than_requested(self) -> None:
-        reranker = NoopReranker()
-
-        results = await reranker.rerank("q", ["only one"], top_n=10)
-
-        assert len(results) == 1
 
 
 class TestInMemoryVectorStore:

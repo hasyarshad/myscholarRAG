@@ -44,9 +44,17 @@ class OllamaChatModel(ChatModel):
         timeout_seconds: float = 120.0,
         keep_alive: int | str = -1,
         suppress_reasoning: bool = True,
+        api_key: str | None = None,
     ) -> None:
         self._model = model
         self._base_url = base_url.rstrip("/")
+        # Ollama Cloud speaks the same /api/chat as a local server, so the only
+        # differences are the host and a bearer token. That is the whole reason
+        # this adapter serves both: dev and production run identical code paths
+        # against identical request shapes, which is a stronger claim of
+        # parity than "we swapped in a different vendor's SDK".
+        self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        self._cloud = bool(api_key)
         self._temperature = temperature
         self._timeout = timeout_seconds
         # -1 keeps weights resident indefinitely. Without it Ollama evicts the
@@ -91,13 +99,18 @@ class OllamaChatModel(ChatModel):
         # `message.content` and contaminates the answer. Omitting it keeps
         # `content` clean; the prompt directive above is what actually shortens
         # the reasoning.
-        return {
+        payload: dict[str, Any] = {
             "model": self._model,
             "messages": wire,
             "stream": stream,
-            "keep_alive": self._keep_alive,
             "options": options,
         }
+        if not self._cloud:
+            # Residency is a property of a server holding weights in memory.
+            # Sending it to a shared cloud endpoint asks for something it does
+            # not own, so it is omitted rather than ignored.
+            payload["keep_alive"] = self._keep_alive
+        return payload
 
     async def complete(
         self,
@@ -109,7 +122,7 @@ class OllamaChatModel(ChatModel):
         payload = self._payload(
             messages, temperature=temperature, max_tokens=max_tokens, stream=False
         )
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        async with httpx.AsyncClient(timeout=self._timeout, headers=self._headers) as client:
             try:
                 response = await client.post(f"{self._base_url}/api/chat", json=payload)
                 response.raise_for_status()
@@ -131,7 +144,7 @@ class OllamaChatModel(ChatModel):
             messages, temperature=temperature, max_tokens=max_tokens, stream=True
         )
         async with (
-            httpx.AsyncClient(timeout=self._timeout) as client,
+            httpx.AsyncClient(timeout=self._timeout, headers=self._headers) as client,
             client.stream("POST", f"{self._base_url}/api/chat", json=payload) as response,
         ):
             response.raise_for_status()
@@ -157,7 +170,7 @@ class OllamaChatModel(ChatModel):
         # rather than merely unlikely.
         payload["format"] = schema.model_json_schema()
 
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        async with httpx.AsyncClient(timeout=self._timeout, headers=self._headers) as client:
             try:
                 response = await client.post(f"{self._base_url}/api/chat", json=payload)
                 response.raise_for_status()

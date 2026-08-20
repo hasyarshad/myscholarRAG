@@ -146,6 +146,47 @@ class TestOllama:
         # 'missing unit in duration'. Found against a live server.
         assert captured["keep_alive"] == -1
 
+    async def test_cloud_sends_a_bearer_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ollama Cloud is the same API behind an API key.
+
+        Same adapter, same request shape, different host — which is what makes
+        development and production genuinely comparable rather than merely
+        similar.
+        """
+        seen: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.update(request.headers)
+            return httpx.Response(200, json={"message": {"content": "x"}})
+
+        _patch_transport(monkeypatch, httpx.MockTransport(handler))
+        await OllamaChatModel(
+            "gpt-oss:120b-cloud", base_url="https://ollama.com", api_key="secret"
+        ).complete(QUESTION)
+
+        assert seen["authorization"] == "Bearer secret"
+
+    async def test_cloud_is_not_asked_to_keep_weights_resident(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`keep_alive` pins weights in one server's memory.
+
+        A shared cloud endpoint has no such memory to pin, so sending it asks
+        for something the host does not own.
+        """
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.update(json.loads(request.content))
+            return httpx.Response(200, json={"message": {"content": "x"}})
+
+        _patch_transport(monkeypatch, httpx.MockTransport(handler))
+        await OllamaChatModel(
+            "gpt-oss:120b-cloud", base_url="https://ollama.com", api_key="secret"
+        ).complete(QUESTION)
+
+        assert "keep_alive" not in captured
+
     async def test_structured_sends_the_schema(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Decoding is constrained to the schema rather than parsed hopefully."""
         captured: dict[str, object] = {}

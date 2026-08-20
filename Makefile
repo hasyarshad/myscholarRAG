@@ -111,3 +111,46 @@ papers:  ## List what is indexed
 clean:  ## Remove caches and build artifacts
 	rm -rf .pytest_cache .ruff_cache .mypy_cache dist build
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
+
+## --- Containers -----------------------------------------------------------
+## Rootless Docker. The compose stack runs its own empty Postgres on 5434, so
+## it can never touch the development index on 5433.
+
+docker-build:  ## Build the production image (exports and verifies the embedder)
+	docker build -f docker/Dockerfile -t myscholar-api:local .
+
+compose-up:  ## Bring up the containerised stack (db + api) on :8001
+	docker compose -f docker/compose.yaml up --build -d
+	@echo "waiting for the API..."
+	@until curl -sf http://localhost:8001/healthz >/dev/null; do sleep 2; done
+	@curl -s http://localhost:8001/readyz; echo
+
+compose-restore:  ## Load the local index into the compose database
+	./scripts/push_index.sh --dump-only
+	docker compose -f docker/compose.yaml exec -T db \
+		psql -U myscholar -d myscholar -v ON_ERROR_STOP=1 < artifacts/index.sql
+	@curl -s http://localhost:8001/v1/corpus; echo
+
+compose-down:  ## Stop the stack and remove its database volume
+	docker compose -f docker/compose.yaml down -v
+
+## --- Deployment -----------------------------------------------------------
+
+deploy:  ## Build on Cloud Build and deploy to Cloud Run (reads .env)
+	./scripts/deploy_cloudrun.sh
+
+supabase-setup:  ## Create the schema and search indexes on Supabase
+	./scripts/supabase_setup.sh
+
+supabase-check:  ## Report what is currently on Supabase, changing nothing
+	./scripts/supabase_setup.sh --check
+
+push-index:  ## Load the local index into Supabase (reads SUPABASE_DB_URL)
+	./scripts/push_index.sh
+
+push-repo:  ## Push this repository to GitHub (reads GITHUB_TOKEN)
+	./scripts/push_repo.sh
+
+pdf:  ## Rebuild the PDFs from the markdown in docs/
+	./scripts/pdf/build.sh docs/ARCHITECTURE.md docs/ARCHITECTURE.pdf
+	./scripts/pdf/build.sh docs/UNDERSTANDING.md docs/UNDERSTANDING.pdf

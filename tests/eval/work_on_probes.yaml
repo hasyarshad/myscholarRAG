@@ -1,0 +1,168 @@
+# Probe set for questions about someone's work on a subject.
+#
+# A diagnostic set rather than a labelled one. routing_set.yaml has five
+# synthesis questions, too few to tell whether a whole *family* of phrasings
+# misroutes or whether one question happened to.
+#
+# Run: uv run python scripts/probe_routing.py
+# Pinned by: tests/integration/test_routing_contract.py
+#
+# Design: four phrasings crossed with five topics, so a phrasing effect can be
+# separated from a topic effect.
+#
+#   A  "talk to me about his work related to X"
+#   B  "tell me about his X work"
+#   C  "what has he done on X?"
+#   D  "how has his work on X developed over time?"
+#
+# D is a within-set positive control: it states multiplicity outright, which is
+# the cue the gold synthesis cases in routing_set.yaml share. Because D covers
+# the same five topics as A-C, comparing them separates "the phrasing lacks a
+# multiplicity cue" from "the topic is too narrow to look like several papers".
+#
+# Every topic was checked against the corpus to span at least two papers, so
+# single_paper_factual is a genuine misroute on all of them rather than a
+# defensible reading. `papers_on_topic` records the count.
+
+# --- chaos: 2 papers (jerk equation; chaos-based SVPWM) -----------------------
+- question: "talk to me about his work related to chaos theory"
+  kind: probe
+  topic: chaos
+  phrasing: A
+  papers_on_topic: 2
+- question: "tell me about his chaos work"
+  kind: probe
+  topic: chaos
+  phrasing: B
+  papers_on_topic: 2
+- question: "what has he done on chaos?"
+  kind: probe
+  topic: chaos
+  phrasing: C
+  papers_on_topic: 2
+- question: "how has his work on chaos developed over time?"
+  kind: probe
+  topic: chaos
+  phrasing: D
+  papers_on_topic: 2
+
+# --- model predictive control: 8 papers ---------------------------------------
+- question: "talk to me about his work related to model predictive control"
+  kind: probe
+  topic: mpc
+  phrasing: A
+  papers_on_topic: 8
+- question: "tell me about his model predictive control work"
+  kind: probe
+  topic: mpc
+  phrasing: B
+  papers_on_topic: 8
+- question: "what has he done on model predictive control?"
+  kind: probe
+  topic: mpc
+  phrasing: C
+  papers_on_topic: 8
+- question: "how has his work on model predictive control developed over time?"
+  kind: probe
+  topic: mpc
+  phrasing: D
+  papers_on_topic: 8
+
+# --- fault detection: 3 papers (stator winding; rotor imbalance; intrusion) ---
+- question: "talk to me about his work related to fault detection"
+  kind: probe
+  topic: fault-detection
+  phrasing: A
+  papers_on_topic: 3
+- question: "tell me about his fault detection work"
+  kind: probe
+  topic: fault-detection
+  phrasing: B
+  papers_on_topic: 3
+- question: "what has he done on fault detection?"
+  kind: probe
+  topic: fault-detection
+  phrasing: C
+  papers_on_topic: 3
+- question: "how has his work on fault detection developed over time?"
+  kind: probe
+  topic: fault-detection
+  phrasing: D
+  papers_on_topic: 3
+
+# --- grid-connected inverters: 2 papers (LC filter FCS-MPC; LCL filter GA-SMC)-
+- question: "talk to me about his work related to grid-connected inverters"
+  kind: probe
+  topic: grid-inverters
+  phrasing: A
+  papers_on_topic: 2
+- question: "tell me about his grid-connected inverter work"
+  kind: probe
+  topic: grid-inverters
+  phrasing: B
+  papers_on_topic: 2
+- question: "what has he done on grid-connected inverters?"
+  kind: probe
+  topic: grid-inverters
+  phrasing: C
+  papers_on_topic: 2
+- question: "how has his work on grid-connected inverters developed over time?"
+  kind: probe
+  topic: grid-inverters
+  phrasing: D
+  papers_on_topic: 2
+
+# --- sliding mode control: 2 papers (GA-tuned discrete-time; Cuk/flatness) ----
+- question: "talk to me about his work related to sliding mode control"
+  kind: probe
+  topic: sliding-mode
+  phrasing: A
+  papers_on_topic: 2
+- question: "tell me about his sliding mode control work"
+  kind: probe
+  topic: sliding-mode
+  phrasing: B
+  papers_on_topic: 2
+- question: "what has he done on sliding mode control?"
+  kind: probe
+  topic: sliding-mode
+  phrasing: C
+  papers_on_topic: 2
+- question: "how has his work on sliding mode control developed over time?"
+  kind: probe
+  topic: sliding-mode
+  phrasing: D
+  papers_on_topic: 2
+
+# --- controls -----------------------------------------------------------------
+#
+# Copied verbatim from routing_set.yaml with their existing gold labels. If a
+# classifier-prompt change moves any of them, the change is too broad.
+#
+# The two bibliographic entries are the ones most exposed to an edit that widens
+# synthesis: a counting question pulled into a content class is answered by
+# retrieval, which fabricates a number instead of querying for one.
+- question: "What optimisation algorithm does the weighting factors paper use?"
+  kind: control
+  expect: single_paper_factual
+- question: "In the Reddit moderation study, what platform was analysed?"
+  kind: control
+  expect: single_paper_factual
+- question: "What filter is used in the grid-tied inverter paper?"
+  kind: control
+  expect: single_paper_factual
+- question: "Which machine does the meta-learner stacking paper diagnose?"
+  kind: control
+  expect: single_paper_factual
+- question: "What sampling frequency does the LSPMSM fault study use?"
+  kind: control
+  expect: single_paper_factual
+- question: "In the UAV paper, which estimator is applied?"
+  kind: control
+  expect: single_paper_factual
+- question: "Give me a count of his 2021 output"
+  kind: control
+  expect: bibliographic
+- question: "How many journal articles has he written?"
+  kind: control
+  expect: bibliographic

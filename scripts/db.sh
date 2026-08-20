@@ -60,8 +60,10 @@ cmd_setup() {
 
     info "enabling extensions"
     psql -h 127.0.0.1 -p "$PGPORT" -U "$USER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -q <<'SQL'
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+-- Into `extensions`, not `public`. See PostgresStore._EXTENSIONS for why, and
+-- for why pg_trgm is no longer created: nothing ever used it.
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions;
 SQL
 
     local version

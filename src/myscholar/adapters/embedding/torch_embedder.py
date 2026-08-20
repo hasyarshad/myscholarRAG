@@ -16,13 +16,8 @@ import asyncio
 from collections.abc import Sequence
 from typing import Any
 
+from myscholar.adapters.embedding import QUERY_INSTRUCTION
 from myscholar.ports.embedding import Embedder, Vector
-
-#: BGE models were trained with an instruction prefix on queries but not on
-#: passages. Omitting it costs a few points of retrieval accuracy; applying it
-#: to passages as well is worse. The asymmetry lives here, inside one class,
-#: rather than at call sites where the two could drift apart.
-_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
 
 
 class TorchEmbedder(Embedder):
@@ -32,7 +27,7 @@ class TorchEmbedder(Embedder):
         *,
         device: str = "cuda",
         batch_size: int = 32,
-        query_instruction: str | None = _QUERY_INSTRUCTION,
+        query_instruction: str | None = QUERY_INSTRUCTION,
     ) -> None:
         self._model_id = model_id
         self._device = device

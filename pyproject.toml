@@ -39,6 +39,14 @@ serve = [
     "tokenizers>=0.21",
 ]
 
+# Model export: run once, on a machine with the PyTorch weights, to produce the
+# ONNX artifacts that production loads. Never installed in production — the
+# point of the export is that the 2GB of PyTorch is not needed to serve.
+export = [
+    "optimum[onnxruntime]>=1.24",
+    "onnx>=1.17",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",
@@ -114,11 +122,29 @@ ignore = [
 python_version = "3.13"
 strict = true
 warn_unreachable = true
-files = ["src", "tests"]
+# scripts is included, and was not. The evaluation harness and the export
+# tooling import the same domain enums the package does, so a rename that the
+# type checker would catch instantly inside src went unnoticed outside it:
+# RetrievalMode.FULL was deleted with the cross-encoder reranker and
+# scripts/eval_generation.py kept referring to it, so the three-configuration
+# evaluation raised AttributeError partway through every run — after the first
+# configuration had finished and printed, which is what made it look like a
+# completed run rather than a crash. mypy names that line in under a second.
+files = ["src", "tests", "scripts"]
 
 # Third-party packages without bundled type stubs.
 [[tool.mypy.overrides]]
-module = ["ollama.*", "docling.*", "sentence_transformers.*", "onnxruntime.*", "pgvector.*"]
+module = [
+    "ollama.*",
+    "docling.*",
+    "sentence_transformers.*",
+    "onnxruntime.*",
+    "pgvector.*",
+    # Used only by scripts/: the ONNX export and the PDF toolchain.
+    "optimum.*",
+    "pygments.*",
+    "markdown_it.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

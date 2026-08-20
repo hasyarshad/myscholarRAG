@@ -10,8 +10,6 @@ database, and the model's only job is to phrase a result it was handed.
 
 Only verified rows are used. Answering from unverified extraction would swap one
 confident-but-wrong source for another.
-
-See docs/learning/04-query-translation-and-routing.md.
 """
 
 from __future__ import annotations

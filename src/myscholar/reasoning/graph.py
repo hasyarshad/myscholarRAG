@@ -8,8 +8,6 @@ The budget is the point. A self-correcting loop retries when it is unhappy with
 its own output, and a question it will never answer makes it unhappy forever.
 Three independent bounds catch three different runaways, and any one of them
 forces the terminal state.
-
-See docs/learning/05-adaptive-rag-and-hallucination.md.
 """
 
 from __future__ import annotations
@@ -37,12 +35,10 @@ class Budget:
 
     max_steps: int = 24
     max_retrieval_rounds: int = 3
-    max_regenerations: int = 2
     deadline_seconds: float = 45.0
 
     steps_used: int = 0
     retrieval_rounds_used: int = 0
-    regenerations_used: int = 0
     strategies_tried: frozenset[str] = field(default_factory=frozenset)
     started_at: float = field(default_factory=time.monotonic)
 
@@ -58,10 +54,6 @@ class Budget:
     def can_retrieve_again(self) -> bool:
         return self.retrieval_rounds_used < self.max_retrieval_rounds and not self.exhausted
 
-    @property
-    def can_regenerate(self) -> bool:
-        return self.regenerations_used < self.max_regenerations and not self.exhausted
-
     def fresh(self) -> Budget:
         """A budget with the same limits and the counters reset.
 
@@ -75,7 +67,6 @@ class Budget:
             self,
             steps_used=0,
             retrieval_rounds_used=0,
-            regenerations_used=0,
             strategies_tried=frozenset(),
             started_at=time.monotonic(),
         )
@@ -85,19 +76,6 @@ class Budget:
 
     def retrieved(self) -> Budget:
         return replace(self, retrieval_rounds_used=self.retrieval_rounds_used + 1)
-
-    def regenerated(self) -> Budget:
-        return replace(self, regenerations_used=self.regenerations_used + 1)
-
-    def exhaust_regenerations(self) -> Budget:
-        """Spend the whole regeneration allowance at once.
-
-        Used when generation fails outright rather than producing something
-        flawed. Retrying an unavailable model just burns the wall clock, and
-        the loop's exits are all expressed in terms of the budget, so saying
-        "there are no attempts left" is how a node declines to continue.
-        """
-        return replace(self, regenerations_used=self.max_regenerations)
 
     def tried(self, strategy: str) -> Budget:
         """Record a corrective strategy, so none is attempted twice."""

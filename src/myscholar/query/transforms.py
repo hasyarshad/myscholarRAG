@@ -4,8 +4,6 @@ Each transform is a small unit that turns one question into one or more search
 queries. The planner decides which fire; none decides for itself. Applying all
 of them to every question multiplies latency and, for some classes, actively
 damages results — HyDE on a counting question searches for a fabricated number.
-
-See docs/learning/04-query-translation-and-routing.md.
 """
 
 from __future__ import annotations

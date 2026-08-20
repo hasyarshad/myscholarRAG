@@ -1,7 +1,7 @@
 """Docling-based PDF extraction.
 
-Every configuration choice here was measured rather than assumed; the evidence
-is in docs/learning/01b-extraction-findings.md. The two that matter:
+Every configuration choice here was measured rather than assumed. The two that
+matter:
 
 - **The pypdfium backend is not optional.** Docling's default parser silently
   drops ``fl`` and ``fi`` ligatures, turning "flux" into " ux" — 51 corrupted

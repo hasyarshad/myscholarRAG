@@ -28,6 +28,8 @@ export interface Citation {
   page_start: number;
   page_end: number;
   slug: string;
+  /** A DOI for a paper, the page itself otherwise. Empty when neither exists. */
+  source_url: string;
 }
 
 export interface AnswerEvent {
@@ -37,7 +39,8 @@ export interface AnswerEvent {
   refusal_reason: string | null;
   nearest_topics: string[];
   confidence: number;
-  /** A component was unavailable — currently reranking. Shown, not hidden. */
+  /** A check did not complete: generation failed, or grounding was
+   *  inconclusive on an answer whose citations all verified. Shown, not hidden. */
   degraded: boolean;
 }
 

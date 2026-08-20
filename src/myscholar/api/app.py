@@ -2,8 +2,6 @@
 
 One endpoint that matters: ``POST /v1/ask``, which streams the pipeline's
 progress and then the verified answer.
-
-See docs/learning/07-streaming-apis.md.
 """
 
 from __future__ import annotations
@@ -16,13 +14,21 @@ import time
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from typing import Any
 
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from myscholar.adapters.persistence.repository import PostgresStore, create_engine
-from myscholar.api.limits import Gate, OverloadedError, RateLimitedError, RateLimiter
+from myscholar.api.limits import (
+    SECRET_HEADER,
+    Gate,
+    OverloadedError,
+    RateLimitedError,
+    RateLimiter,
+    authorised,
+)
 from myscholar.api.schemas import (
     AnswerEvent,
     AskRequest,
@@ -46,10 +52,10 @@ from myscholar.reasoning.engine import Engine
 logger = logging.getLogger(__name__)
 
 SUGGESTIONS = [
-    "How are weighting factors tuned in predictive torque control?",
+    "How are weighting factors tuned in FCS-MPTC for induction motor drive?",
     "How many papers were published in 2023?",
     "What method detects stator winding inter-turn faults?",
-    "How has the work on model predictive control developed?",
+    "How has the work on model predictive control for MMCs developed?",
 ]
 
 
@@ -82,12 +88,10 @@ async def build_services(settings: Settings | None = None) -> Services:
     )
 
     try:
-        # Idempotent, and the conversation table would otherwise only exist on
-        # a machine that had run an ingest. A serving process doing DDL is a
-        # compromise: acceptable while the database is a local one owned by the
-        # same person, and to be replaced by a migration step before the API
-        # runs against a hosted database with a restricted role.
-        await store.create_schema()
+        # Local convenience only. Against a hosted database the serving role
+        # holds no DDL rights, and `myscholar db migrate` has already run.
+        if settings.database.migrate_on_startup:
+            await store.create_schema()
         documents = await store.list_documents()
         services.slugs = {str(d.id): d.slug for d in documents}
         # The index/embedder agreement check from Phase 1. Failing here at
@@ -119,7 +123,10 @@ def create_app(services: Services | None = None, *, origins: list[str] | None = 
         lifespan=lifespan,
         title="myScholar",
         version="0.1.0",
-        description="Ask about a corpus of research papers. Answers carry verified citations.",
+        description=(
+            "Ask about a personal research corpus — papers, CV and project "
+            "write-ups. Answers carry verified citations."
+        ),
     )
 
     # Exact origins, never a wildcard. Worth being clear that CORS is a
@@ -134,8 +141,32 @@ def create_app(services: Services | None = None, *, origins: list[str] | None = 
         allow_origins=allowed,
         allow_credentials=False,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", SECRET_HEADER],
     )
+
+    configured = services.settings if services else load_settings()
+    secret = configured.api.shared_secret.get_secret_value() if configured.api.shared_secret else ""
+
+    @app.middleware("http")
+    async def require_secret(request: Request, call_next: Any) -> Response:
+        """Guard the data endpoints, leave the probes open.
+
+        Health checks come from the host's own monitor, which has no secret and
+        should not need one — a liveness probe that can fail authentication is a
+        liveness probe that reports the wrong thing. Neither route touches the
+        corpus or costs anything to serve.
+
+        CORS preflight is exempt for the same reason it must be: the browser
+        sends OPTIONS without custom headers, so rejecting it here would block
+        the very requests the secret exists to permit.
+        """
+        if request.method == "OPTIONS" or not request.url.path.startswith("/v1/"):
+            return await call_next(request)  # type: ignore[no-any-return]
+        if not authorised(request.headers.get(SECRET_HEADER), secret):
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED, content={"detail": "unauthorized"}
+            )
+        return await call_next(request)  # type: ignore[no-any-return]
 
     limiter = RateLimiter()
     gate = Gate()
@@ -169,11 +200,18 @@ def create_app(services: Services | None = None, *, origins: list[str] | None = 
 
         checks = {"database": database, "index": indexed}
         ok = all(checks.values())
+
+        # Startup notes describe the state at boot; the counts above are live.
+        # Reporting both unfiltered meant a service that started against an
+        # empty database and was populated afterwards answered "ready" while
+        # still carrying "no documents indexed" — which is the most misleading
+        # possible output in exactly the situation someone is debugging.
+        notes = {k: v for k, v in current.detail.items() if not (ok and k in checks)}
         response.status_code = status.HTTP_200_OK if ok else status.HTTP_503_SERVICE_UNAVAILABLE
         return HealthResponse(
             status="ready" if ok else "degraded",
             checks=checks,
-            detail={**current.detail, **{k: str(v) for k, v in counts.items()}},
+            detail={**notes, **{k: str(v) for k, v in counts.items()}},
         )
 
     @app.get("/v1/papers", response_model=list[PaperView])
@@ -405,6 +443,7 @@ def _answer_event(services: Services, response: Answer | Refusal) -> AnswerEvent
                 page_start=c.page_start,
                 page_end=c.page_end,
                 slug=services.slugs.get(str(c.document_id), ""),
+                source_url=c.source_url,
             )
             for c in response.citations
         ],

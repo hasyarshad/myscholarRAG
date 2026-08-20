@@ -45,7 +45,6 @@ class TestBudget:
 
         assert not budget.exhausted
         assert budget.can_retrieve_again
-        assert budget.can_regenerate
 
     def test_the_step_bound_stops_it(self) -> None:
         budget = Budget(max_steps=3)
@@ -60,12 +59,6 @@ class TestBudget:
         budget = Budget(max_retrieval_rounds=2).retrieved().retrieved()
 
         assert not budget.can_retrieve_again
-        assert not budget.exhausted
-
-    def test_the_regeneration_bound_is_independent(self) -> None:
-        budget = Budget(max_regenerations=1).regenerated()
-
-        assert not budget.can_regenerate
         assert not budget.exhausted
 
     def test_the_deadline_stops_it_regardless_of_steps(self) -> None:
@@ -84,7 +77,7 @@ class TestBudget:
     def test_the_budget_is_immutable(self) -> None:
         original = Budget()
 
-        original.step().retrieved().regenerated()
+        original.step().retrieved().tried("rewrite")
 
         assert original.steps_used == 0
 

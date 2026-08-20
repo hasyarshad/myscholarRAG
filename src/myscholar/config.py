@@ -6,7 +6,7 @@ with the ``MYSCHOLAR_`` prefix; nested groups use a double underscore, so
 
 Keeping provider choices here — rather than at call sites — is what allows the
 same code to run against a local GPU in development and a hosted API in
-production. See docs/learning/00-architecture-and-ports.md.
+production.
 """
 
 from __future__ import annotations
@@ -28,12 +28,6 @@ class EmbeddingProvider(StrEnum):
     TORCH = "torch"
     ONNX = "onnx"
     HASH = "hash"
-
-
-class RerankerProvider(StrEnum):
-    TORCH = "torch"
-    ONNX = "onnx"
-    NOOP = "noop"
 
 
 class LLMSettings(BaseModel):
@@ -100,52 +94,76 @@ class EmbeddingSettings(BaseModel):
     device: str = "cuda"
     """Only consulted by the torch adapter; ONNX is CPU-only by design."""
 
+    onnx_path: Path = Path("artifacts/embedder-onnx")
+    """Where `scripts/export_onnx.py` wrote the graph this serves.
 
-class RerankerSettings(BaseModel):
-    provider: RerankerProvider = RerankerProvider.NOOP
-    model_id: str = "BAAI/bge-reranker-base"
-    device: str = "cuda"
+    The float32 export, not the quantised one, and the reason is that there is
+    nothing to trade. float32 agrees with PyTorch at 1.00000 cosine and returns
+    identical retrieval metrics to three decimals across all five evaluated
+    configurations, so serving it is indistinguishable from serving the model
+    the index was built with. int8 agrees at 0.9888, which is close enough to
+    look right and far enough to reorder near neighbours. It costs 306MB and
+    126ms per batch less — neither of which matters beside a hosted generation
+    call taking seconds. Point this at `embedder-onnx-int8` only if a host
+    forces the size, and re-index the corpus with it if you do.
+    """
+
+    onnx_model_id: str | None = None
+    """Recorded with every vector this produces. None means "same as model_id".
+
+    Sharing the identifier is a claim, and the parity check is what earns it:
+    the float32 export agrees with PyTorch to 1.00000 on every probe, so the
+    two are the same embedder in every way the index can observe. That is what
+    lets ingestion run on the GPUs here and the container serve those vectors
+    from CPU without re-embedding anything.
+
+    Set it explicitly to something distinct when the graph is *not* equivalent
+    — int8 is the live example. The startup assertion then refuses the mismatch
+    instead of letting it degrade quietly, which is the old two-embedder bug.
+    """
+
+    onnx_threads: int = 0
+    """0 leaves ONNX Runtime's default. On a two-core host, oversubscribing
+    threads makes latency worse."""
+
+    @model_validator(mode="after")
+    def _default_onnx_id(self) -> EmbeddingSettings:
+        if self.onnx_model_id is None:
+            self.onnx_model_id = self.model_id
+        return self
 
 
 class DatabaseSettings(BaseModel):
     url: str = "postgresql+asyncpg://myscholar:myscholar@localhost:5433/myscholar"
     echo: bool = False
 
+    migrate_on_startup: bool = True
+    """Whether the API creates its own tables when it boots.
+
+    Convenient locally, where the database is a user process owned by the same
+    person and the conversation table would otherwise only exist on a machine
+    that had run an ingest. Wrong in production for two reasons: the serving
+    role should hold no DDL rights at all, so the attempt either fails or proves
+    the role is over-privileged; and every replica racing to create the same
+    tables is a deadlock waiting for a second instance.
+
+    Set MYSCHOLAR_DATABASE__MIGRATE_ON_STARTUP=false there and run
+    `myscholar db migrate` once, as an admin, before deploying.
+    """
+
 
 class RetrievalSettings(BaseModel):
     top_k: int = 50
     """Candidates fetched per branch before fusion."""
 
-    rerank: bool = False
-    """Whether the cross-encoder reorders the fused candidates.
+    context_blocks: int = 8
+    """How many context blocks reach the generator.
 
-    Off, because on this corpus it makes retrieval worse. Measured over the
-    37-question set, hit@1 0.84 -> 0.65 and MRR 0.887 -> 0.766, and the damage
-    is concentrated where documents are near-identical:
-
-        kind             hybrid   reranked
-        confusable         1.00       0.50
-        topical            1.00       0.80
-        paraphrase         0.88       0.75
-        ambiguousdomain    0.75       1.00
-        deepcontent        1.00       1.00
-
-    It earns its place on vague questions and loses it everywhere else. That
-    is not a surprise in hindsight: a cross-encoder reads one query against one
-    passage with no view of the corpus, so among twenty papers that share a
-    vocabulary it cannot tell the passage that is *about* the subject from the
-    one that is the answer. Fusion order carries that corpus-level signal.
-
-    Blending the two orderings by reciprocal rank was tried first and recovered
-    almost nothing (MRR 0.766). The component stays, because a larger or more
-    heterogeneous corpus would likely flip this, and because the ablation is
-    part of the evaluation — but it is not on by default on the evidence here.
-
-    Turn on with MYSCHOLAR_RETRIEVAL__RERANK=true.
+    Named for what it does. It was `rerank_k` — the number surviving a
+    cross-encoder — but the cross-encoder was measured to make retrieval worse
+    on this corpus and has been removed, so the name described a stage that no
+    longer exists.
     """
-
-    rerank_k: int = 8
-    """Candidates surviving the cross-encoder and passed to generation."""
 
     window: int = 2
     """Chunks of context pulled either side of a hit during parent expansion."""
@@ -173,7 +191,6 @@ class ReasoningSettings(BaseModel):
 
     max_steps: int = 24
     max_retrieval_rounds: int = 3
-    max_regenerations: int = 2
 
     deadline_seconds: float = 90.0
     """Wall clock for one question.
@@ -259,6 +276,20 @@ class ApiSettings(BaseModel):
     the shared secret the Next.js proxy injects.
     """
 
+    shared_secret: SecretStr | None = None
+    """Required on every /v1 request when set. Empty in development.
+
+    This is the control that actually restricts who reaches the endpoint. It is
+    held by the Next.js route handler, which runs on a server, so it never
+    enters a browser bundle — and it must not, since a secret shipped to the
+    client is decoration.
+
+    It authenticates *the site*, not the visitor, which is the right granularity
+    here: anyone may ask questions through the page, nobody may point a load
+    generator at a free-tier container directly. Generate with
+    `openssl rand -hex 32`.
+    """
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -271,7 +302,6 @@ class Settings(BaseSettings):
 
     llm: LLMSettings = Field(default_factory=LLMSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
-    reranker: RerankerSettings = Field(default_factory=RerankerSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     retrieval: RetrievalSettings = Field(default_factory=RetrievalSettings)
     reasoning: ReasoningSettings = Field(default_factory=ReasoningSettings)

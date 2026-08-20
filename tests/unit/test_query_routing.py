@@ -353,7 +353,15 @@ class TestPlanner:
             plan = QueryPlanner().plan(Classification(query_class=query_class))
             assert SectionKind.REFERENCES in plan.exclude_sections
 
-    def test_a_resolved_paper_becomes_a_filter(self) -> None:
+    def test_a_single_paper_question_anchors_rather_than_filtering(self) -> None:
+        """A resolved title used to become a document filter. It never happened.
+
+        The filter was wired from the classifier's extracted titles and did not
+        fire once in practice — "the FCS-MPTC paper" and "the MMC paper" both
+        extract nothing, correctly, since neither string appears in any title.
+        Anchoring covers that shorthand by concentrating on the best-matching
+        document instead of trying to name it.
+        """
         plan = QueryPlanner().plan(
             Classification(
                 query_class=QueryClass.SINGLE_PAPER_FACTUAL,
@@ -361,7 +369,8 @@ class TestPlanner:
             )
         )
 
-        assert plan.filter_document_titles == (TITLES[0],)
+        assert plan.anchor_to_top_document
+        assert not hasattr(plan, "filter_document_titles")
 
 
 class TestBibliographicIntent:

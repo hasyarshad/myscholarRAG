@@ -2,13 +2,13 @@
 
     uv run python scripts/eval_retrieval.py
 
-Runs the same test set through dense, hybrid, and hybrid+rerank, and reports
+Runs the same test set through dense and hybrid, and reports
 hit@k and MRR. No language model is involved, so this is fast, deterministic,
 and cheap enough to run after any retrieval change.
 
 The per-kind breakdown is the interesting part: an average that improves tells
 you something worked, but not what. Identifier questions should show the
-lexical branch earning its place, and paraphrase questions the reranker.
+lexical branch earning its place.
 """
 
 from __future__ import annotations
@@ -58,8 +58,7 @@ class Outcome:
     """Fraction of the returned chunks that come from the expected document.
 
     Document-level rank cannot see intra-document reordering, which is most of
-    what a reranker does once the right paper is already found. This measures
-    what the generator actually receives, so the reranker has somewhere to
+    This measures what the generator actually receives, so the effect of
     show up.
     """
 
@@ -102,15 +101,13 @@ async def evaluate(mode: RetrievalMode, cases: list[dict[str, Any]]) -> list[Out
 
     slugs = {row.id: row.slug for row in await store.list_documents()}
 
-    # Constructed here rather than through assembly because this is the
-    # ablation: the reranker is deliberately absent for the dense and hybrid
-    # rows, which is the one thing the shared builder will not do.
+    # Constructed here rather than through assembly so the dense and hybrid
+    # rows differ in exactly one component.
     retriever = HybridRetriever(
         store=store,
         embedder=container.embedder,
-        reranker=container.reranker if mode is RetrievalMode.FULL else None,
         top_k=settings.retrieval.top_k,
-        rerank_k=settings.retrieval.rerank_k,
+        context_blocks=settings.retrieval.context_blocks,
         window=settings.retrieval.window,
         dense_weight=settings.retrieval.dense_weight,
         lexical_weight=settings.retrieval.lexical_weight,
@@ -208,41 +205,19 @@ def render(results: dict[str, list[Outcome]]) -> str:
             else ["None."]
         )
 
-    lines += ["", "## Questions the reranker changed", ""]
-    if "hybrid" in results and "full" in results:
-        moved = [
-            (results["hybrid"][i], results["full"][i])
-            for i in range(len(results["hybrid"]))
-            if results["hybrid"][i].rank != results["full"][i].rank
-        ]
-        if moved:
-            lines += [
-                f"- {before.rank or '—'} → {after.rank or '—'}  ({after.kind}) {after.question}"
-                for before, after in moved
-            ]
-        else:
-            lines.append("None — reranking left every document rank unchanged.")
-
     return "\n".join(lines) + "\n"
 
 
-async def evaluate_routed(cases: list[dict[str, Any]], *, rerank: bool) -> list[Outcome]:
+async def evaluate_routed(cases: list[dict[str, Any]]) -> list[Outcome]:
     """The full shipped path: classify, plan, select documents, retrieve, fuse.
 
-    Compared against `full` this isolates what routing adds on content
+    Compared against `hybrid` this isolates what routing adds on content
     questions. The bibliographic and out-of-scope classes are excluded here
     because they bypass retrieval entirely — their improvement is measured in
     the routing evaluation, not this one.
 
-    ``rerank`` is a parameter rather than a setting because the cross-encoder's
-    value is now an open question again. It was measured as harmful when it
-    re-ordered the whole corpus; it now runs *after* document selection, which
-    is a different and better-posed task — choosing passages within papers
-    already known to be relevant, rather than deciding which paper is relevant.
-    The two rows answer that directly.
     """
     settings = load_settings()
-    settings.retrieval.rerank = rerank
     container = build_container(settings)
     store = PostgresStore(create_engine(settings.database.url))
     documents = await store.list_documents()
@@ -288,7 +263,7 @@ async def main() -> int:
     print(f"{len(cases)} questions\n")
 
     results: dict[str, list[Outcome]] = {}
-    for mode in (RetrievalMode.DENSE, RetrievalMode.HYBRID, RetrievalMode.FULL):
+    for mode in (RetrievalMode.DENSE, RetrievalMode.HYBRID):
         outcomes = await evaluate(mode, cases)
         results[mode.value] = outcomes
         m = Metrics.of(outcomes)
@@ -297,15 +272,14 @@ async def main() -> int:
             f"hit@5={m.hit_at[5]:.2f} MRR={m.mrr:.3f} ctx-prec={m.context_precision:.3f}"
         )
 
-    for name, rerank in (("routed", False), ("routed+rerank", True)):
-        outcomes = await evaluate_routed(cases, rerank=rerank)
-        results[name] = outcomes
-        m = Metrics.of(outcomes)
-        print(
-            f"{name:13s} hit@1={m.hit_at[1]:.2f} hit@3={m.hit_at[3]:.2f} "
-            f"hit@5={m.hit_at[5]:.2f} MRR={m.mrr:.3f} ctx-prec={m.context_precision:.3f} "
-            f"bypassed={m.bypassed}"
-        )
+    outcomes = await evaluate_routed(cases)
+    results["routed"] = outcomes
+    m = Metrics.of(outcomes)
+    print(
+        f"{'routed':13s} hit@1={m.hit_at[1]:.2f} hit@3={m.hit_at[3]:.2f} "
+        f"hit@5={m.hit_at[5]:.2f} MRR={m.mrr:.3f} ctx-prec={m.context_precision:.3f} "
+        f"bypassed={m.bypassed}"
+    )
 
     RESULTS.mkdir(exist_ok=True)
     (RESULTS / "retrieval.md").write_text(render(results), "utf-8")

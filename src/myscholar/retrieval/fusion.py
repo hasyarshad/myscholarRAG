@@ -8,8 +8,6 @@ is wrong for half the queries, because which branch dominates varies per query.
 RRF discards the scores and uses only the ranks::
 
     score(d) = sum over branches  weight_b / (k + rank_b(d))
-
-See docs/learning/02-hybrid-search-and-reranking.md.
 """
 
 from __future__ import annotations

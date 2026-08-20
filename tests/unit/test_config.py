@@ -59,3 +59,25 @@ def test_api_key_is_not_printed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MYSCHOLAR_LLM__API_KEY", "gsk-super-secret")
 
     assert "gsk-super-secret" not in repr(make_settings())
+
+
+def test_the_suite_is_isolated_from_a_developers_env_file() -> None:
+    """A local .env must never decide whether the tests pass.
+
+    Found the hard way: filling in MYSCHOLAR_API__SHARED_SECRET for a real
+    deployment made seventeen unrelated tests fail, because `load_settings()`
+    reads `.env` and the API then demanded a secret the tests do not send. The
+    suite had been quietly coupled to one machine's configuration.
+    """
+    import pathlib
+    import re
+
+    offenders = [
+        path.name
+        for path in pathlib.Path("tests").rglob("*.py")
+        if re.search(r"^from myscholar\.config import .*load_settings", path.read_text(), re.M)
+    ]
+    assert offenders == [], (
+        f"{offenders} call load_settings(), which reads .env. "
+        f"Use make_settings() from tests/conftest.py instead."
+    )

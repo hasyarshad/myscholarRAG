@@ -1,3 +1,7 @@
 node_modules/
 .next/
 out/
+
+# TypeScript build state and the ambient types Next regenerates on every build.
+*.tsbuildinfo
+next-env.d.ts

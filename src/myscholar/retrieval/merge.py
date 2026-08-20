@@ -13,8 +13,6 @@ version had three defects:
   boundary could stitch two papers into one span and cite it as one source.
 
 Keying spans on ``section_id`` makes the third unrepresentable.
-
-See docs/learning/02-hybrid-search-and-reranking.md.
 """
 
 from __future__ import annotations

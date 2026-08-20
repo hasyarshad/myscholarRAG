@@ -122,6 +122,16 @@ class ContextBlock:
     worst error a portfolio assistant can make, and it reads as authoritative.
     """
 
+    authors: tuple[str, ...] = ()
+    """Who wrote the source document.
+
+    Rendered into the prompt because a passage cannot show it. Related-work
+    sections are dense with other researchers' names and silent about their
+    own authors, so a generator given only passage text has no way to answer
+    "is this his?" — and will answer from the names it can see, which are the
+    wrong ones.
+    """
+
     document_kind: str = ""
     """Paper, CV or site page.
 
@@ -131,10 +141,31 @@ class ContextBlock:
     is most likely to be checking whether the thing works.
     """
 
-    def render(self) -> str:
-        """Format for inclusion in a prompt."""
+    source_url: str = ""
+    """Where a reader can go to check the claim: a DOI, or the page itself.
+
+    Deliberately never rendered into the prompt. A citation marker is the
+    model's only way to point at a source and it is verified against the
+    retrieved set; putting a URL in front of the model instead invites it to
+    write one out, and a fabricated link is a worse failure than a missing one
+    because it looks authoritative until clicked.
+    """
+
+    def render(self, *, owner: str = "") -> str:
+        """Format for inclusion in a prompt.
+
+        ``owner`` is the corpus owner's name. When given, each excerpt is
+        marked as theirs or not, which is the only way the generator can answer
+        an attribution question — the passage text will not tell it.
+        """
         review = " [REVIEW: describes other researchers' work]" if self.is_review else ""
+        byline = ""
+        if self.authors:
+            surname = owner.split()[-1].lower() if owner else ""
+            mine = surname and any(surname in a.lower() for a in self.authors)
+            whose = "BY THE AUTHOR" if mine else "NOT BY THE AUTHOR"
+            byline = f" [{whose}: {', '.join(self.authors[:4])}]"
         return (
-            f"[{self.label}]{review} {self.document_title} — {self.section_heading} "
+            f"[{self.label}]{review}{byline} {self.document_title} — {self.section_heading} "
             f"(p. {self.page_start}-{self.page_end})\n{self.text}"
         )

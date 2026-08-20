@@ -69,7 +69,7 @@ class DocumentStats:
     doi: str | None
 
 
-def check(documents: list[DocumentStats]) -> list[Finding]:
+def check(documents: list[DocumentStats], *, model_ids: set[str] | None = None) -> list[Finding]:
     """Every invariant, over the whole corpus.
 
     Returns findings rather than raising, because a corpus with one damaged
@@ -86,6 +86,25 @@ def check(documents: list[DocumentStats]) -> list[Finding]:
 
     if not documents:
         return [Finding(Severity.FAIL, "corpus", "nothing indexed")]
+
+    if model_ids and len(model_ids) > 1:
+        # Keying embeddings by (chunk_id, model_id) makes two models *storable*
+        # side by side. It does not make them searchable side by side, and the
+        # difference is expensive: the HNSW index covers the whole column, so a
+        # search collects its candidates from every model's vectors and only
+        # then filters to the one asked for. Half the candidates are discarded
+        # and the search silently runs at half the breadth it was configured
+        # for. Measured here, indexing a second model cost 0.07 MRR — with no
+        # error, and with both models individually correct.
+        #
+        # Fix by dropping the unused model, or by giving each one a partial
+        # HNSW index so the filter is applied before the scan rather than after.
+        fail(
+            "corpus",
+            f"{len(model_ids)} embedding models indexed ({', '.join(sorted(model_ids))}). "
+            f"They share one HNSW index, so each degrades the other's recall. "
+            f"Keep one: DELETE FROM chunk_embeddings WHERE model_id = '<unused>'",
+        )
 
     seen_titles: dict[str, str] = {}
     for d in documents:

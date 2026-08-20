@@ -41,6 +41,14 @@ class CitationView(BaseModel):
     page_end: int
     slug: str = ""
 
+    source_url: str = ""
+    """Where the citation points: a DOI for a paper, the page itself otherwise.
+
+    Empty when the document has neither, and the widget then renders the
+    citation as plain text. Showing a link that goes nowhere is worse than
+    showing none, because the reader only finds out after following it.
+    """
+
 
 class SessionEvent(BaseModel):
     """The conversation this exchange belongs to.
@@ -79,7 +87,7 @@ class AnswerEvent(BaseModel):
     nearest_topics: list[str] = Field(default_factory=list)
     confidence: float = 0.0
     degraded: bool = False
-    """A component was unavailable — currently reranking. Reported rather than
+    """The answer is known to be lower quality than usual. Reported rather than
     hidden, so a lower-quality answer is identifiable as one."""
 
 

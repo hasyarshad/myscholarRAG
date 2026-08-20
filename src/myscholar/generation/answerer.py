@@ -3,12 +3,11 @@
 Three model-backed steps, each asked a narrow question rather than a broad one.
 Where a check can be done without a model it is done in ``citations.py``
 instead; this module handles only what genuinely needs judgement.
-
-See docs/learning/05-adaptive-rag-and-hallucination.md.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -19,6 +18,8 @@ from myscholar.domain.documents import ContextBlock
 from myscholar.domain.enums import Verdict
 from myscholar.ports.llm import ChatModel, Message, Role
 
+logger = logging.getLogger(__name__)
+
 #: The person's name is the *only* thing interpolated, and it comes from
 #: configuration rather than from a request. User text and retrieved passages
 #: are never formatted into this — a prompt assembled from untrusted input is
@@ -28,24 +29,49 @@ the excerpts provided.
 
 Refer to {short_name} by name or as "he", never as "the researcher" or "the author".
 
-Rules, in order of importance:
+Write the answer as statements, each ending with the marker of the excerpt it came
+from. The example below is deliberately about something else entirely — it shows
+the *form* of an answer, and none of its content belongs in one:
 
-1. Use only the excerpts. If they do not contain the answer, say so plainly.
-   Never draw on knowledge from outside them, even if you are confident.
-2. Every sentence stating a fact must end with a citation marker naming the
-   excerpt it came from, like [C1]. Use several as [C1][C3] where needed.
-   This includes the opening sentence. A general summary of the excerpts is
-   still a claim about them and still needs a marker.
-3. Never cite a label that is not in the excerpts you were given.
-4. Quote verbatim only when the words appear exactly in an excerpt.
-5. Be concise. Three or four sentences is usually enough.
-6. An excerpt marked [REVIEW] comes from a paper that surveys other
-   researchers' work. Never credit its methods to {short_name}. His
-   contribution there is the review itself, not the techniques it describes.
-7. If the question asks which things, how many, or for a list, name them.
-   Saying they "are listed in the excerpts" is not an answer — the reader
-   cannot see the excerpts. This outranks rule 5: a list of nine awards is
-   still concise if nine were asked for."""
+    The trial compared three brewing temperatures [C2]. Higher temperatures
+    extracted more caffeine but increased bitterness [C2]. A coarser grind at
+    the same three temperatures showed the same trend [C1][C4].
+
+Seven rules:
+
+1. Only the excerpts. If they do not contain the answer, say so plainly. Never
+   draw on knowledge from outside them, and never cite a label you were not
+   given.
+2. Every sentence ends with its marker, as above. Use several — [C1][C3] — when
+   a sentence draws on more than one excerpt. A sentence with no marker will be
+   deleted before the reader sees it, so an uncited point is a point lost.
+   A marker is a reference, never the subject of a sentence. Write "MOPSO with
+   Vikor selects the best compromise [C2]", never "[C2] describes MOPSO" or
+   "In [C1], the method is mentioned". Say what is true; the marker records
+   where it came from.
+3. Every sentence must stand on its own. Any one of them may be removed before
+   the reader sees it, so a sentence that leans on its neighbour becomes
+   nonsense when the neighbour goes. Never open one with "In another work",
+   "These methods", "This approach" or "The study also" — name the thing
+   instead.
+4. Quote words verbatim only when they appear exactly in an excerpt.
+5. Answer the question in the first sentence, before any detail. Opening with a
+   finding leaves the reader to work out what was asked.
+   - A question beginning has, did, does, is, are or can is asking yes or no.
+     Say so, and name the work in the same breath: "Yes. He studied content
+     moderation on Reddit during the pandemic." Then give the findings.
+   - Every other question is not. "What accuracy did it reach?" is answered by
+     the accuracy, "which paper" by the paper. Never begin one of these with
+     yes or no.
+6. Answer the question; do not summarise what was retrieved. Working through
+   the excerpts one at a time produces a reading list, not an answer. Where
+   several excerpts describe one thing, say it once and cite them together.
+   The question sets the length: one fact deserves a sentence, the range of
+   someone's work deserves a sentence or two for each part of it. If the
+   question asks which, how many, or for a list, name them.
+7. The labels say whose work it is. [BY THE AUTHOR] is {short_name}'s.
+   [NOT BY THE AUTHOR] and [REVIEW] are other researchers' — never credit their
+   methods to him, whatever names appear inside the text."""
 
 
 def system_prompt(name: str = "the researcher", short_name: str = "they") -> str:
@@ -94,19 +120,28 @@ silent, and not when they neither confirm nor deny.
 If contradicted, say in one sentence what the excerpts do say instead.
 /no_think"""
 
-_GRADE_PROMPT = """Judge whether each excerpt helps answer the question.
+_GRADE_PROMPT = """Judge whether each excerpt could contribute to an answer.
 
 Question: "{question}"
 
 {excerpts}
 
-For each excerpt give a verdict:
-- relevant: contains information that answers the question
-- partial: related and might contribute, but does not answer it directly
-- irrelevant: does not help
+These excerpts are the best matches a search found in a small collection, so
+most of them belong. Your job is to remove what is genuinely about a different
+subject — not to keep only what is closest.
 
-Give a short reason for anything not relevant, naming what it is about instead.
-That reason is used to improve the search, so be specific."""
+An excerpt is relevant when it *demonstrates* what was asked about, even if it
+never uses the words of the question. Asked about someone's machine learning
+work, a paper applying a neural network is relevant although it may never say
+"machine learning"; so is a project building a model. Asked about a method, a
+paper using that method is relevant even where it does not discuss it.
+
+- relevant: contributes something an answer would want
+- partial: connected, adds context
+- irrelevant: about a different subject entirely
+
+Only irrelevant excerpts are discarded, so use it sparingly. Give a short
+reason for those, naming what they are about instead."""
 
 _REWRITE_PROMPT = """A search failed to find what was needed. Write a better search query.
 
@@ -119,15 +154,30 @@ Write one search query likely to find the right passages. Use the vocabulary a
 research paper would use, not the vocabulary of the question. Return the query
 only."""
 
-_GROUNDED_PROMPT = """Check whether an excerpt supports a statement.
+_GROUNDED_PROMPT = """Check whether an excerpt supports the factual content of a statement.
 
 Excerpt:
 {excerpt}
 
 Statement: "{statement}"
 
-Answer supported only if the excerpt states or directly implies the statement.
-If the excerpt is merely about the same topic, that is not support."""
+Judge the *facts* the statement asserts — the methods, numbers, materials and
+findings. Ignore how it is framed.
+
+In particular, these are all supported when the excerpt contains the underlying
+fact, because the corpus belongs to one researcher and describing his work is
+the entire task:
+
+- attributing the excerpt's work to him — "he developed X", "his approach uses
+  X", "he has expertise in X" — when the excerpt says the work uses X
+- characterising it — "strong", "advanced", "significant" — where the excerpt
+  reports the result being characterised
+- generalising across the excerpt — "he works on fault diagnosis" where the
+  excerpt is about detecting a fault
+
+Answer unsupported when a fact is *absent or contradicted*: a number that does
+not appear, a method the excerpt does not mention, a claim the excerpt denies.
+An excerpt merely on the same topic is not support for a specific fact."""
 
 _NEAREST_PROMPT = """Name the topics this collection of research covers, based on these excerpts.
 
@@ -184,6 +234,16 @@ class GradedContext:
     rejected: tuple[tuple[ContextBlock, str], ...]
     """Blocks dropped, with the grader's stated reason — used to rewrite."""
 
+    unavailable: bool = False
+    """True when grading could not run, as distinct from finding everything relevant.
+
+    Both keep every block, and until this existed the two were indistinguishable
+    anywhere downstream: the trace read "8 kept, 0 dropped" whether the grader
+    had judged eight passages or had never answered at all. That is exactly how
+    a model-server misconfiguration went undiagnosed — a call that stalled until
+    it timed out looked, in every log and every trace, like a clean pass.
+    """
+
     @property
     def sufficient(self) -> bool:
         return bool(self.kept)
@@ -210,13 +270,19 @@ class Answerer:
     ) -> None:
         self._generator = generator
         self._utility = utility
+        self._person = person_name
         self._system = system_prompt(person_name, short_name)
 
-    @staticmethod
-    def render(blocks: Sequence[ContextBlock]) -> str:
-        return "\n\n".join(block.render() for block in blocks)
+    def render(self, blocks: Sequence[ContextBlock]) -> str:
+        return "\n\n".join(block.render(owner=self._person) for block in blocks)
 
-    async def grade(self, question: str, blocks: Sequence[ContextBlock]) -> GradedContext:
+    async def grade(
+        self,
+        question: str,
+        blocks: Sequence[ContextBlock],
+        *,
+        discard: frozenset[Verdict] = frozenset({Verdict.IRRELEVANT}),
+    ) -> GradedContext:
         """Grade every block in one call.
 
         Batched rather than one call per block: it is eight times fewer round
@@ -241,8 +307,11 @@ class Answerer:
                 ],
                 Grades,
             )
-        except Exception:  # noqa: BLE001 - a broken grader must not cause a refusal
-            return GradedContext(kept=tuple(blocks), rejected=())
+        except Exception:
+            # Failing open is right — a broken grader must not turn an
+            # answerable question into a refusal — but it must not be silent.
+            logger.exception("grading unavailable; keeping every retrieved block")
+            return GradedContext(kept=tuple(blocks), rejected=(), unavailable=True)
 
         verdicts = {g.label.upper(): g for g in result.grades}
         kept: list[ContextBlock] = []
@@ -251,7 +320,7 @@ class Answerer:
             grade = verdicts.get(block.label.upper())
             # An ungraded block is kept: the grader simply did not mention it,
             # which is not evidence against it.
-            if grade is None or grade.verdict is not Verdict.IRRELEVANT:
+            if grade is None or grade.verdict not in discard:
                 kept.append(block)
             else:
                 rejected.append((block, grade.reason or "not relevant"))
@@ -368,7 +437,12 @@ class Answerer:
                 ],
                 Groundedness,
             )
-        except Exception:  # noqa: BLE001 - an unavailable check is not a failed check
+        except Exception:
+            # Treated as grounded, because an unavailable check is not a failed
+            # one and the citation verification behind it is deterministic and
+            # has already passed. Logged rather than swallowed: an outage here
+            # quietly removes a safety check, and nothing else would say so.
+            logger.exception("grounding check unavailable; treating the statement as supported")
             return True
         return result.supported
 

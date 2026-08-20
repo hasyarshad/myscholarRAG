@@ -4,8 +4,6 @@ This is the only module permitted to import from ``adapters``. Everything else
 depends on ``ports``. Concentrating the choice here is what lets the same
 pipeline run against a local GPU in development and a hosted API in production
 without touching application code.
-
-See docs/learning/00-architecture-and-ports.md.
 """
 
 from __future__ import annotations
@@ -15,11 +13,10 @@ from dataclasses import dataclass
 from myscholar.config import (
     EmbeddingProvider,
     LLMProvider,
-    RerankerProvider,
     Settings,
     load_settings,
 )
-from myscholar.ports import ChatModel, Embedder, Reranker
+from myscholar.ports import ChatModel, Embedder
 from myscholar.ports.metadata import MetadataResolver
 
 
@@ -39,7 +36,6 @@ class Container:
     """Classification and grading. Smaller model, called many times per question."""
 
     embedder: Embedder
-    reranker: Reranker
     resolver: MetadataResolver | None
     """Bibliographic registry, or None when the corpus is built offline."""
 
@@ -60,6 +56,9 @@ def _build_chat(settings: Settings, *, model: str) -> ChatModel:
                 temperature=settings.llm.temperature,
                 timeout_seconds=settings.llm.timeout_seconds,
                 suppress_reasoning=settings.llm.suppress_reasoning,
+                # Set to talk to Ollama Cloud instead of a local server; the
+                # base_url changes to https://ollama.com and nothing else does.
+                api_key=(settings.llm.api_key.get_secret_value() if settings.llm.api_key else None),
             )
 
         case LLMProvider.GROQ:
@@ -93,28 +92,22 @@ def _build_embedder(settings: Settings) -> Embedder:
             )
 
         case EmbeddingProvider.ONNX:
-            msg = "The ONNX embedder arrives in Phase 7 (deployment)."
-            raise ConfigurationError(msg)
+            from myscholar.adapters.embedding.onnx_embedder import OnnxEmbedder
 
+            if not (settings.embedding.onnx_path / "model.onnx").exists():
+                msg = (
+                    f"No ONNX embedder at {settings.embedding.onnx_path}. "
+                    f"Run: uv run --extra export python scripts/export_onnx.py"
+                )
+                raise ConfigurationError(msg)
 
-def _build_reranker(settings: Settings) -> Reranker:
-    match settings.reranker.provider:
-        case RerankerProvider.NOOP:
-            from myscholar.adapters.fakes import NoopReranker
-
-            return NoopReranker()
-
-        case RerankerProvider.TORCH:
-            from myscholar.adapters.reranking.torch_reranker import TorchReranker
-
-            return TorchReranker(
-                settings.reranker.model_id,
-                device=settings.reranker.device,
+            return OnnxEmbedder(
+                settings.embedding.onnx_path,
+                model_id=settings.embedding.onnx_model_id or settings.embedding.model_id,
+                dim=settings.embedding.dim,
+                batch_size=settings.embedding.batch_size,
+                threads=settings.embedding.onnx_threads,
             )
-
-        case RerankerProvider.ONNX:
-            msg = "The ONNX reranker arrives in Phase 7 (deployment)."
-            raise ConfigurationError(msg)
 
 
 def build_container(settings: Settings | None = None) -> Container:
@@ -139,7 +132,6 @@ def build_container(settings: Settings | None = None) -> Container:
         generator=_build_chat(settings, model=settings.llm.generator_model),
         utility=_build_chat(settings, model=settings.llm.utility_model),
         embedder=embedder,
-        reranker=_build_reranker(settings),
         resolver=_build_resolver(settings),
     )
 

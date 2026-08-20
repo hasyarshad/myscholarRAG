@@ -1,0 +1,167 @@
+/* Styles for the assistant widget, scoped so it can be dropped into a site
+   that already has its own design system.
+ *
+ * Every rule is nested under `.scholar`, which is the widget's root element.
+ * That matters: the class names this uses — .chip, .error, .active, .question,
+ * .sources, .composer — are common enough that an unscoped stylesheet would
+ * both break the host site and be broken by it. Scoping makes the widget
+ * self-contained and the integration a copy rather than a merge.
+ *
+ * Colours come from CSS custom properties with fallbacks, so a host site can
+ * override any of them by setting the variable on a parent element:
+ *
+ *     .my-page { --scholar-accent: #ff6b35; }
+ *
+ * Deliberately plain otherwise: this styles structure and lets typography
+ * inherit from the page it lands in.
+ */
+
+.scholar {
+  --scholar-fg: var(--fg, #16181d);
+  --scholar-muted: var(--muted, #6b7280);
+  --scholar-line: var(--line, #e5e7eb);
+  --scholar-accent: var(--accent, #2563eb);
+  --scholar-warn: var(--warn, #b45309);
+  --scholar-soft: var(--bg-soft, #f9fafb);
+
+  color: var(--scholar-fg);
+  border: 1px solid var(--scholar-line);
+  border-radius: 12px;
+  padding: 1.25rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .scholar {
+    --scholar-fg: var(--fg, #e8eaed);
+    --scholar-muted: var(--muted, #9aa1ab);
+    --scholar-line: var(--line, #2b2f36);
+    --scholar-accent: var(--accent, #7aa2f7);
+    --scholar-warn: var(--warn, #d9a441);
+    --scholar-soft: var(--bg-soft, #171a1f);
+  }
+}
+
+.scholar *,
+.scholar *::before,
+.scholar *::after { box-sizing: border-box; }
+
+.scholar .visually-hidden {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* --- shell --------------------------------------------------------------- */
+
+.scholar .scholar-header h2 { font-size: 1.05rem; margin: 0 0 .25rem; }
+.scholar .scholar-scope { color: var(--scholar-muted); font-size: .85rem; margin: 0 0 1rem; }
+
+.scholar .starters { list-style: none; padding: 0; margin: 0 0 1rem; display: grid; gap: .4rem; }
+.scholar .starters button {
+  width: 100%; text-align: left; cursor: pointer;
+  padding: .55rem .75rem; font: inherit; font-size: .88rem;
+  color: inherit; background: var(--scholar-soft);
+  border: 1px solid var(--scholar-line); border-radius: 8px;
+}
+.scholar .starters button:hover { border-color: var(--scholar-accent); }
+
+.scholar .turns { list-style: none; padding: 0; margin: 0; display: grid; gap: 1.75rem; }
+.scholar .turn { display: block; }
+.scholar .question { font-weight: 600; margin: 0 0 .6rem; }
+
+/* --- stages -------------------------------------------------------------- */
+
+.scholar .stages {
+  list-style: none; padding: .6rem .75rem; margin: 0 0 .75rem;
+  background: var(--scholar-soft); border-radius: 8px;
+  font-size: .8rem; display: grid; gap: .3rem;
+}
+.scholar .stage {
+  display: grid; grid-template-columns: auto 1fr auto auto;
+  gap: .5rem; align-items: baseline;
+}
+.scholar .stage-dot {
+  width: .45rem; height: .45rem; border-radius: 50%;
+  background: var(--scholar-muted); opacity: .5;
+}
+.scholar .stage.active .stage-dot { background: var(--scholar-accent); opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .scholar .stage.active .stage-dot { animation: scholar-pulse 1.1s ease-in-out infinite; }
+}
+@keyframes scholar-pulse { 50% { opacity: .3; } }
+.scholar .stage-label { color: inherit; }
+.scholar .stage-retry { color: var(--scholar-warn); font-style: normal; }
+.scholar .stage-detail { color: var(--scholar-muted); }
+.scholar .stage-time { color: var(--scholar-muted); font-variant-numeric: tabular-nums; }
+
+/* --- answer -------------------------------------------------------------- */
+
+.scholar .answer p { margin: 0 0 .6rem; }
+.scholar .answer-refused { color: var(--scholar-muted); }
+.scholar .nearest,
+.scholar .degraded { font-size: .85rem; color: var(--scholar-muted); }
+.scholar .degraded { color: var(--scholar-warn); }
+
+.scholar .chip-wrap { position: relative; white-space: nowrap; }
+.scholar .chip {
+  font: inherit; font-size: .7rem; cursor: pointer;
+  vertical-align: super; line-height: 1;
+  padding: .1rem .3rem; margin: 0 .1rem;
+  color: var(--scholar-accent); background: transparent;
+  border: 1px solid var(--scholar-line); border-radius: 4px;
+}
+.scholar .chip:hover,
+.scholar .chip[aria-expanded="true"] { border-color: var(--scholar-accent); }
+.scholar .chip-unknown { color: var(--scholar-warn); }
+.scholar .chip-popover {
+  position: absolute; z-index: 10; left: 0; top: 1.6rem;
+  display: grid; gap: .2rem; width: max-content; max-width: 22rem;
+  padding: .5rem .65rem; font-size: .8rem; white-space: normal;
+  background: var(--scholar-soft);
+  border: 1px solid var(--scholar-line); border-radius: 8px;
+}
+.scholar .chip-meta { color: var(--scholar-muted); }
+
+/* The citation title, when the document resolves to a DOI or a page. Weighted
+   like the <strong> it replaces so the popover does not shift when one source
+   has a link and the next does not. */
+.scholar .chip-link {
+  font-weight: 600;
+  color: var(--scholar-accent, #1f6feb);
+  text-decoration: none;
+}
+.scholar .chip-link:hover,
+.scholar .chip-link:focus-visible { text-decoration: underline; }
+.scholar .chip-doi {
+  font-family: ui-monospace, "SF Mono", "DejaVu Sans Mono", monospace;
+  font-size: .74rem;
+  word-break: break-all;
+}
+
+.scholar .sources { margin-top: 1.25rem; font-size: .85rem; color: var(--scholar-muted); }
+.scholar .sources ul { margin: .4rem 0 0; padding-left: 1.1rem; }
+
+.scholar .error { color: var(--scholar-warn); font-size: .9rem; }
+.scholar .error button {
+  margin-left: .5rem; font: inherit; font-size: .82rem; cursor: pointer;
+  color: inherit; background: none;
+  border: 1px solid currentColor; border-radius: 6px; padding: .1rem .45rem;
+}
+
+/* --- composer ------------------------------------------------------------ */
+
+.scholar .composer { display: flex; gap: .5rem; margin-top: 1.5rem; }
+.scholar .composer input {
+  flex: 1; font: inherit; padding: .6rem .75rem;
+  color: inherit; background: transparent;
+  border: 1px solid var(--scholar-line); border-radius: 8px;
+}
+.scholar .composer input:focus-visible {
+  outline: 2px solid var(--scholar-accent); outline-offset: 1px;
+}
+.scholar .composer button {
+  font: inherit; cursor: pointer; padding: .6rem 1.1rem;
+  color: inherit; background: var(--scholar-soft);
+  border: 1px solid var(--scholar-line); border-radius: 8px;
+}
+.scholar .composer button:disabled { opacity: .5; cursor: default; }

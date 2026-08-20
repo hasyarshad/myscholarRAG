@@ -14,8 +14,6 @@ Retrieval precision and generation context are different problems.
 The code this replaces embedded one sentence per row. "The proposed approach
 achieves a 23% reduction compared to the conventional method" carries almost no
 retrievable meaning on its own — no topic, no paper, no comparison target.
-
-See docs/learning/01-chunking-and-embeddings.md.
 """
 
 from __future__ import annotations

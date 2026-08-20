@@ -7,7 +7,7 @@ portfolio RAG can produce:
 
   naive      dense-only retrieval, one model call,
              no citations, no verification, no way to decline
-  retrieved  the same one-shot generation, fed hybrid + reranked + expanded
+  retrieved  the same one-shot generation, fed hybrid + expanded
              context. Isolates what retrieval alone is worth.
   adaptive   the full system — routing, grading, citation verification,
              grounding, corrective retry, refusal
@@ -46,6 +46,7 @@ from myscholar.adapters.persistence.repository import (  # noqa: E402
     create_engine,
 )
 from myscholar.assembly import (  # noqa: E402
+    build_answerer,
     build_engine,
     build_retriever,
     build_router,
@@ -54,6 +55,10 @@ from myscholar.config import load_settings  # noqa: E402
 from myscholar.container import build_container  # noqa: E402
 from myscholar.domain.answers import Refusal  # noqa: E402
 from myscholar.domain.documents import ContextBlock  # noqa: E402
+from myscholar.evaluation.ablation import (  # noqa: E402
+    LADDER,
+    AblationPipeline,
+)
 from myscholar.evaluation.baseline import (  # noqa: E402
     NaivePipeline,
     contradicts,
@@ -93,6 +98,18 @@ class Outcome:
     unsupported_examples: tuple[str, ...] = ()
     dangling: int = 0
     markers: int = 0
+
+    #: Distinct source documents the generator was given, after grading.
+    #:
+    #: The denominator for coverage, and deliberately the *graded* blocks
+    #: rather than everything retrieved: retrieval returns a fixed number
+    #: whether or not that many sources are relevant, so dividing by it would
+    #: punish a narrow question for having a correct narrow answer.
+    papers_available: int = 0
+
+    #: Distinct source documents the answer actually cites.
+    papers_cited: int = 0
+
     path: str = ""
     """Nodes visited, for the adaptive configuration. The distribution shows
     how often the loop corrects itself, which is the behaviour it exists for
@@ -162,7 +179,7 @@ class ConfigResult:
         return sum(o.seconds for o in self.outcomes) / max(len(self.outcomes), 1)
 
 
-async def _build(settings: Any) -> tuple[Any, HybridRetriever, PostgresStore, Engine]:
+async def _build(settings: Any) -> tuple[Any, HybridRetriever, PostgresStore, Engine, Any]:
     """Assembled through myscholar.assembly, exactly as the API assembles it.
 
     This used to duplicate the wiring, which meant the evaluation could measure
@@ -177,7 +194,8 @@ async def _build(settings: Any) -> tuple[Any, HybridRetriever, PostgresStore, En
     router = build_router(
         settings, container, store, retriever=retriever, titles=[d.title for d in documents]
     )
-    return container, retriever, store, build_engine(settings, container, store, router=router)
+    engine = build_engine(settings, container, store, router=router)
+    return container, retriever, store, engine, router
 
 
 async def _score_all(
@@ -241,10 +259,14 @@ async def run_naive(
 async def run_adaptive(
     cases: list[dict[str, str]],
     *,
-    engine: Engine,
+    engine: Any,
     judge: FaithfulnessJudge,
+    name: str = "adaptive",
 ) -> ConfigResult:
-    result = ConfigResult(name="adaptive")
+    """Any pipeline exposing ``answer_with_context``: the engine, or one rung
+    of the ablation ladder. They are measured by identical code so a difference
+    between rows cannot come from the harness."""
+    result = ConfigResult(name=name)
     pending: list[tuple[Outcome, str, tuple[ContextBlock, ...]]] = []
     for index, case in enumerate(cases, 1):
         started = time.monotonic()
@@ -252,18 +274,20 @@ async def run_adaptive(
             async with asyncio.timeout(QUESTION_TIMEOUT):
                 response, trace, blocks = await engine.answer_with_context(case["question"])
         except Exception as exc:  # noqa: BLE001 - one bad question must not end the run
-            print(f"  [adaptive] {index}/{len(cases)} FAILED: {type(exc).__name__}", flush=True)
+            print(f"  [{name}] {index}/{len(cases)} FAILED: {type(exc).__name__}", flush=True)
             continue
         # A structural refusal and a paragraph that says "the excerpts do not
         # mention this" are the same outcome for a reader, so both count.
         declined = isinstance(response, Refusal) or declines(response.text)
 
-        markers = dangling = 0
+        markers = dangling = papers_cited = 0
         if not isinstance(response, Refusal):
             emitted = citations.parse_markers(response.text)
             labels = {c.label for c in response.citations}
             markers = len(emitted)
             dangling = sum(1 for m in emitted if m not in labels)
+            papers_cited = len({c.document_id for c in response.citations})
+        papers_available = len({b.document_id for b in blocks})
 
         outcome = Outcome(
             question=case["question"],
@@ -275,12 +299,14 @@ async def run_adaptive(
             seconds=time.monotonic() - started,
             markers=markers,
             dangling=dangling,
-            path=" -> ".join(trace.path),
+            papers_available=papers_available,
+            papers_cited=papers_cited,
+            path=" -> ".join(trace.path if hasattr(trace, "path") else trace),
         )
         pending.append((outcome, response.text, blocks))
         result.outcomes.append(outcome)
         print(
-            f"  [adaptive] {index}/{len(cases)} {outcome.seconds:5.1f}s  {case['question'][:52]}",
+            f"  [{name}] {index}/{len(cases)} {outcome.seconds:5.1f}s  {case['question'][:52]}",
             flush=True,
         )
     await _score_all(judge, pending)
@@ -302,14 +328,20 @@ def report(results: list[ConfigResult], cases: list[dict[str, str]]) -> str:
         "variable is pipeline design, so every difference below is "
         "attributable to it rather than to a bigger model or a cleaner corpus.",
         "",
-        "| Configuration | unsupported claims | correct refusal | over-refusal "
-        "| citation validity | mean latency |",
-        "|---|---|---|---|---|---|",
+        "| Configuration | unsupported claims | claims/question | correct refusal "
+        "| over-refusal | citation validity | mean latency |",
+        "|---|---|---|---|---|---|---|",
     ]
     for r in results:
+        # Claims per question is here because an unsupported-claim *rate*
+        # rewards saying less. Two configurations at the same rate are not
+        # equivalent if one of them makes a third as many statements.
+        judged = sum(o.claims_judged for o in r.outcomes)
+        per_question = judged / max(len(r.outcomes), 1)
         lines.append(
-            f"| {r.name} | {_pct(r.unsupported_rate)} | {_pct(r.correct_refusal)} "
-            f"| {_pct(r.over_refusal)} | {_pct(r.citation_validity)} | {r.mean_seconds:.1f}s |"
+            f"| {r.name} | {_pct(r.unsupported_rate)} | {per_question:.1f} "
+            f"| {_pct(r.correct_refusal)} | {_pct(r.over_refusal)} "
+            f"| {_pct(r.citation_validity)} | {r.mean_seconds:.1f}s |"
         )
 
     lines += [
@@ -336,6 +368,57 @@ def report(results: list[ConfigResult], cases: list[dict[str, str]]) -> str:
                 "—" if not subset else f"{sum(o.correct for o in subset) / len(subset) * 100:.0f}%"
             )
         lines.append(f"| {r.name} | " + " | ".join(cells) + " |")
+
+    # --- coverage ------------------------------------------------------------
+    #
+    # Deliberately descriptive. There is no target here and no pass mark,
+    # because the obvious target is wrong: a narrow factual question deserves a
+    # narrow answer, and a metric rewarding breadth everywhere would reward
+    # padding — the exact failure the citation checks exist to prevent.
+    #
+    # It exists because the complaint that recurs in use — "it cited one paper
+    # when six were relevant" — is invisible to every other number here. Those
+    # answers refuse nothing, support every claim and cite validly, so they
+    # score as correct. Something unmeasured cannot be argued about honestly.
+    lines += [
+        "",
+        "## Coverage — did the answer use what it was given",
+        "",
+        "Distinct source documents cited, against the number the generator held",
+        "after grading. Reported per question kind because breadth is only a",
+        "virtue where the corpus has several relevant sources: a question about",
+        "one measurement should cite one paper, and a question about the span of",
+        "someone's work should not.",
+        "",
+        "| Configuration | kind | n | mean available | mean cited | coverage |",
+        "|---|---|---|---|---|---|",
+    ]
+    for result in results:
+        answered = [o for o in result.outcomes if not o.declined and o.papers_available]
+        by_kind: dict[str, list[Outcome]] = {}
+        for o in answered:
+            by_kind.setdefault(o.kind, []).append(o)
+        for kind, group in sorted(by_kind.items()):
+            available = sum(o.papers_available for o in group) / len(group)
+            cited = sum(o.papers_cited for o in group) / len(group)
+            lines.append(
+                f"| {result.name} | {kind} | {len(group)} | {available:.1f} | "
+                f"{cited:.1f} | {cited / available:.0%} |"
+            )
+
+    lines += ["", "Answers citing one source while holding four or more:", ""]
+    for result in results:
+        narrow = [
+            o
+            for o in result.outcomes
+            if not o.declined and o.papers_cited <= 1 and o.papers_available >= 4
+        ]
+        if not narrow:
+            lines.append(f"- {result.name}: none")
+        for o in narrow:
+            lines.append(
+                f"- ({o.kind}) {o.question} — cited {o.papers_cited} of {o.papers_available}"
+            )
 
     lines += ["", "## Where each configuration went wrong", ""]
     for r in results:
@@ -381,11 +464,6 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=0, help="Run only the first N questions.")
     parser.add_argument(
-        "--rerank",
-        action="store_true",
-        help="Turn the cross-encoder on for the adaptive configuration.",
-    )
-    parser.add_argument(
         "--suffix", default="", help="Appended to the output filenames, to keep runs apart."
     )
     parser.add_argument(
@@ -401,7 +479,7 @@ async def main() -> None:
     wanted = {name.strip() for name in args.configs.split(",")}
 
     settings = load_settings()
-    container, retriever, _store, engine = await _build(settings)
+    container, retriever, _store, engine, router = await _build(settings)
     judge = FaithfulnessJudge(container.utility, person=settings.person.name)
 
     print(f"{len(cases)} questions x {len(wanted)} configuration(s)\n", flush=True)
@@ -422,13 +500,43 @@ async def main() -> None:
         results.append(
             await run_naive(
                 cases,
+                # HYBRID, not FULL. This configuration is "the same naive
+                # generator, given better retrieval", and until the reranker was
+                # removed the best retrieval available was dense + lexical +
+                # cross-encoder. FULL went with it, and this line did not, so
+                # the script raised AttributeError partway through every run —
+                # after the naive configuration had finished, which is why it
+                # looked like a completed run that had merely written stale
+                # numbers. Hybrid is now the strongest retrieval there is, so it
+                # is what the contrast should use.
                 pipeline=NaivePipeline(
-                    retriever=retriever, model=container.generator, mode=RetrievalMode.FULL
+                    retriever=retriever, model=container.generator, mode=RetrievalMode.HYBRID
                 ),
                 judge=judge,
                 name="retrieved",
             )
         )
+    # The ablation ladder. Each rung adds exactly one mechanism to the one
+    # below it, and every rung is measured by the same runner as `adaptive`, so
+    # a difference between rows cannot come from the harness.
+    answerer = build_answerer(settings, container)
+    for rung in LADDER:
+        if rung.name in wanted:
+            results.append(
+                await run_adaptive(
+                    cases,
+                    engine=AblationPipeline(
+                        router=router,
+                        answerer=answerer,
+                        ablation=rung,
+                        retriever=retriever,
+                        context_blocks=settings.retrieval.context_blocks,
+                    ),
+                    judge=judge,
+                    name=rung.name,
+                )
+            )
+
     if "adaptive" in wanted:
         results.append(await run_adaptive(cases, engine=engine, judge=judge))
 
@@ -451,6 +559,17 @@ async def main() -> None:
                     "correct": o.correct,
                     "claims_judged": o.claims_judged,
                     "claims_unsupported": o.claims_unsupported,
+                    # Written because a stored answer alone cannot distinguish a
+                    # refusal the system reasoned its way to from one it fell
+                    # into by running out of wall clock. A local model swap was
+                    # stalling one call per question past the 90s deadline, and
+                    # the graph's budget_exhausted edge returned "I don't have
+                    # anything on that in these papers" for questions the corpus
+                    # answers. Nothing in the stored results showed it; the
+                    # timings did, as soon as anything recorded them.
+                    "seconds": o.seconds,
+                    "papers_available": o.papers_available,
+                    "papers_cited": o.papers_cited,
                     "text": o.text,
                 }
                 for o in r.outcomes
