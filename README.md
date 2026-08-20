@@ -13,35 +13,37 @@ Measured on this corpus, reproducible from `scripts/`.
 
 | Metric | naive | adaptive | Basis |
 |---|---|---|---|
-| **Unsupported claims** | 55.4% | **8.5%** | factual sentences the retrieved passages do not support |
-| **Correct refusal** | 61.9% | **76.2%** | 21 questions the corpus cannot answer, incl. 12 false premises |
-| Over-refusal | 12.5% | **6.2%** | 16 answerable controls, incl. CV and bibliographic |
-| Document selection | — | 88% | recall of the papers a cross-paper answer needs, over 10 questions |
+| **Unsupported claims** | 55.5% | **13.0%** | factual sentences the retrieved passages do not support |
+| **Correct refusal** | 65.0% | **75.0%** | 20 questions the corpus cannot answer, incl. 11 false premises |
+| **Over-refusal** | 5.9% | **0.0%** | 17 answerable controls, incl. CV and bibliographic |
 | Citation validity | — | **100%** | 0 dangling markers — enforced in code, not by prompting |
-| Query classification | — | 91.3% | 46 questions; **95.5%** on the classes where a misroute fabricates |
-| Retrieval MRR | 0.865 | 0.869 | 37 questions, document-level, over the blocks a generator receives |
-| Tests | — | 591 | unit + integration, including property tests |
+| Document selection | — | 88% | recall of the papers a cross-paper answer needs, 10 questions |
+| Query classification | — | 93.5% | 46 questions; **100%** on the classes where a misroute fabricates |
+| Retrieval MRR | 0.865 | 0.865 | 37 questions, document-level, over the blocks a generator receives |
+| Tests | — | 625 | unit + integration, including property tests |
 
 `naive` is a baseline of dense-only retrieval and one ungrounded call, run against the *same* index,
 embedder, generator and corpus, so the difference is pipeline design and
 nothing else.
 
-**Retrieval alone moved the unsupported-claim rate by 3.0 points. The
-verification loop moved it by 43.9.** That is the finding worth taking from
+**Retrieval alone moved the unsupported-claim rate by 2.7 points. The
+verification loop moved it by 39.8.** That is the finding worth taking from
 this project: hybrid search, reranking and parent expansion are what most RAG
 tutorials spend their time on, and on this corpus they bought almost nothing in
 groundedness. Without the third configuration in the middle, the loop's share
 would have been credited to them.
 
-**Read these as smoke tests with numbers attached.** Every one rests on fewer
-than 50 examples, so a single question is two to eight percentage points. They
-are enough to catch a broken component and not enough to rank two good ones.
+**Read the direction, not the decimal.** The adaptive unsupported-claim rate
+has measured 8.5%, 8.7%, 11.4% and 13.0% across four runs of substantially the
+same pipeline — it rests on ~46 judged claims, so one claim is two points. The
+42-point gap to the baseline is robust; the second decimal is not. Every metric
+here rests on fewer than 50 examples.
 
-The faithfulness figures come from a 4B judge, which is itself measured before
-it is trusted — 16 cases where the right answer is not in doubt, 100% in both
-directions ([results/judge.md](results/judge.md)). Three separate measurement
-bugs were found and fixed during this phase, each of which would have published
-a wrong number; they are written up in
+The faithfulness figures come from a 4B judge, itself measured before it is
+trusted — 16 cases where the right answer is not in doubt, 100% in both
+directions ([results/judge.md](results/judge.md)). Six measurement bugs were
+found and fixed during this phase, four of which would have published a number
+flattering to this system; they are written up in
 [docs/learning/06-evaluating-rag.md](docs/learning/06-evaluating-rag.md).
 
 The exception is citation validity, which is 100% *by construction* rather than

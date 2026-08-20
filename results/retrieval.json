@@ -843,8 +843,8 @@
       "question": "How is torque ripple reduced without using a speed sensor?",
       "kind": "paraphrase",
       "expected": "implications-of-the-sensorless-predictive-control-for-line-start-permanent-magnet-synchronous-machine",
-      "rank": 2,
-      "context_precision": 0.625
+      "rank": 3,
+      "context_precision": 0.375
     },
     {
       "question": "How were volunteers moderating an online forum studied during the pandemic?",
@@ -920,8 +920,8 @@
       "question": "Data-driven predictive control that is computationally efficient",
       "kind": "topical",
       "expected": "computationally-efficient-data-driven-model-predictive-control-for-modular-multilevel-converters",
-      "rank": 2,
-      "context_precision": 0.5
+      "rank": 1,
+      "context_precision": 0.75
     },
     {
       "question": "What did the Reddit study find about moderator behaviour?",
@@ -1040,7 +1040,7 @@
       "kind": "deepcontent",
       "expected": "packet-level-and-flow-level-network-intrusion-detection-based-on-reinforcement-learning-and-adversarial-training",
       "rank": 1,
-      "context_precision": 1.0
+      "context_precision": 0.875
     }
   ],
   "routed+rerank": [
@@ -1105,7 +1105,7 @@
       "kind": "paraphrase",
       "expected": "implications-of-the-sensorless-predictive-control-for-line-start-permanent-magnet-synchronous-machine",
       "rank": 3,
-      "context_precision": 0.5
+      "context_precision": 0.375
     },
     {
       "question": "How were volunteers moderating an online forum studied during the pandemic?",
@@ -1119,7 +1119,7 @@
       "kind": "paraphrase",
       "expected": "an-overview-of-sequential-learning-algorithms-for-single-hidden-layer-networks-current-issues-future-trends",
       "rank": 1,
-      "context_precision": 1.0
+      "context_precision": 0.875
     },
     {
       "question": "How is unbalanced rotation in rotating machinery detected automatically?",
@@ -1147,14 +1147,14 @@
       "kind": "paraphrase",
       "expected": "linear-quadratic-gaussian-control-for-uavs-with-improved-state-estimation-against-gyroscope-and-accelerometer-biases",
       "rank": 1,
-      "context_precision": 0.375
+      "context_precision": 0.5
     },
     {
       "question": "How is deterministic chaos generated and analysed with a simple equation?",
       "kind": "paraphrase",
       "expected": "a-simple-technique-for-studying-chaos-using-jerk-equation-with-discrete-time-sine-map",
       "rank": 1,
-      "context_precision": 0.75
+      "context_precision": 0.625
     },
     {
       "question": "Direct torque control of a four switch two-phase induction motor",
@@ -1181,8 +1181,8 @@
       "question": "Data-driven predictive control that is computationally efficient",
       "kind": "topical",
       "expected": "computationally-efficient-data-driven-model-predictive-control-for-modular-multilevel-converters",
-      "rank": 4,
-      "context_precision": 0.375
+      "rank": 3,
+      "context_precision": 0.5
     },
     {
       "question": "What did the Reddit study find about moderator behaviour?",
@@ -1245,7 +1245,7 @@
       "kind": "deepcontent",
       "expected": "a-simple-technique-for-studying-chaos-using-jerk-equation-with-discrete-time-sine-map",
       "rank": 1,
-      "context_precision": 0.75
+      "context_precision": 1.0
     },
     {
       "question": "Which paper reduces electromagnetic interference by varying the switching frequency?",
