@@ -194,7 +194,6 @@ class PersonSettings(BaseModel):
 
     name: str = "Muhammad Haseeb Arshad"
     short_name: str = "Haseeb"
-    pronoun: str = "his"
     site_url: str = "https://haseeb-arshad.me"
 
 

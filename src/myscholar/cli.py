@@ -4,17 +4,22 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from myscholar.config import load_settings
+from myscholar.config import Settings, load_settings
 from myscholar.container import build_container
 from myscholar.domain.answers import Answer
 from myscholar.domain.enums import DocumentKind
+
+if TYPE_CHECKING:
+    # Typing only. Adapters stay lazily imported at the call sites so that
+    # `myscholar --help` does not pay for SQLAlchemy.
+    from myscholar.adapters.persistence.repository import PostgresStore
 
 app = typer.Typer(
     name="myscholar",
@@ -23,6 +28,19 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+
+
+def open_store(settings: Settings, *, echo: bool = False) -> PostgresStore:
+    """The store, opened the same way everywhere.
+
+    Twelve commands built this by hand. Each was one line, which is why it
+    stayed — but it is the line that changes for a connection pool, a read
+    replica or a hosted database, and twelve of them is twelve chances to
+    change eleven.
+    """
+    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
+
+    return PostgresStore(create_engine(settings.database.url, echo=echo))
 
 
 @app.command()
@@ -36,10 +54,9 @@ def ask(
     settings = load_settings()
     container = build_container(settings)
 
-    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
     from myscholar.assembly import build_engine
 
-    store = PostgresStore(create_engine(settings.database.url))
+    store = open_store(settings)
     engine = build_engine(settings, container, store)
 
     response, loop_trace = asyncio.run(engine.answer_with_trace(question))
@@ -114,13 +131,12 @@ if __name__ == "__main__":  # pragma: no cover
 def _build_pipeline(settings: Any) -> tuple[Any, Any]:
     """Assemble the ingestion pipeline and the store it writes to."""
     from myscholar.adapters.extraction.docling_extractor import DoclingExtractor
-    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
     from myscholar.ingest.metadata import MetadataExtractor
     from myscholar.ingest.pipeline import IngestionPipeline
     from myscholar.ingest.sectionizer import Sectionizer
 
     container = build_container(settings)
-    store = PostgresStore(create_engine(settings.database.url, echo=settings.database.echo))
+    store = open_store(settings, echo=settings.database.echo)
 
     pipeline = IngestionPipeline(
         extractor=DoclingExtractor(),
@@ -213,9 +229,8 @@ def papers_list() -> None:
     settings = load_settings()
 
     async def _list() -> Any:
-        from myscholar.adapters.persistence.repository import PostgresStore, create_engine
 
-        store = PostgresStore(create_engine(settings.database.url))
+        store = open_store(settings)
         return await store.list_documents(), await store.counts()
 
     rows, counts = asyncio.run(_list())
@@ -255,9 +270,8 @@ def papers_sections() -> None:
     settings = load_settings()
 
     async def _stats() -> dict[str, int]:
-        from myscholar.adapters.persistence.repository import PostgresStore, create_engine
 
-        store = PostgresStore(create_engine(settings.database.url))
+        store = open_store(settings)
         return await store.section_kind_counts()
 
     counts = asyncio.run(_stats())
@@ -315,11 +329,10 @@ def papers_import_metadata(
         return
 
     async def _apply() -> tuple[int, int]:
-        from myscholar.adapters.persistence.repository import PostgresStore, create_engine
         from myscholar.ingest.chunker import build_context_header, strip_mathematics
 
         container = build_container(settings)
-        store = PostgresStore(create_engine(settings.database.url))
+        store = open_store(settings)
 
         from myscholar.ingest.metadata import slugify
 
@@ -415,13 +428,12 @@ def papers_check() -> None:
     every well-formed document here, so a violation means something upstream
     broke even where nobody can say what the right answer was.
     """
-    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
     from myscholar.ingest.health import Severity, check
 
     settings = load_settings()
 
     async def _run() -> Any:
-        store = PostgresStore(create_engine(settings.database.url))
+        store = open_store(settings)
         stats = await store.corpus_stats()
         return stats, check(stats)
 
@@ -463,9 +475,8 @@ def papers_show(
         from sqlalchemy import select
 
         from myscholar.adapters.persistence.orm import Chunk, Document, Section
-        from myscholar.adapters.persistence.repository import PostgresStore, create_engine
 
-        store = PostgresStore(create_engine(settings.database.url))
+        store = open_store(settings)
         async with store.session() as session:
             document = await session.scalar(
                 select(Document).where(Document.slug.ilike(f"%{slug}%")).limit(1)
@@ -520,20 +531,18 @@ def papers_show(
 
 def _build_router(settings: Any) -> Any:
     """The routed pipeline, assembled exactly as the API assembles it."""
-    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
     from myscholar.assembly import build_router
 
     container = build_container(settings)
-    store = PostgresStore(create_engine(settings.database.url))
+    store = open_store(settings)
     return build_router(settings, container, store)
 
 
 def _build_retriever(settings: Any, *, with_reranker: bool = True) -> Any:
-    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
     from myscholar.retrieval.retriever import HybridRetriever
 
     container = build_container(settings)
-    store = PostgresStore(create_engine(settings.database.url))
+    store = open_store(settings)
 
     return HybridRetriever(
         store=store,
@@ -706,7 +715,6 @@ def ingest_web(
     can be re-run whenever the site changes.
     """
     from myscholar.adapters.extraction.html_extractor import HtmlExtractor
-    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
     from myscholar.domain.enums import DocumentKind
     from myscholar.ingest.metadata import MetadataExtractor
     from myscholar.ingest.pipeline import IngestionPipeline
@@ -720,7 +728,7 @@ def ingest_web(
 
     async def _run() -> Any:
         container = build_container(settings)
-        store = PostgresStore(create_engine(settings.database.url))
+        store = open_store(settings)
         pipeline = IngestionPipeline(
             extractor=HtmlExtractor(),
             embedder=container.embedder,
@@ -803,7 +811,6 @@ def sync(
     Defaults to a dry run. A sync that silently rewrites twenty documents is
     not something to discover after the fact.
     """
-    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
     from myscholar.ingest.sync import plan
 
     settings = load_settings()
@@ -830,7 +837,7 @@ def sync(
 
     async def _run() -> Any:
         container = build_container(settings)
-        store = PostgresStore(create_engine(settings.database.url))
+        store = open_store(settings)
         await store.create_schema()
 
         if container.resolver is None:  # pragma: no cover - guarded above
@@ -844,6 +851,11 @@ def sync(
             )
         except Exception as exc:  # noqa: BLE001 - the page is advisory, not required
             console.print(f"[yellow]could not read the publications page:[/yellow] {exc}")
+
+        # Retention runs here rather than as a command of its own: a policy
+        # nobody remembers to run is not a policy.
+        if pruned := await store.prune_conversations():
+            console.print(f"[dim]pruned {pruned} conversation turn(s) older than 30 days[/dim]")
 
         documents = await store.bibliographic_view()
         result = await plan(documents, resolver=container.resolver, published_dois=published)
@@ -935,14 +947,13 @@ def ingest_summarise(
     A summary names the techniques twice, specifically and ordinarily, which is
     what lets a document be found for what it is.
     """
-    from myscholar.adapters.persistence.repository import PostgresStore, create_engine
     from myscholar.ingest.summaries import Summariser
 
     settings = load_settings()
 
     async def _run() -> Any:
         container = build_container(settings)
-        store = PostgresStore(create_engine(settings.database.url))
+        store = open_store(settings)
         await store.create_schema()
 
         model_id = container.embedder.model_id

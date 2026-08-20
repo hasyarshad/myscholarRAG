@@ -74,10 +74,6 @@ class Selection:
     document_ids: frozenset[UUID] = frozenset()
     reason: str = "whole corpus"
 
-    @property
-    def restricts(self) -> bool:
-        return bool(self.document_ids)
-
 
 class DocumentSelector:
     """Decides which documents a question should be answered from."""
