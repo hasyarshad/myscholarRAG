@@ -31,12 +31,12 @@ def test_nested_env_vars_override(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_hosted_provider_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Selecting Groq without a key fails at startup, not at first request.
+    """Selecting the hosted provider without a key fails at startup, not at first request.
 
     A configuration error surfacing on the first visitor question rather than at
     boot is the kind of thing that only shows up in production.
     """
-    monkeypatch.setenv("MYSCHOLAR_LLM__PROVIDER", "groq")
+    monkeypatch.setenv("MYSCHOLAR_LLM__PROVIDER", "openai_compatible")
     monkeypatch.delenv("MYSCHOLAR_LLM__API_KEY", raising=False)
 
     with pytest.raises(ValidationError, match="api_key"):
@@ -44,7 +44,7 @@ def test_hosted_provider_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_hosted_provider_accepts_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MYSCHOLAR_LLM__PROVIDER", "groq")
+    monkeypatch.setenv("MYSCHOLAR_LLM__PROVIDER", "openai_compatible")
     monkeypatch.setenv("MYSCHOLAR_LLM__API_KEY", "gsk-not-a-real-key")
 
     settings = make_settings()
@@ -55,7 +55,7 @@ def test_hosted_provider_accepts_api_key(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_api_key_is_not_printed(monkeypatch: pytest.MonkeyPatch) -> None:
     """Secrets must not leak into logs or tracebacks via repr."""
-    monkeypatch.setenv("MYSCHOLAR_LLM__PROVIDER", "groq")
+    monkeypatch.setenv("MYSCHOLAR_LLM__PROVIDER", "openai_compatible")
     monkeypatch.setenv("MYSCHOLAR_LLM__API_KEY", "gsk-super-secret")
 
     assert "gsk-super-secret" not in repr(make_settings())

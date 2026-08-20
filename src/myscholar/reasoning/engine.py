@@ -205,7 +205,13 @@ class Engine:
             edges={
                 "route": self._after_route,
                 "screen": self._after_screen,
-                "generate": lambda _: "verify",
+                # A failed generation leaves no draft, and verifying an empty
+                # string produces an empty *answer* rather than a refusal — the
+                # blank reply a visitor least deserves. `_generate` already
+                # treats an outage as "end the loop without a draft"; this makes
+                # that end at the refusal, which is what its comment intends.
+                # Same guard as `drop_ungrounded` below, for the same reason.
+                "generate": lambda state: "verify" if state.draft else "refuse",
                 "verify": self._after_verify,
                 "check_grounding": self._after_grounding,
                 "drop_ungrounded": lambda state: "done" if state.draft else "refuse",

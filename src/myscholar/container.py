@@ -61,17 +61,27 @@ def _build_chat(settings: Settings, *, model: str) -> ChatModel:
                 api_key=(settings.llm.api_key.get_secret_value() if settings.llm.api_key else None),
             )
 
-        case LLMProvider.GROQ:
-            from myscholar.adapters.llm.groq import GroqChatModel
+        case LLMProvider.OPENAI_COMPATIBLE:
+            from myscholar.adapters.llm.openai_compatible import (
+                DEFAULT_BASE_URL,
+                OpenAICompatibleChatModel,
+            )
 
             if settings.llm.api_key is None:  # pragma: no cover - validated in settings
-                msg = "groq provider requires MYSCHOLAR_LLM__API_KEY"
+                msg = "openai_compatible provider requires MYSCHOLAR_LLM__API_KEY"
                 raise ConfigurationError(msg)
-            return GroqChatModel(
+            # The Ollama default base_url is a local address, which is not a
+            # sensible endpoint for a hosted provider — so fall back to the
+            # adapter's own default rather than inheriting it.
+            local_default = settings.llm.base_url.startswith(("http://localhost", "http://127."))
+            return OpenAICompatibleChatModel(
                 model,
                 api_key=settings.llm.api_key.get_secret_value(),
+                base_url=DEFAULT_BASE_URL if local_default else settings.llm.base_url,
                 temperature=settings.llm.temperature,
                 timeout_seconds=settings.llm.timeout_seconds,
+                reasoning_effort=settings.llm.reasoning_effort,
+                seed=settings.llm.seed,
             )
 
 

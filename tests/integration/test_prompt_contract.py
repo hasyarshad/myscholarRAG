@@ -38,7 +38,9 @@ prompt. Excluded from ``make test``; run with ``make test-all`` or
 
 from __future__ import annotations
 
+import asyncio
 import os
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
@@ -59,7 +61,75 @@ DATABASE_URL = os.environ.get(
 )
 EMBEDDING_DEVICE = os.environ.get("MYSCHOLAR_TEST_EMBEDDING_DEVICE", "cuda")
 
-#: Questions the prompt was changed to fix. Each is a real regression.
+
+# The model backend the canaries run against. Defaults to the local pair, which
+# is what the published numbers were measured on and needs no key. Point it at
+# the deployed configuration to check the prompt against the model that will
+# actually serve it:
+#
+#     MYSCHOLAR_TEST_LLM_PROVIDER=openai_compatible \
+#     MYSCHOLAR_TEST_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai \
+#     MYSCHOLAR_TEST_LLM_MODEL=gemini-3.5-flash-lite \
+#     MYSCHOLAR_TEST_LLM_KEY=... \
+#     uv run pytest -m integration -k prompt
+#
+# Worth having as a switch rather than a second test file: the prompt is 87% of
+# this system's accuracy, and "it holds on the model we measured" says nothing
+# about the model in production.
+# Read at import time, not inside the fixture. The autouse `_isolate_environment`
+# fixture hides every MYSCHOLAR_* variable from `os.environ` so a developer's
+# exported settings cannot change whether the suite passes — and these share that
+# prefix, so a fixture-time lookup silently returns the default and the run
+# quietly tests the wrong backend. That is why DATABASE_URL above is a constant.
+LLM_PROVIDER = os.environ.get("MYSCHOLAR_TEST_LLM_PROVIDER", "ollama")
+LLM_BASE_URL = os.environ.get("MYSCHOLAR_TEST_LLM_BASE_URL", "")
+LLM_MODEL = os.environ.get("MYSCHOLAR_TEST_LLM_MODEL", "")
+LLM_UTILITY_MODEL = os.environ.get("MYSCHOLAR_TEST_LLM_UTILITY_MODEL", "")
+LLM_KEY = os.environ.get("MYSCHOLAR_TEST_LLM_KEY", "")
+
+
+@pytest.fixture(autouse=True)
+async def _pace_hosted_calls() -> AsyncIterator[None]:
+    """Space out tests when the backend is a shared free tier.
+
+    Nothing here is about correctness — it is about not measuring the provider's
+    capacity instead of the prompt. Google's free tier answers `503 high demand`
+    to bursts: six spaced calls succeeded 6/6 where the same six back to back
+    managed 1/6. Run without pacing, three of these canaries fail on 503 while
+    the very same questions answer correctly in isolation, which is a false
+    negative on the component carrying 87% of the system's accuracy.
+
+    The local backend needs none of this, so it pays nothing.
+    """
+    yield
+    if LLM_PROVIDER != "ollama":
+        await asyncio.sleep(_HOSTED_PACING_SECONDS)
+
+
+# Twelve seconds, not the adapter's three. The adapter retries inside a 45s
+# per-question deadline shared with every other call, so it cannot afford to wait
+# longer; a test suite can. At 6s this file still lost two of fifteen canaries to
+# 503, and both questions answered correctly when run on their own.
+_HOSTED_PACING_SECONDS = 12.0
+
+
+def _llm_settings() -> dict[str, object]:
+    settings: dict[str, object] = {"provider": LLM_PROVIDER}
+    if LLM_PROVIDER != "ollama":
+        if not LLM_KEY:
+            pytest.skip(f"provider {LLM_PROVIDER} needs MYSCHOLAR_TEST_LLM_KEY")
+        settings["api_key"] = LLM_KEY
+        # This endpoint rejects unknown parameters rather than ignoring them.
+        settings["seed"] = None
+        if LLM_BASE_URL:
+            settings["base_url"] = LLM_BASE_URL
+    if LLM_MODEL:
+        settings["generator_model"] = LLM_MODEL
+        settings["utility_model"] = LLM_UTILITY_MODEL or LLM_MODEL
+    return settings
+
+
+# Questions the prompt was changed to fix. Each is a real regression.
 ANSWERABLE = [
     "He found that sensorless control performs worse than sensored control. What caused that?",
     "Tell me about his transformer project.",
@@ -77,7 +147,7 @@ async def engine() -> Engine:
     # whatever that machine happens to be configured for.
     settings = make_settings(
         database={"url": DATABASE_URL},
-        llm={"provider": "ollama"},
+        llm=_llm_settings(),
         embedding={"provider": "torch", "device": EMBEDDING_DEVICE},
     )
     store = PostgresStore(create_engine(settings.database.url))

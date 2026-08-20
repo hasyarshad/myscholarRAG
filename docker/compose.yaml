@@ -54,7 +54,7 @@ services:
       # so generation defaults to the fake model — it needs no API key and no
       # network. Override both to talk to a real one:
       #
-      #   MYSCHOLAR_LLM__PROVIDER=groq
+      #   MYSCHOLAR_LLM__PROVIDER=openai_compatible
       #   MYSCHOLAR_LLM__API_KEY=...
       MYSCHOLAR_LLM__PROVIDER: ${MYSCHOLAR_LLM__PROVIDER:-fake}
       MYSCHOLAR_LLM__API_KEY: ${MYSCHOLAR_LLM__API_KEY:-}

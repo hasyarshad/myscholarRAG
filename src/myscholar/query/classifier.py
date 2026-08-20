@@ -16,10 +16,10 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from myscholar.domain.enums import QueryClass
-from myscholar.ports.llm import ChatModel, Message, Role
+from myscholar.ports.llm import ChatModel, Message, ModelOutput, Role
 
 #: Recognised without a model call. These are unambiguous, they are a large
 #: share of what a public bot receives, and spending 300ms of GPU on "hi" is
@@ -186,8 +186,11 @@ _CHITCHAT = re.compile(
 
 _YEAR = re.compile(r"\b(19[89]\d|20[0-4]\d)\b")
 
+#: Cap on the classifier's own explanation of its choice.
+_MAX_REASONING = 200
 
-class QueryEntities(BaseModel):
+
+class QueryEntities(ModelOutput):
     """What the question refers to, if anything."""
 
     paper_titles: list[str] = Field(
@@ -201,7 +204,7 @@ class QueryEntities(BaseModel):
     )
 
 
-class QueryClassification(BaseModel):
+class QueryClassification(ModelOutput):
     """The classifier's output. Schema-constrained, so it cannot be malformed.
 
     ``out_of_scope`` is deliberately absent from the enumeration. Decoding is
@@ -239,7 +242,7 @@ class QueryClassification(BaseModel):
         QueryClass.BIOGRAPHICAL,
     ]
     entities: QueryEntities = Field(default_factory=QueryEntities)
-    reasoning: str = Field(default="", max_length=200)
+    reasoning: str = Field(default="", max_length=_MAX_REASONING)
 
 
 @dataclass(frozen=True, slots=True)

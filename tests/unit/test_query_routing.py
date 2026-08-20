@@ -14,7 +14,13 @@ from myscholar.query.classifier import (
     QueryEntities,
 )
 from myscholar.query.planner import QueryPlanner
-from myscholar.query.transforms import TransformKind, normalise
+from myscholar.query.transforms import (
+    Hypothetical,
+    SubQuestions,
+    TransformKind,
+    Variations,
+    normalise,
+)
 
 TITLES = [
     "Weighting Factors Optimization of Model Predictive Torque Control of Induction Motor",
@@ -528,3 +534,43 @@ class TestBibliographicIntentGuard:
         self, question: str, expected: BibliographicIntent
     ) -> None:
         assert detect_intent(question) is expected
+
+
+class TestBoundsTrimRatherThanReject:
+    """Constrained decoding fixes a response's shape, not its string lengths.
+
+    No backend enforces ``maxLength`` or ``maxItems`` — not Ollama's grammar,
+    not a hosted provider's ``json_schema``, not Google's OpenAI-compatible endpoint. Every
+    caller of `structured` treats a validation error as an outage and degrades
+    quietly, so a model writing one over-long field used to take the classifier
+    down the fallback path for every question, or silently stop a transform
+    running, or make the groundedness check pass everything through.
+
+    All three were observed against hosted models. `ports.llm.ModelOutput`
+    coerces to the bound instead; these cases pin the ones on the routing path.
+    """
+
+    def test_an_over_long_reasoning_trace_is_trimmed_not_refused(self) -> None:
+        result = QueryClassification(query_class=QueryClass.METHODOLOGICAL, reasoning="y" * 900)
+
+        assert len(result.reasoning) == 200
+        assert result.query_class is QueryClass.METHODOLOGICAL
+
+    def test_a_long_hypothetical_passage_is_trimmed(self) -> None:
+        assert len(Hypothetical(passage="x" * 2000).passage) == 800
+
+    def test_too_many_query_variations_are_capped(self) -> None:
+        assert len(Variations(queries=[f"q{i}" for i in range(9)]).queries) == 4
+
+    def test_too_many_sub_questions_are_capped(self) -> None:
+        assert len(SubQuestions(questions=[f"q{i}" for i in range(9)]).questions) == 4
+
+    def test_values_inside_the_bounds_are_untouched(self) -> None:
+        # The trim must not be doing anything on the normal path.
+        assert (
+            QueryClassification(
+                query_class=QueryClass.BIOGRAPHICAL, reasoning="asks about the CV"
+            ).reasoning
+            == "asks about the CV"
+        )
+        assert Variations(queries=["a", "b"]).queries == ["a", "b"]

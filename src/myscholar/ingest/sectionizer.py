@@ -20,10 +20,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from myscholar.domain.enums import DocumentKind, SectionKind
-from myscholar.ports.llm import ChatModel, Message, Role
+from myscholar.ports.llm import ChatModel, Message, ModelOutput, Role
 
 #: Leading enumeration to strip before matching: "III.", "3.1", "B)", "IV -".
 _ENUMERATION = re.compile(r"^\s*(?:[IVXLC]+|\d+(?:\.\d+)*|[A-Z])\s*[.):\-]?\s+", re.IGNORECASE)
@@ -84,7 +84,7 @@ _CV_PATTERNS: tuple[tuple[re.Pattern[str], SectionKind], ...] = (
 )
 
 
-class HeadingClassification(BaseModel):
+class HeadingClassification(ModelOutput):
     """Schema handed to the model, so decoding is constrained to valid kinds."""
 
     kind: SectionKind

@@ -63,15 +63,33 @@ COPY --chown=user:user src/ src/
 COPY --chown=user:user pyproject.toml README.md ./
 
 USER user
+
+# Configuration, not secrets. The hosted model is chosen here because two
+# requirements eliminate most free tiers, and both were measured rather than
+# assumed:
+#
+#   * The pipeline needs schema-constrained output. Classification, the premise
+#     check and the groundedness gate are all `structured` calls, and a provider
+#     that answers with prose disables them *silently* — every caller treats a
+#     validation error as an outage and degrades quietly.
+#   * One generation request carries eight context blocks, about 10,000 tokens.
+#     A free tier that caps a whole minute at 8,000 can never answer once.
+#
+# Google AI Studio satisfies both: a million-token context, reliable JSON, and
+# 3.3s per question against 11.6s for the local pair. `flash-lite` is pinned
+# rather than `-latest` so the behaviour the tests pin cannot drift.
+#
+# SEED is empty on purpose: a fixed seed keeps evaluation runs comparable, but
+# this endpoint rejects unknown parameters instead of ignoring them.
 ENV HOME=/home/user \
     PYTHONPATH=/app/src \
     MYSCHOLAR_EMBEDDING__PROVIDER=onnx \
     MYSCHOLAR_EMBEDDING__ONNX_PATH=/app/artifacts/embedder-onnx \
-    MYSCHOLAR_LLM__PROVIDER=groq \
-    MYSCHOLAR_LLM__GENERATOR_MODEL=llama-3.3-70b-versatile \
-    MYSCHOLAR_LLM__UTILITY_MODEL=llama-3.1-8b-instant \
-    MYSCHOLAR_RERANKER__PROVIDER=noop \
-    MYSCHOLAR_RETRIEVAL__RERANK=false \
+    MYSCHOLAR_LLM__PROVIDER=openai_compatible \
+    MYSCHOLAR_LLM__BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai \
+    MYSCHOLAR_LLM__GENERATOR_MODEL=gemini-3.5-flash-lite \
+    MYSCHOLAR_LLM__UTILITY_MODEL=gemini-3.5-flash-lite \
+    MYSCHOLAR_LLM__SEED= \
     MYSCHOLAR_DATABASE__MIGRATE_ON_STARTUP=false
 
 # Everything above is configuration, not secrets. MYSCHOLAR_DATABASE__URL,

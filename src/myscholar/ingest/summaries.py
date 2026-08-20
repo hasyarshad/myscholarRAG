@@ -29,10 +29,10 @@ import logging
 import re
 from dataclasses import dataclass
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from myscholar.ports.embedding import Embedder
-from myscholar.ports.llm import ChatModel, Message, Role
+from myscholar.ports.llm import ChatModel, Message, ModelOutput, Role
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 _MAX_SOURCE_CHARS = 8000
 
 
-class PaperSummary(BaseModel):
+class PaperSummary(ModelOutput):
     """The four things worth knowing about a paper before opening it."""
 
     topic: str = Field(description="What the paper is about, in one sentence.")

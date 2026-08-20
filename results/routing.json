@@ -114,9 +114,9 @@
   {
     "question": "What is the capital of France?",
     "expected": "content",
-    "actual": "bibliographic",
+    "actual": "cross_paper_synthesis",
     "decided_by": "model",
-    "correct": false,
+    "correct": true,
     "papers": []
   },
   {
@@ -125,7 +125,9 @@
     "actual": "single_paper_factual",
     "decided_by": "model",
     "correct": true,
-    "papers": []
+    "papers": [
+      "Weighting Factors Optimization of Model Predictive Torque Control of Induction Motor Using NSGA-II With TOPSIS Decision Making"
+    ]
   },
   {
     "question": "In the Reddit moderation study, what platform was analysed?",
@@ -133,46 +135,48 @@
     "actual": "single_paper_factual",
     "decided_by": "model",
     "correct": true,
-    "papers": []
+    "papers": [
+      "Exploring Crowdsourced Content Moderation Through Lens of Reddit during COVID-19"
+    ]
   },
   {
     "question": "What filter is used in the grid-tied inverter paper?",
     "expected": "single_paper_factual",
-    "actual": "single_paper_factual",
-    "decided_by": "model",
-    "correct": true,
+    "actual": "cross_paper_synthesis",
+    "decided_by": "fallback",
+    "correct": false,
     "papers": []
   },
   {
     "question": "Which machine does the meta-learner stacking paper diagnose?",
     "expected": "single_paper_factual",
-    "actual": "single_paper_factual",
-    "decided_by": "model",
-    "correct": true,
+    "actual": "cross_paper_synthesis",
+    "decided_by": "fallback",
+    "correct": false,
     "papers": []
   },
   {
     "question": "How are weighting factors tuned in predictive torque control?",
     "expected": "methodological",
-    "actual": "single_paper_factual",
+    "actual": "methodological",
     "decided_by": "model",
-    "correct": false,
+    "correct": true,
     "papers": []
   },
   {
     "question": "What approach is taken to sensorless control?",
     "expected": "methodological",
-    "actual": "methodological",
-    "decided_by": "model",
-    "correct": true,
+    "actual": "cross_paper_synthesis",
+    "decided_by": "fallback",
+    "correct": false,
     "papers": []
   },
   {
     "question": "How is chaos analysed quantitatively?",
     "expected": "methodological",
-    "actual": "methodological",
-    "decided_by": "model",
-    "correct": true,
+    "actual": "cross_paper_synthesis",
+    "decided_by": "fallback",
+    "correct": false,
     "papers": []
   },
   {
@@ -195,7 +199,7 @@
     "question": "What are the recurring themes across his publications?",
     "expected": "cross_paper_synthesis",
     "actual": "cross_paper_synthesis",
-    "decided_by": "model",
+    "decided_by": "fallback",
     "correct": true,
     "papers": []
   },
@@ -250,9 +254,9 @@
   {
     "question": "Give me a count of his 2021 output",
     "expected": "bibliographic",
-    "actual": "bibliographic",
-    "decided_by": "model",
-    "correct": true,
+    "actual": "cross_paper_synthesis",
+    "decided_by": "fallback",
+    "correct": false,
     "papers": []
   },
   {
@@ -306,32 +310,32 @@
   {
     "question": "What sampling frequency does the LSPMSM fault study use?",
     "expected": "single_paper_factual",
-    "actual": "single_paper_factual",
-    "decided_by": "model",
-    "correct": true,
+    "actual": "cross_paper_synthesis",
+    "decided_by": "fallback",
+    "correct": false,
     "papers": []
   },
   {
     "question": "In the UAV paper, which estimator is applied?",
     "expected": "single_paper_factual",
-    "actual": "single_paper_factual",
-    "decided_by": "model",
-    "correct": true,
+    "actual": "cross_paper_synthesis",
+    "decided_by": "fallback",
+    "correct": false,
     "papers": []
   },
   {
     "question": "How is switching loss reduced in these converters?",
     "expected": "methodological",
-    "actual": "methodological",
-    "decided_by": "model",
-    "correct": true,
+    "actual": "cross_paper_synthesis",
+    "decided_by": "fallback",
+    "correct": false,
     "papers": []
   },
   {
     "question": "What validation strategies appear across the machine learning papers?",
     "expected": "methodological",
     "actual": "cross_paper_synthesis",
-    "decided_by": "model",
+    "decided_by": "fallback",
     "correct": false,
     "papers": []
   },
@@ -339,7 +343,7 @@
     "question": "What connects his control work to his machine learning work?",
     "expected": "cross_paper_synthesis",
     "actual": "cross_paper_synthesis",
-    "decided_by": "model",
+    "decided_by": "fallback",
     "correct": true,
     "papers": []
   },
@@ -347,7 +351,7 @@
     "question": "Summarise the evolution of his fault detection research",
     "expected": "cross_paper_synthesis",
     "actual": "cross_paper_synthesis",
-    "decided_by": "model",
+    "decided_by": "fallback",
     "correct": true,
     "papers": []
   },

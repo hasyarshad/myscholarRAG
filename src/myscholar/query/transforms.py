@@ -14,7 +14,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
-from myscholar.ports.llm import ChatModel, Message, Role
+from myscholar.ports.llm import ChatModel, Message, ModelOutput, Role
 
 
 class TransformKind(StrEnum):
@@ -35,20 +35,37 @@ class SearchQuery:
     """Scales this query's contribution when results are fused."""
 
 
-class Variations(BaseModel):
-    queries: list[str] = Field(max_length=4, description="Alternative phrasings, one per line")
+#: Caps on what a transform may return. Constrained decoding fixes the shape of
+#: a response but not these bounds — neither Ollama's grammar nor the hosted provider's
+#: ``json_schema`` enforces ``maxLength`` or ``maxItems``. Exceeding one used to
+#: raise, and `_structured` drops a failed transform by design, so HyDE simply
+#: stopped happening on any question where the model wrote a long passage. That
+#: is invisible: retrieval still returns results, just worse ones. Trimming to
+#: the bound keeps the limit without turning it into a silent outage.
+_MAX_VARIANTS = 4
+_MAX_PASSAGE = 800
 
 
-class SubQuestions(BaseModel):
-    questions: list[str] = Field(max_length=4, description="Self-contained sub-questions")
+class Variations(ModelOutput):
+    queries: list[str] = Field(
+        max_length=_MAX_VARIANTS, description="Alternative phrasings, one per line"
+    )
 
 
-class StepBack(BaseModel):
+class SubQuestions(ModelOutput):
+    questions: list[str] = Field(
+        max_length=_MAX_VARIANTS, description="Self-contained sub-questions"
+    )
+
+
+class StepBack(ModelOutput):
     question: str = Field(description="A more general question the specific one falls under")
 
 
-class Hypothetical(BaseModel):
-    passage: str = Field(max_length=800, description="A plausible passage answering the question")
+class Hypothetical(ModelOutput):
+    passage: str = Field(
+        max_length=_MAX_PASSAGE, description="A plausible passage answering the question"
+    )
 
 
 _FILLER = re.compile(

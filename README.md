@@ -113,7 +113,8 @@ There is no relevance grading step and no retry. Both cost accuracy when measure
 FastAPI with server-sent events, so the stages above appear as they happen rather
 than after twenty seconds of spinner. Conversation history is server-side. The
 embedder runs as ONNX on CPU, verified at 1.00000 cosine parity with PyTorch;
-generation goes to a hosted API. The whole thing runs without a GPU.
+generation goes to a hosted API over the OpenAI chat-completions shape. The whole
+thing runs without a GPU.
 
 ---
 
@@ -158,15 +159,24 @@ Supporting measurements:
 | Attribution on confusable questions | 87% correct paper cited, **0% contamination** |
 | Query classification | 93.5%, and 100% on the classes where a misroute fabricates |
 | Latency | 11.6s per answer |
-| Tests | 694 |
+| Tests | 703 |
 
 Citation validity is 100% by construction rather than by sampling: every marker
 is checked against the retrieved set in code.
 
-Two caveats stated rather than buried. The groundedness check and the
+Three caveats stated rather than buried. The groundedness check and the
 faithfulness judge that scores these runs are the same small model, so the last
-row's advantage is partly self-marked. And the 37-question set has informed
-enough decisions to be a development set rather than a held-out one.
+row's advantage is partly self-marked. The 37-question set has informed enough
+decisions to be a development set rather than a held-out one.
+
+And every figure above was measured against the **local** pair, `qwen3:14b` with
+`qwen3:4b-instruct`. That is deliberate: the numbers describe one fixed
+configuration, and a free hosted tier cannot reproduce them — running the
+evaluations against one measures its rate limits rather than the pipeline. The
+deployed configuration is checked differently, by
+`tests/integration/test_prompt_contract.py`, which can be pointed at the hosted
+model to confirm the prompt contract holds there. It does, and answers arrive in
+3.3s against the 11.6s above.
 
 ---
 
@@ -176,7 +186,7 @@ Nothing here needs root, Docker, or a GPU.
 
 ```bash
 make setup                         # install dependencies (uv)
-make test                          # 650 tests, no GPU, network or database
+make test                          # 659 tests, no GPU, network or database
 uv run myscholar ask "hello"       # runs with fake components
 ```
 
@@ -222,6 +232,16 @@ minutes per configuration, so the ablation is not quick.
 The container is CPU-only: the embedder is exported to ONNX and generation moves
 to a hosted API, so the image needs no GPU and scales to zero.
 
+Generation goes to Google AI Studio, chosen by measurement rather than
+preference. Two requirements eliminate most free tiers. The pipeline needs
+schema-constrained output, because classification, the premise check and the
+groundedness gate are all structured calls — and a provider that answers with
+prose disables them *silently*, since every caller treats a validation error as
+an outage. And one generation request carries eight context blocks, roughly
+10,000 tokens, so a tier that caps a whole minute at 8,000 can never answer once,
+however little traffic it sees. Any OpenAI-compatible endpoint meeting both works
+by changing two environment variables.
+
 ```bash
 make docker-build
 uv run python scripts/export_onnx.py    # float32, asserted at 1.00000 parity
@@ -235,7 +255,7 @@ uv run python scripts/export_onnx.py    # float32, asserted at 1.00000 parity
 
 | | | |
 |---|---|---|
-| Generation | `qwen3:14b` local / `llama-3.3-70b` hosted | one env var swaps them |
+| Generation | `qwen3:14b` local / `gemini-3.5-flash-lite` hosted | one env var swaps them |
 | Classification, premise checks | `qwen3:4b-instruct` | many small calls per question |
 | Embeddings | `bge-base-en-v1.5`, ONNX for serving | same weights at index and query time, asserted at startup |
 | Store | PostgreSQL + pgvector | dense, lexical, relational and summaries in one system |

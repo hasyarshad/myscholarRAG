@@ -97,7 +97,7 @@ cmd_start() {
     #
     # Four parallel slots buy nothing here: this is a single-user development
     # box serving one question at a time. Concurrency belongs in production,
-    # which runs against Groq and never loads a model locally at all.
+    # which runs against a hosted model and never loads one locally at all.
     # CONTEXT_LENGTH caps the window both models are loaded with. Without it,
     # dropping NUM_PARALLEL to 1 had the opposite effect to the one intended:
     # Ollama stopped rationing context between slots and gave qwen3:4b-instruct

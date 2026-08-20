@@ -1,4 +1,4 @@
-"""Ollama and Groq adapters, exercised against a stubbed HTTP transport.
+"""Ollama and the hosted model adapters, exercised against a stubbed HTTP transport.
 
 No network and no running model server: httpx's MockTransport intercepts
 requests, so these tests assert the request bodies and response handling that
@@ -13,11 +13,15 @@ import httpx
 import pytest
 from pydantic import BaseModel
 
-from myscholar.adapters.llm.groq import GroqChatModel, GroqError, GroqRateLimitError
 from myscholar.adapters.llm.ollama import (
     NO_THINK_DIRECTIVE,
     OllamaChatModel,
     OllamaError,
+)
+from myscholar.adapters.llm.openai_compatible import (
+    HostedModelError,
+    HostedModelRateLimitError,
+    OpenAICompatibleChatModel,
 )
 from myscholar.ports.llm import Message, Role
 
@@ -244,9 +248,9 @@ class TestOllama:
         assert "".join(tokens) == "finite control set"
 
 
-class TestGroq:
-    def _model(self) -> GroqChatModel:
-        return GroqChatModel("llama-3.3-70b-versatile", api_key="gsk-test")
+class TestOpenAICompatible:
+    def _model(self) -> OpenAICompatibleChatModel:
+        return OpenAICompatibleChatModel("openai/gpt-oss-120b", api_key="gsk-test")
 
     async def test_complete_reads_openai_shaped_response(
         self, monkeypatch: pytest.MonkeyPatch
@@ -259,6 +263,73 @@ class TestGroq:
         _patch_transport(monkeypatch, httpx.MockTransport(handler))
 
         assert await self._model().complete(QUESTION) == "a control strategy"
+
+    async def test_reasoning_effort_is_omitted_unless_configured(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Unset must mean absent, not a default value.
+
+        A model that does not accept ``reasoning_effort`` rejects the whole
+        request, so sending it speculatively would break every model that lacks
+        it in order to speed up the ones that have it.
+        """
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.update(json.loads(request.content))
+            return httpx.Response(200, json={"choices": [{"message": {"content": "x"}}]})
+
+        _patch_transport(monkeypatch, httpx.MockTransport(handler))
+        await self._model().complete(QUESTION)
+
+        assert "reasoning_effort" not in captured
+
+    async def test_reasoning_effort_is_sent_when_configured(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.update(json.loads(request.content))
+            return httpx.Response(200, json={"choices": [{"message": {"content": "x"}}]})
+
+        _patch_transport(monkeypatch, httpx.MockTransport(handler))
+        model = OpenAICompatibleChatModel(
+            "openai/gpt-oss-120b", api_key="k", reasoning_effort="low"
+        )
+        await model.complete(QUESTION)
+
+        assert captured["reasoning_effort"] == "low"
+
+    async def test_reasoning_effort_reaches_schema_constrained_calls_too(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Classification is the call made most often, so it is the one where the
+        # saving matters. `structured` builds its payload through the same
+        # helper, and this pins that it keeps doing so.
+        captured: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.update(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {"message": {"content": '{"relevant": true, "reason": "tunes them"}'}}
+                    ]
+                },
+            )
+
+        _patch_transport(monkeypatch, httpx.MockTransport(handler))
+        model = OpenAICompatibleChatModel(
+            "openai/gpt-oss-120b", api_key="k", reasoning_effort="low"
+        )
+        await model.structured(QUESTION, Verdict)
+
+        assert captured["reasoning_effort"] == "low"
+        response_format = captured["response_format"]
+        assert isinstance(response_format, dict)
+        assert response_format["type"] == "json_schema"
 
     async def test_api_key_is_sent_as_a_bearer_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
         captured: dict[str, str] = {}
@@ -282,7 +353,7 @@ class TestGroq:
 
         _patch_transport(monkeypatch, httpx.MockTransport(handler))
 
-        with pytest.raises(GroqRateLimitError, match="60"):
+        with pytest.raises(HostedModelRateLimitError, match="60"):
             await self._model().complete(QUESTION)
 
     async def test_server_error_is_reported_with_status(
@@ -293,7 +364,7 @@ class TestGroq:
 
         _patch_transport(monkeypatch, httpx.MockTransport(handler))
 
-        with pytest.raises(GroqError, match="500"):
+        with pytest.raises(HostedModelError, match="500"):
             await self._model().complete(QUESTION)
 
     async def test_stream_parses_server_sent_events(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -324,10 +395,12 @@ class TestAdapterEquivalence:
         _patch_transport(monkeypatch, httpx.MockTransport(ollama_handler))
         local = await OllamaChatModel("qwen3:14b").complete(QUESTION)
 
-        def groq_handler(_request: httpx.Request) -> httpx.Response:
+        def hosted_handler(_request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={"choices": [{"message": {"content": "same answer"}}]})
 
-        _patch_transport(monkeypatch, httpx.MockTransport(groq_handler))
-        hosted = await GroqChatModel("llama-3.3-70b-versatile", api_key="k").complete(QUESTION)
+        _patch_transport(monkeypatch, httpx.MockTransport(hosted_handler))
+        hosted = await OpenAICompatibleChatModel("openai/gpt-oss-120b", api_key="k").complete(
+            QUESTION
+        )
 
         assert local == hosted == "same answer"

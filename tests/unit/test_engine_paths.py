@@ -11,11 +11,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
 from myscholar.domain.answers import Answer, Refusal
+from myscholar.domain.documents import ContextBlock
 from myscholar.domain.enums import QueryClass, RefusalReason
+from myscholar.generation.answerer import GradedContext
 from myscholar.query.bibliographic import BibliographicAnswer, BibliographicIntent
 from myscholar.query.classifier import Classification
 from myscholar.query.planner import Plan
@@ -412,3 +415,59 @@ class TestTheBestAttemptIsTheOneReturned:
 
         assert better, "the worse final attempt would have been returned"
         assert state.best_draft == second
+
+
+class TestAFailedGenerationRefusesRatherThanReturningNothing:
+    """An outage must produce a refusal, not a blank answer.
+
+    `_generate` catches a dead or rate-limited model and ends the loop without a
+    draft, on the reasoning that an outage is not a programming error. But the
+    edge out of `generate` went unconditionally to `verify`, which verified the
+    empty string and fell through to `done` — so the visitor received an
+    *Answer* whose text was "". Observed against a hosted model that rejected
+    the generation request outright: the trace said "generation unavailable" and
+    the reply was blank.
+    """
+
+    def _block(self) -> ContextBlock:
+        return ContextBlock(
+            label="C1",
+            document_id=uuid4(),
+            section_id=uuid4(),
+            document_title="Weighting Factors Optimization of MPTC",
+            section_heading="Results",
+            text="Switching loss falls as the horizon shortens.",
+            page_start=1,
+            page_end=1,
+        )
+
+    def _routed(self) -> _Routed:
+        return _Routed(
+            classification=Classification(query_class=QueryClass.METHODOLOGICAL),
+            plan=Plan(query_class=QueryClass.METHODOLOGICAL),
+            blocks=(self._block(),),
+        )
+
+    async def test_a_generator_outage_produces_a_refusal(self) -> None:
+        block = self._block()
+
+        class _Failing(_Answerer):
+            async def grade(self, *args: Any, **kwargs: Any) -> Any:
+                return GradedContext(kept=(block,), rejected=())
+
+            async def check_premise(self, *args: Any, **kwargs: Any) -> Any:
+                return None
+
+            async def generate(self, *args: Any, **kwargs: Any) -> str:
+                msg = "hosted model unavailable"
+                raise RuntimeError(msg)
+
+        engine = Engine(
+            router=_Router(self._routed()),  # type: ignore[arg-type]
+            answerer=_Failing(),  # type: ignore[arg-type]
+            budget=Budget(),
+        )
+        response = await engine.answer("How is switching loss reduced?")
+
+        assert isinstance(response, Refusal), f"got an Answer: {response!r}"
+        assert response.text.strip(), "a refusal must still say something"

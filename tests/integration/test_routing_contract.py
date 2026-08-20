@@ -25,9 +25,6 @@ name, among other things, and a hand-built classifier silently gets the default.
 Marked ``integration`` because catching a routing regression requires running
 the classifier. Run with
 
-Marked ``integration`` because catching a routing regression requires running
-the classifier. Run with
-
     uv run pytest -m integration -k routing
 """
 
@@ -55,11 +52,54 @@ DATABASE_URL = os.environ.get(
 )
 EMBEDDING_DEVICE = os.environ.get("MYSCHOLAR_TEST_EMBEDDING_DEVICE", "cuda")
 
+
+# The model backend the canaries run against. Defaults to the local pair, which
+# is what the published numbers were measured on and needs no key. Point it at
+# the deployed configuration to check the prompt against the model that will
+# actually serve it:
+#
+#     MYSCHOLAR_TEST_LLM_PROVIDER=openai_compatible \
+#     MYSCHOLAR_TEST_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai \
+#     MYSCHOLAR_TEST_LLM_MODEL=gemini-3.5-flash-lite \
+#     MYSCHOLAR_TEST_LLM_KEY=... \
+#     uv run pytest -m integration -k prompt
+#
+# Worth having as a switch rather than a second test file: the prompt is 87% of
+# this system's accuracy, and "it holds on the model we measured" says nothing
+# about the model in production.
+# Read at import time, not inside the fixture. The autouse `_isolate_environment`
+# fixture hides every MYSCHOLAR_* variable from `os.environ` so a developer's
+# exported settings cannot change whether the suite passes — and these share that
+# prefix, so a fixture-time lookup silently returns the default and the run
+# quietly tests the wrong backend. That is why DATABASE_URL above is a constant.
+LLM_PROVIDER = os.environ.get("MYSCHOLAR_TEST_LLM_PROVIDER", "ollama")
+LLM_BASE_URL = os.environ.get("MYSCHOLAR_TEST_LLM_BASE_URL", "")
+LLM_MODEL = os.environ.get("MYSCHOLAR_TEST_LLM_MODEL", "")
+LLM_UTILITY_MODEL = os.environ.get("MYSCHOLAR_TEST_LLM_UTILITY_MODEL", "")
+LLM_KEY = os.environ.get("MYSCHOLAR_TEST_LLM_KEY", "")
+
+
+def _llm_settings() -> dict[str, object]:
+    settings: dict[str, object] = {"provider": LLM_PROVIDER}
+    if LLM_PROVIDER != "ollama":
+        if not LLM_KEY:
+            pytest.skip(f"provider {LLM_PROVIDER} needs MYSCHOLAR_TEST_LLM_KEY")
+        settings["api_key"] = LLM_KEY
+        # This endpoint rejects unknown parameters rather than ignoring them.
+        settings["seed"] = None
+        if LLM_BASE_URL:
+            settings["base_url"] = LLM_BASE_URL
+    if LLM_MODEL:
+        settings["generator_model"] = LLM_MODEL
+        settings["utility_model"] = LLM_UTILITY_MODEL or LLM_MODEL
+    return settings
+
+
 PROBES = Path("tests/eval/work_on_probes.yaml")
 
-#: A measured ceiling, not a goal. Three of twenty probes land in a class that
-#: does not select documents. Raising this number needs a measurement that says
-#: why; lowering it is the point of the file.
+# A measured ceiling, not a goal. Three of twenty probes land in a class that
+# does not select documents. Raising this number needs a measurement that says
+# why; lowering it is the point of the file.
 MAX_PROBES_WITHOUT_SELECTION = 3
 
 
@@ -75,7 +115,7 @@ async def router() -> QueryRouter:
     # whatever that machine happens to be configured for.
     settings = make_settings(
         database={"url": DATABASE_URL},
-        llm={"provider": "ollama"},
+        llm=_llm_settings(),
         embedding={"provider": "torch", "device": EMBEDDING_DEVICE},
     )
     store = PostgresStore(create_engine(settings.database.url))

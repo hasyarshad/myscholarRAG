@@ -14,13 +14,21 @@ from __future__ import annotations
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, Field, SecretStr, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class LLMProvider(StrEnum):
     OLLAMA = "ollama"
-    GROQ = "groq"
+
+    OPENAI_COMPATIBLE = "openai_compatible"
+    """Any endpoint speaking the OpenAI chat-completions shape.
+
+    Named for the wire format rather than a vendor. A previous vendor-specific
+    member was removed once measurement showed its free tier could not run the
+    pipeline: this project only ships paths a reader can reproduce for nothing.
+    """
+
     FAKE = "fake"
 
 
@@ -61,8 +69,47 @@ class LLMSettings(BaseModel):
     matters worse — see the Ollama adapter.
     """
 
+    reasoning_effort: str | None = None
+    """How much reasoning a hosted reasoning model should spend, if it supports it.
+
+    The OpenAI-compatible counterpart to ``suppress_reasoning`` above, which is
+    a Qwen3 prompt directive the hosted models ignore. Sent only when set, so a
+    model that rejects the parameter is unaffected by the default.
+
+    Measured on ``openai/gpt-oss-120b`` with the same prompt: unset spends 727
+    characters of reasoning and 254 completion tokens in 0.8s; ``"low"`` spends
+    49 characters and 122 tokens in 0.5s, for no visible difference in the
+    answer. Reasoning is billed and rate-limited like any other output token, so
+    on a free tier this is a saving as well as a latency win.
+    """
+
+    seed: int | None = 42
+    """Fixed sampling seed, so repeated evaluation runs are comparable.
+
+    Disable it for an endpoint that rejects unknown parameters instead of
+    ignoring them. Google's OpenAI-compatible endpoint is one: it returns 400
+    `Unknown name "seed"` rather than dropping the field.
+
+    Environment variables are strings, and an unset optional integer has no
+    natural spelling in one, so ``""``, ``none``, ``null`` and ``off`` all mean
+    "do not send it" — see the validator below.
+    """
+
     base_url: str = "http://localhost:11434"
     api_key: SecretStr | None = None
+
+    @field_validator("seed", "reasoning_effort", mode="before")
+    @classmethod
+    def _empty_means_unset(cls, value: object) -> object:
+        """Let an env var switch an optional setting off.
+
+        Without this, ``MYSCHOLAR_LLM__SEED=`` raises rather than meaning None,
+        so the only way to disable it is to edit code — which a deployment
+        cannot do.
+        """
+        if isinstance(value, str) and value.strip().lower() in {"", "none", "null", "off"}:
+            return None
+        return value
 
     temperature: float = 0.0
     """Zero by default. Grounded extraction wants determinism, not creativity."""
@@ -71,10 +118,10 @@ class LLMSettings(BaseModel):
 
     @model_validator(mode="after")
     def _require_key_for_hosted(self) -> LLMSettings:
-        if self.provider is LLMProvider.GROQ and self.api_key is None:
+        if self.provider is LLMProvider.OPENAI_COMPATIBLE and self.api_key is None:
             msg = (
-                "llm.provider is 'groq' but no api_key was supplied. "
-                "Set MYSCHOLAR_LLM__API_KEY (free key at https://console.groq.com)."
+                "llm.provider is 'openai_compatible' but no api_key was supplied. "
+                "Set MYSCHOLAR_LLM__API_KEY (free key at https://aistudio.google.com/apikey)."
             )
             raise ValueError(msg)
         return self

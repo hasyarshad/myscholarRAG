@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from myscholar.domain.documents import ContextBlock
 from myscholar.domain.enums import Verdict
-from myscholar.ports.llm import ChatModel, Message, Role
+from myscholar.ports.llm import ChatModel, Message, ModelOutput, Role
 
 logger = logging.getLogger(__name__)
 
@@ -186,13 +186,13 @@ _NEAREST_PROMPT = """Name the topics this collection of research covers, based o
 Give at most three short topic phrases, as a reader would recognise them."""
 
 
-class BlockGrade(BaseModel):
+class BlockGrade(ModelOutput):
     label: str
     verdict: Verdict
     reason: str = Field(default="", max_length=200)
 
 
-class Grades(BaseModel):
+class Grades(ModelOutput):
     grades: list[BlockGrade]
 
 
@@ -200,12 +200,12 @@ class RewrittenQuery(BaseModel):
     query: str
 
 
-class Groundedness(BaseModel):
+class Groundedness(ModelOutput):
     supported: bool
     reason: str = Field(default="", max_length=200)
 
 
-class PremiseCheck(BaseModel):
+class PremiseCheck(ModelOutput):
     """Whether a claim smuggled into the question survives the sources."""
 
     premise: str = Field(
@@ -224,7 +224,7 @@ class PremiseCheck(BaseModel):
     )
 
 
-class NearestTopics(BaseModel):
+class NearestTopics(ModelOutput):
     topics: list[str] = Field(default_factory=list, max_length=3)
 
 
