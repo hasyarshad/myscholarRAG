@@ -1,31 +1,15 @@
-"""Measure document selection on its own.
+"""Measure document selection for cross-paper questions.
 
     uv run python scripts/eval_selection.py
 
-Selection decides which papers a question is about, before any passage is
-fetched. It is the stage the summariser exists to serve, and until now nothing
-measured it: the retrieval set is 27 single-paper questions and 9
-methodological ones, with no cross-paper synthesis at all — so the class this
-was built for was invisible to every metric.
-
-Two numbers, and the second is the one that matters:
+Selection decides which papers a question is about before any passage is fetched.
+The retrieval set has no cross-paper synthesis questions, so it cannot measure this.
 
   recall     of the documents a good answer needs, how many are in scope
-  complete   fraction of questions where *every* needed document is in scope
+  complete   fraction of questions where every needed document is in scope
 
-Recall alone hides the shape of the failure. Nine questions at 80% and one at
-zero average to 78%, and the one at zero is an answer that confidently omits a
-paper. Completeness reports that directly.
-
-Precision is deliberately not scored. Selecting nine documents of twenty-five
-and being wrong about two costs a little context; missing the paper that
-answers the question costs the answer.
-
-The comparison is against no selection at all, which trivially scores 100% —
-that is the point of the second row. Selection is only worth having if what it
-*excludes* improves the answer, which is measured downstream in
-scripts/eval_generation.py. This tells you whether it is throwing away the
-evidence.
+Precision is not scored: an extra document costs a little context, while a
+missing one costs the answer.
 """
 
 from __future__ import annotations
@@ -51,21 +35,13 @@ from myscholar.retrieval.selection import DocumentSelector  # noqa: E402
 TEST_SET = Path("tests/eval/selection_set.yaml")
 RESULTS = Path("results")
 
-#: What a cross-paper synthesis question selects. Matching the planner rather
-#: than sweeping: this measures the shipped setting, and a sweep that reported
-#: a better number for a value nothing uses would be misleading.
+#: The planner's setting for cross-paper synthesis questions.
 SELECT_DOCUMENTS = 11
 
 
 @dataclass(frozen=True, slots=True)
 class Row:
-    """One question's selection result.
-
-    A record rather than a dict because every read of a ``dict[str, object]``
-    comes back as ``object``: ``sum(float(r["recall"]) ...)`` type-checks only
-    by casting, and ``r["missing"]`` needed a ``type: ignore`` to be joined.
-    Naming the five fields removes the casts and the suppression together.
-    """
+    """One question's selection result."""
 
     question: str
     kind: str
@@ -122,11 +98,10 @@ async def main() -> None:
         f"| Recall of needed documents | **{recall:.0%}** |",
         f"| Questions with nothing missing | **{complete:.0%}** |",
         "",
-        "Recall alone hides the shape of the failure: nine questions at 80% "
-        "and one at zero average to 78%, and the one at zero is an answer that "
-        "confidently omits a paper. Precision is not scored — selecting a "
-        "document that turns out to be irrelevant costs a little context, "
-        "while missing the one that answers the question costs the answer.",
+        "Recall is an average and can hide a question that misses a needed paper "
+        "entirely, so the share of questions with nothing missing is reported "
+        "beside it. Precision is not scored: an irrelevant extra document costs a "
+        "little context, while a missing one costs the answer.",
         "",
         "## By question shape",
         "",
@@ -146,8 +121,6 @@ async def main() -> None:
 
     RESULTS.mkdir(exist_ok=True)
     (RESULTS / "selection.md").write_text("\n".join(lines), "utf-8")
-    # asdict, because Row is a dataclass and json.dumps cannot serialise one.
-    # The stored shape is unchanged: the same five keys the dict carried.
     (RESULTS / "selection.json").write_text(
         json.dumps([asdict(r) for r in rows], indent=2), "utf-8"
     )

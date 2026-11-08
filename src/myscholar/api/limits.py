@@ -1,8 +1,7 @@
-"""Bounding the work a public endpoint will accept.
+"""Bounds on the work the public endpoint accepts.
 
-A GPU serves one question at a time. Without limits, one script exhausts the
-machine and every other visitor gets nothing — so the queue is bounded and
-callers over the limit are told to come back rather than left waiting.
+A per-caller rate limit and a bounded queue, so one client cannot exhaust the
+service and callers over the limit are told to retry.
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ class RateLimitedError(Exception):
 
 
 class OverloadedError(Exception):
-    """The queue is full. Better to say so than to accept work and stall."""
+    """The admission queue is full."""
 
 
 #: Header carrying the secret the Next.js proxy injects.
@@ -33,16 +32,9 @@ SECRET_HEADER = "x-myscholar-secret"
 def authorised(supplied: str | None, expected: str) -> bool:
     """Whether a request may proceed.
 
-    An empty ``expected`` disables the check, which is how development runs —
-    the alternative is a secret in every local shell, and a check people turn
-    off by pasting a placeholder is worse than one that is honestly absent.
-
-    Compared with ``compare_digest``. A plain ``==`` returns as soon as two
-    bytes differ, so the time it takes reveals how much of the prefix was
-    right, and a few thousand requests recover the secret one character at a
-    time. The comparison here is short and over a network, which makes the
-    signal small but not absent; constant time costs nothing, so there is no
-    reason to leave it.
+    An empty ``expected`` disables the check, as in development. ``compare_digest``
+    runs in constant time: a plain ``==`` stops at the first differing byte, so
+    response timing would leak how much of a guess was right.
     """
     if not expected:
         return True
@@ -54,8 +46,7 @@ class Limits:
     per_minute: int = 8
     per_hour: int = 40
     max_concurrent: int = 1
-    """One question at a time: generation is serialised on the GPU anyway, and
-    pretending otherwise just moves the queue somewhere less visible."""
+    """One question at a time; a local GPU model serves requests serially anyway."""
 
     max_queued: int = 6
 
@@ -63,25 +54,12 @@ class Limits:
 class RateLimiter:
     """A sliding window per caller.
 
-    In-memory, so it resets on restart and does not survive multiple processes.
-    That is the right trade for a single-process portfolio service; anything
-    larger wants the counter in Postgres or at the edge.
+    In memory, so counts reset on restart and are not shared between processes.
     """
 
-    #: How often the caller table is swept for entries with nothing left in them.
-    #:
-    #: Each caller's own deque was already pruned on the way past, but only for
-    #: the caller making the request — the *table* keyed by caller was never
-    #: pruned at all, and `forget` was written and then never called from
-    #: anywhere. So every distinct caller left a permanent entry behind.
-    #:
-    #: That matters more than a slow leak usually would, because the key is
-    #: taken from `X-Forwarded-For`, which the header's own docstring notes is
-    #: client-controlled. A caller sending a different value each time therefore
-    #: allocated a new permanent entry per request, against a container with a
-    #: few hundred megabytes to its name. Spoofing the header already defeated
-    #: the rate limit; it should not also have been the cheapest way to exhaust
-    #: the process.
+    #: Requests between sweeps of the caller table. The key comes from the
+    #: client-controlled ``X-Forwarded-For``, so an unswept table could be grown
+    #: without bound by varying it.
     _SWEEP_EVERY = 256
 
     def __init__(self, limits: Limits | None = None) -> None:
@@ -109,26 +87,20 @@ class RateLimiter:
             self._sweep(now)
 
     def _sweep(self, now: float) -> None:
-        """Drop callers with no activity inside the window.
+        """Drop callers with no hits in the last hour.
 
-        Amortised rather than scheduled: it runs on the request path, so there
-        is no background task to own, and the cost is one pass over a table that
-        only reaches a size worth sweeping if it is being filled.
+        Runs on the request path every ``_SWEEP_EVERY`` checks, so no background task is needed.
         """
         stale = [caller for caller, hits in self._hits.items() if not hits or now - hits[-1] > 3600]
         for caller in stale:
             del self._hits[caller]
 
-    def forget(self, caller: str) -> None:
-        self._hits.pop(caller, None)
-
 
 class Gate:
-    """Admission control for the GPU.
+    """Admission control: a bounded queue in front of the pipeline.
 
-    Rejecting at the door beats accepting and stalling: a visitor told to retry
-    in a moment has a better experience than one watching a spinner behind five
-    other questions.
+    A caller that would wait behind ``max_queued`` others is rejected at once
+    and told to retry.
     """
 
     def __init__(self, limits: Limits | None = None) -> None:
@@ -141,9 +113,8 @@ class Gate:
         return self._waiting
 
     async def __aenter__(self) -> Gate:
-        # Rejection applies only to callers that would have to *wait*. Checking
-        # the queue unconditionally meant max_queued=0 rejected everything,
-        # including the first caller with the slot free.
+        # Only callers that would have to wait are rejected, so max_queued=0
+        # still admits a caller when the slot is free.
         if self._semaphore.locked() and self._waiting >= self._limits.max_queued:
             raise OverloadedError
         self._waiting += 1
@@ -154,7 +125,6 @@ class Gate:
         return self
 
     async def __aexit__(self, *_: object) -> None:
-        # Released in __aexit__ rather than after the response is built, so a
-        # client disconnecting mid-stream frees the slot immediately. Otherwise
-        # abandoning requests would be a denial of service.
+        # Also runs when a client disconnects mid-stream, so an abandoned
+        # request cannot hold the slot.
         self._semaphore.release()

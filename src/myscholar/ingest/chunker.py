@@ -1,19 +1,8 @@
 """Splitting sections into embeddable chunks.
 
-Two rules do most of the work:
-
-**A chunk belongs to exactly one section.** A chunk spanning the end of Methods
-and the start of Results averages two unrelated meanings, so its vector is close
-to neither. It also cannot be filtered by section, since it has no single one.
-
-**Chunks are small; context is restored later.** Around 350 tokens keeps a
-vector specific. The generator still needs coherent prose, so neighbouring
-chunks are merged back into a contiguous span *after* retrieval (Phase 2).
-Retrieval precision and generation context are different problems.
-
-The code this replaces embedded one sentence per row. "The proposed approach
-achieves a 23% reduction compared to the conventional method" carries almost no
-retrievable meaning on its own — no topic, no paper, no comparison target.
+A chunk belongs to exactly one section, so its vector carries one meaning and it can be
+filtered by section. Chunks are small (around 350 tokens) to keep vectors specific;
+neighbouring chunks are merged back into a contiguous span after retrieval.
 """
 
 from __future__ import annotations
@@ -25,14 +14,11 @@ from dataclasses import dataclass
 from myscholar.domain.enums import ChunkKind
 
 #: Candidate sentence boundary: a terminator, optional closing punctuation,
-#: whitespace, then a capital or digit. Python's ``re`` only allows fixed-width
-#: lookbehind, so abbreviations are handled by re-joining afterwards rather than
-#: by excluding them here.
+#: whitespace, then a capital or digit. ``re`` only allows fixed-width lookbehind,
+#: so abbreviations are re-joined afterwards.
 _SENTENCE_END = re.compile(r"(?<=[.!?])[\"')\]]*\s+(?=[A-Z0-9])")
 
-#: Fragments ending in these are not sentence ends. Dense in this corpus —
-#: "as shown in Fig. 3", "reported by H. Arshad", "see Sec. 4" — and splitting
-#: on them shreds sentences into unembeddable fragments.
+#: Fragments ending in these are not sentence ends ("Fig. 3", "see Sec. 4").
 _ABBREVIATIONS = frozenset(
     {
         "fig",
@@ -71,21 +57,18 @@ _ABBREVIATIONS = frozenset(
 #: A single initial, as in "H. Arshad" or "J. K. Rowling".
 _INITIAL = re.compile(r"\b[A-Z]\.$")
 
-#: LaTeX picked up by formula enrichment. Kept in the stored text as evidence,
-#: stripped before embedding: "\frac { 1 } { \tau _ { s } }" is token soup that
-#: matches no natural-language question and dilutes the rest of the vector.
+#: LaTeX from formula enrichment. Kept in the stored text but stripped before
+#: embedding, where it matches no natural-language question and dilutes the vector.
 _LATEX_BLOCK = re.compile(r"\$\$.*?\$\$|\$[^$\n]{3,}\$", re.DOTALL)
 _LATEX_COMMAND = re.compile(r"\\[a-zA-Z]+\s*(?:\{[^{}]*\})*")
 _FORMULA_PLACEHOLDER = re.compile(r"<!--\s*formula-not-decoded\s*-->")
 
 
 def estimate_tokens(text: str) -> int:
-    """Approximate token count without loading a tokeniser.
+    """Approximate token count at four characters per token.
 
-    Roughly four characters per token for English prose. Chunk boundaries do not
-    need to be exact — being 20 tokens over target costs nothing — and the real
-    tokeniser would force this module to depend on the embedder, which would
-    make it untestable without model weights.
+    Chunk boundaries need not be exact, and a real tokeniser would tie this module to the
+    embedder's weights.
     """
     return max(1, len(text) // 4)
 
@@ -143,14 +126,10 @@ class ChunkingPolicy:
     target_tokens: int = 350
     overlap_tokens: int = 60
     min_tokens: int = 40
-    """Below this a chunk is merged into its neighbour rather than kept alone.
-
-    A 15-token fragment embeds almost meaninglessly and wastes a retrieval slot.
-    """
+    """Below this a prose chunk is merged into the one before it."""
 
     max_tokens: int = 700
-    """Hard ceiling. A single sentence longer than this is split mid-sentence,
-    which is ugly but better than one chunk swallowing a whole subsection."""
+    """Hard ceiling. A single sentence longer than this is split mid-sentence."""
 
 
 def chunk_section(
@@ -160,8 +139,7 @@ def chunk_section(
     """Split one section's blocks into chunks.
 
     ``blocks`` is ``(kind, text, page)`` in document order. Tables, captions and
-    equations are never split or merged — a half table is worse than no table,
-    and their boundaries are already meaningful.
+    equations are never split or merged.
     """
     policy = policy or ChunkingPolicy()
     chunks: list[TextChunk] = []
@@ -224,8 +202,7 @@ def _pack_sentences(text: str, policy: ChunkingPolicy) -> Iterator[str]:
 def _overlap_tail(sentences: list[str], policy: ChunkingPolicy) -> tuple[list[str], int]:
     """Carry the last few sentences into the next chunk.
 
-    Overlap means a fact stated across a chunk boundary appears whole in at
-    least one chunk, rather than being split in both.
+    A fact stated across a chunk boundary then appears whole in at least one chunk.
     """
     tail: list[str] = []
     total = 0
@@ -255,12 +232,7 @@ def _split_oversized(sentence: str, policy: ChunkingPolicy) -> Iterator[str]:
 
 
 def _merge_runts(chunks: list[TextChunk], policy: ChunkingPolicy) -> list[TextChunk]:
-    """Fold undersized prose chunks into a neighbour.
-
-    Sections often end with a short sentence or two. Left alone those become
-    chunks too small to embed usefully; merged, they strengthen a neighbour.
-    Non-prose chunks are never merged.
-    """
+    """Fold undersized prose chunks into the preceding prose chunk."""
     if not chunks:
         return []
 
@@ -287,8 +259,7 @@ def _merge_runts(chunks: list[TextChunk], policy: ChunkingPolicy) -> list[TextCh
         else:
             merged.append(chunk)
 
-    # Ordinals must be contiguous within a section: parent expansion in Phase 2
-    # fetches ranges by ordinal, and a gap would silently truncate a span.
+    # Ordinals must be contiguous: parent expansion fetches ranges by ordinal.
     return [
         TextChunk(text=c.text, kind=c.kind, ordinal=i, page=c.page, token_count=c.token_count)
         for i, c in enumerate(merged)
@@ -305,10 +276,8 @@ def build_context_header(
 ) -> str:
     """The text prepended to a chunk before embedding.
 
-    Without this, a chunk reading "the proposed method reduces torque ripple by
-    18%" is unfindable for "what has he achieved on torque ripple?" — the
-    sentence names neither the paper nor the topic. The header is a template
-    filled from metadata already on hand, which makes it close to free.
+    A chunk such as "the proposed method reduces torque ripple by 18%" names neither its
+    paper nor its section; the header supplies both.
     """
     attribution = title
     if year and venue:

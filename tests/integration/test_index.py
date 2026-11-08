@@ -3,14 +3,11 @@
 Marked ``integration``. Run after ingestion:
 
     make up && uv run myscholar ingest run && uv run pytest -m integration
-
-These verify properties that only hold once actual papers are indexed —
-retrieval finding the right document, the ligature repair having worked, and
-the structural guards on the schema actually firing.
 """
 
 from __future__ import annotations
 
+import getpass
 import os
 
 import pytest
@@ -26,7 +23,7 @@ pytestmark = pytest.mark.integration
 
 DATABASE_URL = os.environ.get(
     "MYSCHOLAR_DATABASE__URL",
-    "postgresql+asyncpg://haseeb@127.0.0.1:5433/myscholar",
+    f"postgresql+asyncpg://{getpass.getuser()}@127.0.0.1:5433/myscholar",
 )
 EMBEDDING_MODEL = os.environ.get("MYSCHOLAR_EMBEDDING__MODEL_ID", "BAAI/bge-base-en-v1.5")
 
@@ -50,7 +47,6 @@ async def embedder() -> Embedder:
 
 class TestIndexIntegrity:
     async def test_every_chunk_has_an_embedding(self, store: PostgresStore) -> None:
-        """A chunk without a vector is invisible to dense search, silently."""
         counts = await store.counts()
 
         assert counts["embeddings"] == counts["chunks"]
@@ -59,11 +55,6 @@ class TestIndexIntegrity:
         assert len(await store.indexed_model_ids()) == 1
 
     async def test_a_mismatched_embedder_is_rejected(self, store: PostgresStore) -> None:
-        """The structural guard against the defect in the previous code.
-
-        Searching an index built by a different model returns plausible,
-        meaningless results. This must fail loudly rather than quietly.
-        """
         with pytest.raises(IndexMismatchError, match="Re-index"):
             await store.assert_embedder_matches("some-other/embedding-model")
 
@@ -71,13 +62,11 @@ class TestIndexIntegrity:
         await store.assert_embedder_matches(EMBEDDING_MODEL)
 
     async def test_references_were_excluded(self, store: PostgresStore) -> None:
-        """Roughly a quarter of each paper, none of it answerable."""
         kinds = await store.section_kind_counts()
 
         assert kinds.get("references", 0) == 0
 
     async def test_most_sections_were_classified(self, store: PostgresStore) -> None:
-        """Section filtering is worthless if everything lands in OTHER."""
         kinds = await store.section_kind_counts()
         total = sum(kinds.values())
 
@@ -86,12 +75,7 @@ class TestIndexIntegrity:
 
 class TestExtractionQuality:
     async def test_ligatures_survived_extraction(self, store: PostgresStore) -> None:
-        """The defect that motivated switching Docling's PDF backend.
-
-        The default parser turned "flux" into " ux". On a corpus about motor
-        flux control that silently breaks retrieval for a central term, so it
-        is worth asserting on the real index rather than trusting the config.
-        """
+        # Docling's default PDF backend turned "flux" into " ux".
         from sqlalchemy import func, select
 
         from myscholar.adapters.persistence.orm import Chunk
@@ -104,7 +88,7 @@ class TestExtractionQuality:
                 select(func.count(Chunk.id)).where(Chunk.text.op("~")(r"\m ux\M"))
             )
 
-        assert intact and intact > 0, "no chunk mentions flux — extraction is suspect"
+        assert intact and intact > 0, "no chunk mentions flux; extraction is suspect"
         assert not corrupted, f"{corrupted} chunks contain ' ux', so ligatures were dropped"
 
     async def test_no_undecoded_formula_placeholders_leaked_in(self, store: PostgresStore) -> None:
@@ -143,7 +127,6 @@ class TestRetrieval:
     async def test_lexical_search_finds_rare_identifiers(
         self, store: PostgresStore, term: str
     ) -> None:
-        """The case dense embeddings are worst at, and why hybrid search exists."""
         hits = await store.search_lexical(term, limit=5)
 
         assert hits, f"lexical search found nothing for {term!r}"
@@ -156,11 +139,6 @@ class TestRetrieval:
         assert [h.score for h in hits] == sorted((h.score for h in hits), reverse=True)
 
     async def test_span_fetch_stays_within_one_section(self, store: PostgresStore) -> None:
-        """Parent expansion must never stitch text across sections or documents.
-
-        The previous implementation expanded by global row id with no filter,
-        so a window near a boundary could merge two papers into one citation.
-        """
         from sqlalchemy import select
 
         from myscholar.adapters.persistence.orm import Chunk

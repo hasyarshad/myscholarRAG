@@ -1,16 +1,8 @@
-"""Bibliographic metadata: extract, then have a human confirm it.
+"""Bibliographic metadata: extract a proposal, then have a person confirm it.
 
-Questions like "how many papers did he publish in 2023?" or "what venue was the
-NSGA-II paper in?" are the ones naive RAG answers most confidently and most
-wrongly — there is no single passage stating the answer, so the model composes
-one from fragments.
-
-The fix is not a better prompt. It is to answer those questions with SQL over
-columns a human has checked. For twenty papers that review costs about ten
-minutes, once, and removes the entire failure class.
-
-So extraction produces a *proposal*, written to YAML. Nothing is marked verified
-until the file has been reviewed and re-imported.
+Questions such as "how many papers did he publish in 2023?" have no single passage to
+retrieve, so they are answered with SQL over verified columns. Extraction writes a YAML
+proposal, and nothing is marked verified until that file is reviewed and re-imported.
 """
 
 from __future__ import annotations
@@ -62,9 +54,8 @@ def find_doi(text: str) -> str | None:
 def find_year(text: str) -> int | None:
     """The most frequent plausible year on the page.
 
-    Publication years repeat — in the header, the footer, the copyright line —
-    whereas years inside citations vary. Frequency is a better signal than
-    position.
+    The publication year repeats in the header, footer and copyright line, while years in
+    citations vary.
     """
     years = [int(y) for y in _YEAR.findall(text)]
     return max(set(years), key=years.count) if years else None
@@ -73,10 +64,7 @@ def find_year(text: str) -> int | None:
 def slugify(title: str, fallback: str, *, taken: set[str] | None = None) -> str:
     """Build a URL-safe identifier, unique against ``taken``.
 
-    Uniqueness matters because the slug is a unique key. Two papers from the
-    same publisher can extract to the same title if extraction goes wrong, and
-    a collision then fails the whole document rather than degrading — which is
-    exactly what happened on the first full run.
+    The slug is a unique key, so a collision would fail the whole document.
     """
     slug = re.sub(r"[^a-z0-9]+", "-", (title or fallback).lower()).strip("-")[:120]
     if not slug:
@@ -85,8 +73,7 @@ def slugify(title: str, fallback: str, *, taken: set[str] | None = None) -> str:
     if taken is None or slug not in taken:
         return slug
 
-    # Disambiguate with the fallback (the filename stem) before resorting to
-    # a counter, since that at least stays human-readable.
+    # Try the fallback (the filename stem) before a counter, since it stays readable.
     from_fallback = re.sub(r"[^a-z0-9]+", "-", fallback.lower()).strip("-")[:120]
     if from_fallback and from_fallback not in taken:
         return from_fallback
@@ -129,17 +116,15 @@ class MetadataExtractor:
                     [Message(role=Role.USER, content=_PROMPT.format(page=first_page[:3500]))],
                     ExtractedMetadata,
                 )
-            except Exception as exc:  # noqa: BLE001 - fall back rather than abort a run
+            except Exception as exc:  # noqa: BLE001 - fall back to the filename
                 notes.append(f"model extraction failed ({type(exc).__name__}); using filename")
 
-        # The extractor's title item is the typeset title, so it beats both the
-        # model's reading of the page and the filename. Filenames in this corpus
-        # are lowercased and truncated by the download tool.
+        # Prefer the extractor's typeset title to the model's reading and to the
+        # filename, which is often lowercased and truncated.
         fallback = Path(str(source_path)).stem
         title = extracted_title or (extracted.title if extracted else "") or fallback
-        # Regex findings win over the model's for DOI and year: a pattern match
-        # against the literal page text cannot hallucinate, and both fields are
-        # exactly the sort a model will confidently invent.
+        # For DOI and year, a regex match on the page text is preferred to the
+        # model, which can invent both.
         doi = regex_doi or (extracted.doi if extracted else None)
         year = regex_year or (extracted.year if extracted else None)
 
@@ -165,11 +150,7 @@ class MetadataExtractor:
 
 
 def write_review_file(proposals: list[MetadataProposal], path: Path) -> None:
-    """Write proposals to YAML for human review.
-
-    Ordered with the least confident first, so the entries most likely to be
-    wrong are the ones read while attention is freshest.
-    """
+    """Write proposals to YAML for human review, least confident first."""
     payload = [
         {
             "file": Path(str(p.source_path)).name,
@@ -190,8 +171,7 @@ def write_review_file(proposals: list[MetadataProposal], path: Path) -> None:
         "# Correct anything wrong, then set verified: true on each entry and run\n"
         "#   myscholar papers import-metadata\n"
         "#\n"
-        "# Only verified entries are used to answer bibliographic questions, which\n"
-        "# are otherwise the ones a language model gets confidently wrong.\n"
+        "# Only verified entries are used to answer bibliographic questions.\n"
         "# Entries with a _check key had something the extractor was unsure about;\n"
         "# they are listed first. Delete _check once reviewed.\n"
         "#\n"
@@ -199,9 +179,7 @@ def write_review_file(proposals: list[MetadataProposal], path: Path) -> None:
         '# containing ": " is read by YAML as a nested mapping.\n\n'
     )
     path.parent.mkdir(parents=True, exist_ok=True)
-    # default_style='"' quotes every scalar. Titles in this corpus routinely
-    # contain ": ", which YAML reads as a nested mapping when unquoted, and the
-    # resulting parse error is opaque to someone editing prose.
+    # Quote every scalar: an unquoted title containing ": " parses as a mapping.
     body = yaml.safe_dump(
         payload, sort_keys=False, allow_unicode=True, default_style='"', width=100
     )
@@ -211,9 +189,7 @@ def write_review_file(proposals: list[MetadataProposal], path: Path) -> None:
 class MetadataFileError(RuntimeError):
     """The review file could not be read.
 
-    Raised in place of a raw YAML ``ScannerError``, which points at a line and
-    column without explaining what a person editing prose is supposed to do
-    about it.
+    Raised in place of a raw YAML error, with advice on the usual cause.
     """
 
 
@@ -222,9 +198,8 @@ def read_review_file(path: Path) -> dict[str, PaperMetadata]:
     try:
         raw: Any = yaml.safe_load(path.read_text("utf-8")) or []
     except yaml.YAMLError as exc:
-        # By far the most common cause: a title containing ": ", which YAML
-        # reads as a nested mapping unless the value is quoted. Academic titles
-        # use colons constantly, and the fix is not obvious from the raw error.
+        # Usually a title containing ": ", which YAML reads as a nested mapping
+        # unless the value is quoted.
         mark = getattr(exc, "problem_mark", None)
         where = f" at line {mark.line + 1}" if mark is not None else ""
         line = ""

@@ -1,8 +1,8 @@
-"""Grading retrieved context, generating an answer, and checking it.
+"""Model-backed steps of the answering loop: generation, premise and grounding checks,
+query rewriting and topic suggestions.
 
-Three model-backed steps, each asked a narrow question rather than a broad one.
-Where a check can be done without a model it is done in ``citations.py``
-instead; this module handles only what genuinely needs judgement.
+Checks that need no model live in ``citations``. ``Answerer.grade`` is not part of the
+live loop; the ablation harness uses it.
 """
 
 from __future__ import annotations
@@ -20,10 +20,8 @@ from myscholar.ports.llm import ChatModel, Message, ModelOutput, Role
 
 logger = logging.getLogger(__name__)
 
-#: The person's name is the *only* thing interpolated, and it comes from
-#: configuration rather than from a request. User text and retrieved passages
-#: are never formatted into this — a prompt assembled from untrusted input is
-#: the classic injection vector, and this bot is public.
+#: Only the configured person's name is formatted in. User text and retrieved passages
+#: never are, which keeps untrusted input out of the system prompt.
 _SYSTEM_TEMPLATE = """You answer questions about {name}'s research and background, using only \
 the excerpts provided.
 
@@ -78,19 +76,8 @@ def system_prompt(name: str = "the researcher", short_name: str = "they") -> str
     return _SYSTEM_TEMPLATE.format(name=name, short_name=short_name)
 
 
-#: Default for callers that do not configure a person.
-SYSTEM_PROMPT = system_prompt()
-
-#: Questions that assert something and then ask about it.
-#:
-#: "Why did his NSGA-II study conclude weighting factors are unnecessary?"
-#: contains a claim ("concluded they are unnecessary") that the papers
-#: contradict, wrapped in a question ("why") that presupposes it. Retrieval
-#: works perfectly — NSGA-II passages come back — and everything downstream
-#: then helps the model explain a thing that never happened.
-#:
-#: Only these shapes are checked, because a question that asserts nothing has
-#: no premise to test and the call would be wasted.
+#: Questions that assert something and then ask about it, such as "Why did his NSGA-II
+#: study conclude weighting factors are unnecessary?". Only these get a premise check.
 _ASSERTS_SOMETHING = re.compile(
     # "Why did X conclude/find/show/report Y", "how does X improve Y"
     r"^\s*(why|how\s+come)\b"
@@ -206,7 +193,7 @@ class Groundedness(ModelOutput):
 
 
 class PremiseCheck(ModelOutput):
-    """Whether a claim smuggled into the question survives the sources."""
+    """Whether the excerpts contradict something the question takes for granted."""
 
     premise: str = Field(
         default="",
@@ -232,21 +219,7 @@ class NearestTopics(ModelOutput):
 class GradedContext:
     kept: tuple[ContextBlock, ...]
     rejected: tuple[tuple[ContextBlock, str], ...]
-    """Blocks dropped, with the grader's stated reason — used to rewrite."""
-
-    unavailable: bool = False
-    """True when grading could not run, as distinct from finding everything relevant.
-
-    Both keep every block, and until this existed the two were indistinguishable
-    anywhere downstream: the trace read "8 kept, 0 dropped" whether the grader
-    had judged eight passages or had never answered at all. That is exactly how
-    a model-server misconfiguration went undiagnosed — a call that stalled until
-    it timed out looked, in every log and every trace, like a clean pass.
-    """
-
-    @property
-    def sufficient(self) -> bool:
-        return bool(self.kept)
+    """Dropped blocks with the grader's reason, used by ``Answerer.rewrite``."""
 
     def rejection_reasons(self) -> str:
         return (
@@ -285,12 +258,8 @@ class Answerer:
     ) -> GradedContext:
         """Grade every block in one call.
 
-        Batched rather than one call per block: it is eight times fewer round
-        trips, and the model sees the excerpts comparatively, which makes the
-        verdicts more consistent than judging each in isolation.
-
-        A grader failure keeps everything. Discarding context because the
-        grader broke would turn a transient fault into a refusal.
+        One batched call is cheaper than one per block and gives more consistent
+        verdicts. If grading fails, every block is kept.
         """
         if not blocks:
             return GradedContext(kept=(), rejected=())
@@ -308,18 +277,15 @@ class Answerer:
                 Grades,
             )
         except Exception:
-            # Failing open is right — a broken grader must not turn an
-            # answerable question into a refusal — but it must not be silent.
             logger.exception("grading unavailable; keeping every retrieved block")
-            return GradedContext(kept=tuple(blocks), rejected=(), unavailable=True)
+            return GradedContext(kept=tuple(blocks), rejected=())
 
         verdicts = {g.label.upper(): g for g in result.grades}
         kept: list[ContextBlock] = []
         rejected: list[tuple[ContextBlock, str]] = []
         for block in blocks:
             grade = verdicts.get(block.label.upper())
-            # An ungraded block is kept: the grader simply did not mention it,
-            # which is not evidence against it.
+            # A block the grader did not mention is kept.
             if grade is None or grade.verdict not in discard:
                 kept.append(block)
             else:
@@ -328,11 +294,9 @@ class Answerer:
         return GradedContext(kept=tuple(kept), rejected=tuple(rejected))
 
     async def rewrite(self, question: str, graded: GradedContext) -> str | None:
-        """Rewrite the query using the grader's reasons for rejecting.
+        """Rewrite the question as a search query, guided by any rejection reasons.
 
-        The reasons are what make this better than trying again. Without them a
-        rewrite is another sample from the same distribution, as likely to
-        repeat the mistake as to fix it.
+        Returns None if the call fails or the rewrite matches the question.
         """
         try:
             result = await self._utility.structured(
@@ -346,7 +310,7 @@ class Answerer:
                 ],
                 RewrittenQuery,
             )
-        except Exception:  # noqa: BLE001 - no rewrite simply means no retry
+        except Exception:  # noqa: BLE001 - a failed rewrite skips the retry
             return None
         rewritten = result.query.strip()
         return rewritten if rewritten and rewritten.casefold() != question.casefold() else None
@@ -360,8 +324,8 @@ class Answerer:
     ) -> str:
         """Write the answer.
 
-        ``correction`` carries what failed verification last time, quoted back,
-        so a regeneration addresses the specific problem rather than rerolling.
+        ``correction``, when given, is appended as a follow-up instruction. The loop
+        uses it for a false-premise correction.
         """
         messages = [
             Message(role=Role.SYSTEM, content=self._system),
@@ -389,16 +353,10 @@ class Answerer:
     async def check_premise(
         self, question: str, blocks: Sequence[ContextBlock]
     ) -> PremiseCheck | None:
-        """Whether the question assumes something the sources contradict.
+        """The check result if the question assumes something the excerpts contradict.
 
-        Runs only on questions shaped like an assertion, which is most of the
-        cost avoided: a question that asserts nothing has no premise to test.
-
-        A contradicted premise is not a retrieval failure and cannot be fixed
-        by retrieving harder — the right passages are already in hand, and they
-        are what disprove it. It is handled by telling the generator what is
-        wrong, so the answer corrects the question instead of elaborating on
-        it.
+        Runs only on questions shaped like an assertion. Returns None otherwise, and
+        when the check fails.
         """
         if not blocks or not _ASSERTS_SOMETHING.search(question):
             return None
@@ -421,9 +379,8 @@ class Answerer:
     async def is_grounded(self, statement: str, excerpt: str) -> bool:
         """Whether one excerpt supports one statement.
 
-        A far narrower question than "did you hallucinate?", which is the
-        question the model already got wrong. Failures are treated as
-        supported: an unavailable checker should not manufacture refusals.
+        A failed check counts as supported: the deterministic citation checks have
+        already passed, and an outage should not produce refusals.
         """
         try:
             result = await self._utility.structured(
@@ -438,16 +395,12 @@ class Answerer:
                 Groundedness,
             )
         except Exception:
-            # Treated as grounded, because an unavailable check is not a failed
-            # one and the citation verification behind it is deterministic and
-            # has already passed. Logged rather than swallowed: an outage here
-            # quietly removes a safety check, and nothing else would say so.
             logger.exception("grounding check unavailable; treating the statement as supported")
             return True
         return result.supported
 
     async def nearest_topics(self, blocks: Sequence[ContextBlock]) -> tuple[str, ...]:
-        """What the corpus does cover, for a refusal that is not a dead end."""
+        """Up to three topics the nearest passages cover, offered with a refusal."""
         if not blocks:
             return ()
         try:
@@ -464,6 +417,6 @@ class Answerer:
                 ],
                 NearestTopics,
             )
-        except Exception:  # noqa: BLE001 - a plain refusal is still a valid refusal
+        except Exception:  # noqa: BLE001 - refuse without topics
             return ()
         return tuple(t.strip() for t in result.topics if t.strip())[:3]

@@ -1,17 +1,9 @@
 """Docling-based PDF extraction.
 
-Every configuration choice here was measured rather than assumed. The two that
-matter:
-
-- **The pypdfium backend is not optional.** Docling's default parser silently
-  drops ``fl`` and ``fi`` ligatures, turning "flux" into " ux" — 51 corrupted
-  occurrences against 10 intact ones in a single paper about motor flux
-  control. Extraction still reports success, which is what makes it dangerous.
-
-- **Formula enrichment is on**, so equations become LaTeX rather than
-  ``<!-- formula-not-decoded -->`` placeholders. The LaTeX is stored but
-  excluded from embeddings later, since it is token soup that matches no
-  natural-language question.
+Uses the pypdfium backend: Docling's default parser drops ``fl`` and ``fi``
+ligatures without reporting an error ("flux" became " ux" 51 times in one paper).
+Formula enrichment turns equations into LaTeX instead of placeholders; the LaTeX is
+stored but excluded from embeddings.
 """
 
 from __future__ import annotations
@@ -34,29 +26,20 @@ from myscholar.ports.extractor import (
 
 logger = logging.getLogger(__name__)
 
-#: Labels that start a new section.
-#:
-#: ``title`` is deliberately excluded. Docling labels the paper's own title as a
-#: title item, and treating it as a section heading produces a section whose
-#: heading is the entire paper title, swallowing the abstract and author block —
-#: which then gets classified by content and filed as, say, methods. The title
-#: is metadata, not a section, and is captured separately.
+#: Labels that start a new section. ``title`` is excluded: the paper title is
+#: captured as metadata, and as a heading it would open a section swallowing the
+#: abstract and author block.
 _HEADING_LABELS = frozenset({"section_header"})
 
-#: Labels carrying no answerable content — running heads, page numbers, and
-#: image placeholders.
+#: Labels with no answerable content: running heads, page numbers and image placeholders.
 _SKIP_LABELS = frozenset({"page_footer", "page_header", "picture"})
 
 #: The document title, captured for metadata rather than treated as content.
 _TITLE_LABELS = frozenset({"title"})
 
-#: Shapes that mark a genuine section heading rather than a paper title.
-#:
-#: Length is not a usable discriminator: measured across the corpus, titles run
-#: 79-108 characters while real headings such as "Q. Adaptive Forgetting Factor
-#: with Generalized Regularization Online Sequential ..." run longer still.
-#: Shape is reliable, because a paper title never opens with an enumerator or a
-#: canonical section word.
+#: Shapes that mark a section heading rather than a paper title. Length cannot
+#: separate them (titles in the corpus run 79-108 characters, some headings run
+#: longer), but a title never opens with an enumerator or a canonical section word.
 _SECTION_HEADING_SHAPE = re.compile(
     r"""^\s*(
         # Numeric enumeration: "3.1 Results", "4. Methods". Trailing
@@ -78,10 +61,8 @@ _SECTION_HEADING_SHAPE = re.compile(
 )
 
 
-#: Publisher furniture that appears above the title on the first page.
-#: Elsevier, Frontiers and IEEE templates all put a banner there, and taking
-#: the first heading-like item produced five documents titled "ScienceDirect",
-#: "ARTICLE", "ORIGINAL RESEARCH" and "Research paper".
+#: Publisher banners that Elsevier, Frontiers and IEEE templates put above the
+#: title on the first page, such as "ScienceDirect" or "ORIGINAL RESEARCH".
 _PUBLISHER_BANNER = re.compile(
     r"^\s*(sciencedirect|elsevier|springer|wiley|mdpi|frontiers|ieee|acm|"
     r"article|original\s+research|research\s+(paper|article)|review\s+article|"
@@ -90,9 +71,7 @@ _PUBLISHER_BANNER = re.compile(
     re.IGNORECASE,
 )
 
-#: Shorter than this and it is furniture, not a title. Measured across the
-#: corpus, real titles run 79-108 characters; the shortest plausible academic
-#: title is still well above this floor.
+#: Shorter than this is furniture. Titles in the corpus run 79-108 characters.
 _MIN_TITLE_CHARS = 30
 
 
@@ -113,33 +92,22 @@ def is_plausible_title(text: str) -> bool:
 _WHITESPACE = re.compile(r"[ \t]+")
 _BLANK_LINES = re.compile(r"\n{3,}")
 
-#: Shortest repeat worth removing.
-#:
-#: Long enough that ordinary English cannot reach it by accident. "had had" and
-#: "that that" are seven characters; a duplicated title or affiliation line runs
-#: to fifty.
+#: Shortest repeat worth removing: longer than natural repetition such as
+#: "had had", shorter than a duplicated title or affiliation line.
 _MIN_REPEAT_CHARS = 20
 
-#: How far back to look for the original. The stacked layer interleaves with
-#: the real one, so a duplicate follows its original within a few items.
+#: How many recent blocks are checked for containment.
 _REPEAT_WINDOW = 6
 
 #: Fraction of repeated text above which a document is treated as damaged.
-#:
-#: Measured across the corpus: nineteen papers repeat 0-3% of their text, one
-#: repeats 52%. Nothing lands between, so the threshold is not a tuned
-#: parameter — it separates two populations that do not overlap.
-#:
-#: The gate exists because document-wide deduplication is not free on a healthy
-#: paper. Docling emits a table's caption twice, once as a caption and once
-#: with the table, so removing every repeat cost seven captions in one paper
-#: and moved the right document off rank 1 for eight of thirty-seven retrieval
-#: questions. Legitimate repetition and a broken text layer are different
-#: problems and only the second one is worth that.
+#: Nineteen papers in the corpus repeat 0-3% of their text and one repeats 52%.
+#: Line deduplication is gated because it harms healthy papers: Docling emits
+#: table captions twice, and removing every repeat moved the right document off
+#: rank 1 for eight of thirty-seven retrieval questions.
 _DAMAGED_ABOVE = 0.15
 
-#: Kinds exempt from deduplication even in a damaged document. A table's rows
-#: repeat by nature, and its caption is emitted alongside it by design.
+#: Kinds exempt from line deduplication: table rows repeat by nature, and
+#: Docling emits each caption twice.
 _DEDUP_EXEMPT = frozenset({ChunkKind.TABLE, ChunkKind.CAPTION})
 
 
@@ -164,44 +132,22 @@ _ALPHANUMERIC = re.compile(r"[^a-z0-9]+")
 
 
 def _dedup_key(text: str) -> str:
-    """Punctuation-free, lowercased. The duplicate layer differs only in these.
+    """Lowercase letters and digits only.
 
-    IFAC's template stacks two text layers, and the second has its punctuation
-    stripped: "Surveillance, reconnaissance, infrastructure inspection" is
-    followed by "Surveillancereconnaissanceinfrastructure inspection". Compared
-    literally the two are different strings; normalised, they are identical.
+    IFAC's template stacks a second text layer with the punctuation stripped
+    ("Surveillancereconnaissanceinfrastructure inspection"), so copies only
+    match once normalised.
     """
     return _ALPHANUMERIC.sub("", text.casefold())
 
 
 def collapse_repeated_lines(text: str, seen: set[str] | None = None) -> str:
-    """Drop lines already seen, across the whole document by default.
+    """Drop lines already seen, across the whole document when ``seen`` is shared.
 
-    The damage is *inside* a block, not between blocks. One block in the UAV
-    paper runs to 49,588 characters and is a single abstract accumulating line
-    by line:
-
-        Abstract: This paper proposes a linear quadratic Gaussian control ...
-        Abstract: This paper proposes a linear quadratic Gaussian control ...
-        a quadrotor UAV ...
-        Abstract: This paper proposes a linear quadratic Gaussian control ...
-
-    Deduplication spans the document rather than the block, because the copies
-    are not confined to one: consecutive blocks are growing prefixes of the
-    same text, so no two are identical and every one is mostly repeat.
-
-    That is safe here, and it was measured rather than assumed. Across the
-    twenty papers, nineteen contain 0-3% repeated lines — a figure caption
-    restated, a running header — and the UAV paper contains 52%. A rule that
-    removes three percent from healthy documents and half of a broken one is
-    hitting what it aims at.
-
-    Working at line granularity keeps the Phase 1 caution intact. No line is
-    ever edited, so every surviving line is verbatim source and a quoted span
-    still resolves; only whole duplicate lines are removed. English does not
-    repeat a twenty-character line, whereas it repeats "had had" all the time —
-    which is why the earlier attempt at a self-referential regex over the prose
-    failed and this does not.
+    In a damaged paper one block can be an abstract accumulating line by line,
+    and consecutive blocks are growing prefixes of the same text, so no two
+    blocks are identical. Lines are removed whole and never edited, so every
+    surviving line is verbatim source and quoted spans still resolve.
     """
     seen = set() if seen is None else seen
     kept: list[str] = []
@@ -216,23 +162,12 @@ def collapse_repeated_lines(text: str, seen: set[str] | None = None) -> str:
 
 
 def drop_repeated(blocks: list[ExtractedBlock]) -> tuple[list[ExtractedBlock], int]:
-    """Remove blocks that restate a nearby one.
+    """Remove blocks that restate another; returns the kept blocks and the number dropped.
 
-    Phase 1 deliberately left this alone, on the grounds that the artefact was
-    cosmetic and that a self-referential regex over prose would be a
-    correctness bug in the very text citations are verified against. The first
-    half of that was wrong: measured in Phase 5, the worst-affected paper
-    produced 796 chunks from 6 pages against ~12 per page elsewhere, and its
-    garbled fragments were crowding out real content in unrelated searches.
-
-    The second half still stands, which is why this compares *whole blocks*
-    rather than rewriting inside one. A block is dropped only when another
-    block nearby says the same thing — no prose is ever edited, so a citation
-    can still be verified against text that appears exactly as extracted.
+    Repeats crowd out real content: the worst-affected paper produced 796 chunks
+    from 6 pages, against about 12 per page elsewhere. Whole blocks and lines are
+    removed but never edited, so citations still verify against the extracted text.
     """
-    # Document-wide line deduplication is applied only to documents that are
-    # actually damaged. On a healthy paper it removes real content — see
-    # _DAMAGED_ABOVE — and there is nothing for it to gain there anyway.
     damaged = repetition_ratio(blocks) > _DAMAGED_ABOVE
 
     kept: list[ExtractedBlock] = []
@@ -242,13 +177,11 @@ def drop_repeated(blocks: list[ExtractedBlock]) -> tuple[list[ExtractedBlock], i
     dropped = 0
 
     for original in blocks:
-        # Tables and captions are left alone: a column of repeated values is
-        # data, and Docling emits a caption twice by design.
         block = original
         if damaged and block.kind not in _DEDUP_EXEMPT:
             collapsed = collapse_repeated_lines(block.text, seen_lines)
             if not collapsed.strip():
-                # Everything in it had already been said elsewhere.
+                # Every line repeats an earlier one.
                 dropped += 1
                 continue
             if collapsed != block.text:
@@ -259,15 +192,12 @@ def drop_repeated(blocks: list[ExtractedBlock]) -> tuple[list[ExtractedBlock], i
             kept.append(block)
             continue
 
-        # Exact repeats are matched across the whole document, not a window.
-        # The stacked layer is not merely adjacent: the same paragraph
-        # reappears dozens of times at every distance, and a six-block window
-        # caught 94 of them out of several thousand.
+        # Exact repeats are matched document-wide: the same paragraph can
+        # reappear at any distance.
         duplicate_of = seen.get(key)
 
-        # Containment stays windowed. Globally it would drop a short block that
-        # happens to be a substring of an unrelated one — a heading inside a
-        # paragraph quoting it — which is a real loss rather than an artefact.
+        # Containment is windowed: globally it would drop a short block that
+        # appears inside an unrelated one, such as a heading quoted in a paragraph.
         if duplicate_of is None:
             for other_key, index in recent:
                 if key in other_key or other_key in key:
@@ -290,12 +220,10 @@ def drop_repeated(blocks: list[ExtractedBlock]) -> tuple[list[ExtractedBlock], i
 
 
 def normalise(text: str) -> str:
-    """Repair the text defects this corpus actually exhibits.
+    """Repair the text defects found in this corpus.
 
-    NFKC decomposes ligature codepoints such as U+FB02 (``ﬂ``) into ``fl``.
-    Different PDF backends disagree about whether to emit the ligature as one
-    character or two, and an index containing both forms would fail to match
-    either consistently.
+    NFKC turns ligature codepoints such as U+FB02 into ``fl``, so backends that
+    emit the ligature and backends that emit two letters index the same way.
     """
     text = unicodedata.normalize("NFKC", text)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -315,9 +243,8 @@ def _sha256(path: Path) -> str:
 
 class DoclingExtractor(DocumentExtractor):
     def __init__(self, *, enrich_formulas: bool = True, ocr: bool = False) -> None:
-        # OCR defaults off: these are born-digital publisher PDFs with a real
-        # text layer. Running OCR over them costs minutes per document and
-        # introduces recognition errors into text that was already correct.
+        # OCR is off by default: the corpus is born-digital PDFs with a real text
+        # layer, and OCR costs minutes per document and adds recognition errors.
         self._enrich_formulas = enrich_formulas
         self._ocr = ocr
         self._converter: Any | None = None
@@ -345,7 +272,7 @@ class DoclingExtractor(DocumentExtractor):
 
     @property
     def converter(self) -> Any:
-        """Built once and reused — model loading dominates the first call."""
+        """Built on first use and reused, since model loading is slow."""
         if self._converter is None:
             self._converter = self._build_converter()
         return self._converter
@@ -378,17 +305,10 @@ class DoclingExtractor(DocumentExtractor):
             is_title_label = any(t in label for t in _TITLE_LABELS)
             is_heading_label = any(head in label for head in _HEADING_LABELS)
 
-            # Docling is inconsistent about the paper's own title: measured
-            # across this corpus, only one paper in five carries a title item,
-            # and the rest label the title as a section_header. Label alone is
-            # therefore not enough.
-            #
-            # The reliable signal is position plus shape: the first heading-like
-            # item, before any content, that does not look like a section
-            # heading, is the paper title.
-            # Keyed on "no section heading yet" rather than "no content yet":
-            # several papers open with a journal banner or an author block
-            # before the title, and requiring an empty block list missed those.
+            # Only one paper in five has a title item; the rest label the title
+            # a section_header. So the title is the first plausible heading on
+            # page 1 before any section heading. Other content may precede it:
+            # several papers open with a journal banner or an author block.
             looks_like_title = (
                 not title
                 and is_heading_label
@@ -397,10 +317,8 @@ class DoclingExtractor(DocumentExtractor):
                 and is_plausible_title(text)
             )
 
-            # Furniture above the title — a banner, a correspondence line — is
-            # neither a title nor a section. Treating it as a section heading
-            # set seen_section_heading and blocked the real title that follows,
-            # which is why five papers ended up titled "ScienceDirect".
+            # Furniture above the title (a banner, a correspondence line) is kept
+            # as prose, so it cannot block the title as a section heading.
             is_furniture = (
                 is_heading_label
                 and page <= 1
@@ -412,16 +330,13 @@ class DoclingExtractor(DocumentExtractor):
             if is_furniture:
                 blocks.append(ExtractedBlock(kind=ChunkKind.PROSE, text=text, page=page))
             elif (is_title_label and is_plausible_title(text)) or looks_like_title:
-                # The first such item is the paper's title; later ones are
-                # figure or table titles, which belong with the surrounding
-                # prose rather than replacing the document title.
+                # Later title items are figure or table titles and stay with the prose.
                 if not title:
                     title = text
                 else:
                     blocks.append(ExtractedBlock(kind=ChunkKind.PROSE, text=text, page=page))
             elif is_heading_label:
-                # Several papers repeat the title as a running heading. Once it
-                # has been claimed as the title, later copies are not sections.
+                # Some papers repeat the title as a running heading.
                 if title and text.casefold() == title.casefold():
                     continue
                 seen_section_heading = True

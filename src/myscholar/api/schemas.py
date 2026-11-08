@@ -1,16 +1,10 @@
-"""Request and response shapes.
-
-These are the contract the widget is written against, and the thing
-``openapi-typescript`` generates client types from, so changes here are
-breaking changes.
-"""
+"""Request and response shapes: the contract the widget is written against."""
 
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-#: A question longer than this is not a question. The cap bounds both the
-#: embedding cost and the prompt-injection surface.
+#: Bounds the embedding cost and the prompt-injection surface.
 MAX_QUESTION_CHARS = 1200
 
 
@@ -28,11 +22,7 @@ class AskRequest(BaseModel):
 
 
 class CitationView(BaseModel):
-    """A citation as the widget renders it.
-
-    Every field has been verified: the label resolved to a block that was
-    actually retrieved, and any quoted span really appears in it.
-    """
+    """A verified citation: the label resolved to a retrieved block containing any quoted span."""
 
     label: str
     document_title: str
@@ -42,37 +32,21 @@ class CitationView(BaseModel):
     slug: str = ""
 
     source_url: str = ""
-    """Where the citation points: a DOI for a paper, the page itself otherwise.
-
-    Empty when the document has neither, and the widget then renders the
-    citation as plain text. Showing a link that goes nowhere is worse than
-    showing none, because the reader only finds out after following it.
-    """
+    """A DOI for a paper, otherwise the page itself; empty when there is neither."""
 
 
 class SessionEvent(BaseModel):
-    """The conversation this exchange belongs to.
+    """The conversation this exchange belongs to. The identifier is issued by the server.
 
     Sent first, so a client that disconnects mid-answer can still continue the
     conversation on its next request.
-
-    The identifier is generated here rather than accepted from the request. A
-    client-chosen one could be guessed or reused, and would then hand one
-    visitor another visitor's questions as the context for resolving a
-    follow-up.
     """
 
     session_id: str
 
 
 class StageEvent(BaseModel):
-    """One step of the pipeline, as it happens.
-
-    This is what gets streamed instead of tokens. It shows the visitor the
-    system doing the work that makes it trustworthy — a `verifying` event
-    reporting two citation issues, followed by a regeneration, conveys more
-    than any amount of prose.
-    """
+    """One pipeline stage, streamed as it happens in place of tokens."""
 
     stage: str
     detail: str = ""
@@ -87,16 +61,11 @@ class AnswerEvent(BaseModel):
     nearest_topics: list[str] = Field(default_factory=list)
     confidence: float = 0.0
     degraded: bool = False
-    """The answer is known to be lower quality than usual. Reported rather than
-    hidden, so a lower-quality answer is identifiable as one."""
+    """The answer is known to be lower quality than usual."""
 
 
 class ErrorEvent(BaseModel):
-    """Only for failures that occur *during* a stream.
-
-    Anything knowable before the response begins returns a real HTTP status
-    instead, which is far easier for a client to handle.
-    """
+    """A failure during the stream. Failures known before it opens get an HTTP status instead."""
 
     code: str
     message: str
@@ -113,7 +82,7 @@ class PaperView(BaseModel):
 
 
 class CorpusInfo(BaseModel):
-    """What the assistant covers, so the widget can say so without guessing."""
+    """What the assistant covers, for the widget to display."""
 
     documents: int
     chunks: int

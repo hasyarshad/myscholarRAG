@@ -1,11 +1,7 @@
 """Reciprocal rank fusion.
 
-Merges rankings from retrieval branches that score on incomparable scales.
-Cosine similarity sits in a narrow band; ``ts_rank_cd`` is unbounded and
-length-dependent. Normalising and averaging them means choosing a weight that
-is wrong for half the queries, because which branch dominates varies per query.
-
-RRF discards the scores and uses only the ranks::
+Merges rankings whose scores are incomparable: cosine similarity sits in a narrow band,
+while ``ts_rank_cd`` is unbounded and length-dependent. RRF uses only the ranks::
 
     score(d) = sum over branches  weight_b / (k + rank_b(d))
 """
@@ -14,9 +10,8 @@ from __future__ import annotations
 
 from collections.abc import Hashable, Mapping, Sequence
 
-#: From the original paper. Large enough that the first few ranks differ by
-#: under 2%, so agreement across branches outweighs confidence within one. With
-#: k=0 the top hit of a single branch would dominate the fusion outright.
+#: From the original paper. The first few ranks differ by under 2%, so agreement across
+#: branches outweighs confidence within one.
 DEFAULT_K = 60
 
 
@@ -32,10 +27,8 @@ def reciprocal_rank_fusion[T: Hashable](
     ``ranked_lists`` maps a branch name to its results, best first. ``weights``
     scales each branch's contribution; unnamed branches default to 1.0.
 
-    Returns ``(item, score)`` pairs, best first. Ties break on the item's first
-    appearance across branches, so the result is deterministic — which matters,
-    because a non-deterministic ranking makes the evaluation harness unable to
-    distinguish a real change from noise.
+    Returns ``(item, score)`` pairs, best first. Ties break on first appearance across
+    branches, so the ranking is deterministic and evaluation runs are comparable.
     """
     weights = weights or {}
     scores: dict[T, float] = {}
@@ -65,12 +58,10 @@ def weighted_branches[T: Hashable](
     k: int = DEFAULT_K,
     limit: int | None = None,
 ) -> list[tuple[T, float]]:
-    """Fuse the two standard branches.
+    """Fuse the dense and lexical branches.
 
-    The defaults weight both branches equally, which was measured rather than
-    assumed: an initial 0.4 for lexical scored worse than 1.0 on the retrieval
-    test set. A corpus dense in identifiers such as "NSGA-II" or "T-Type VSI"
-    rewards exact matching more than general guidance suggests.
+    Equal weights were measured: 0.4 for lexical scored worse than 1.0 on the retrieval
+    test set, as the corpus is dense in identifiers such as "NSGA-II".
     """
     return reciprocal_rank_fusion(
         {"dense": dense, "lexical": lexical},

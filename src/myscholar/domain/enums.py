@@ -11,19 +11,14 @@ class DocumentKind(StrEnum):
     PAPER = "paper"
     CV = "cv"
     PAGE = "page"
-    """A page from the portfolio site — projects, roles, research summaries.
-
-    Answers biographical and "what does he work on" questions that no paper
-    contains, which the assistant would otherwise refuse correctly but
-    unhelpfully.
-    """
+    """A page from the portfolio site: projects, roles, research summaries."""
 
 
 class SectionKind(StrEnum):
-    """Canonical section, mapped from whatever heading the document actually used.
+    """Canonical section, mapped from whatever heading the document used.
 
-    Section identity drives retrieval filtering ("search only the methods"),
-    chunk boundaries (a chunk never spans two sections) and citation display.
+    Drives retrieval boosts and exclusions, chunk boundaries (a chunk never spans two
+    sections) and citation display.
     """
 
     TITLE = "title"
@@ -67,24 +62,20 @@ class ChunkKind(StrEnum):
 
 
 class QueryClass(StrEnum):
-    """What kind of question this is, which decides how it gets answered.
-
-    Routing on this is the point: HyDE actively harms a bibliographic lookup,
-    and decomposition wastes seconds on a single-fact question.
-    """
+    """What kind of question this is, which decides how it is answered."""
 
     BIBLIOGRAPHIC = "bibliographic"
-    """Answered by SQL over curated metadata. No vector search, no invention."""
+    """Answered by SQL over verified metadata, without vector search."""
 
     SINGLE_PAPER_FACTUAL = "single_paper_factual"
     CROSS_PAPER_SYNTHESIS = "cross_paper_synthesis"
     METHODOLOGICAL = "methodological"
     BIOGRAPHICAL = "biographical"
     OUT_OF_SCOPE = "out_of_scope"
-    """Short-circuited before any retrieval happens."""
+    """Answered with a fixed reply before any retrieval."""
 
     AMBIGUOUS = "ambiguous"
-    """Answered with a clarifying question, which is a valid terminal state."""
+    """Answered with a clarifying question."""
 
 
 class Verdict(StrEnum):
@@ -94,11 +85,7 @@ class Verdict(StrEnum):
 
 
 class RefusalReason(StrEnum):
-    """Refusal is a first-class outcome, not an error.
-
-    The corpus is deliberately closed and there is no web fallback, so
-    admitting ignorance is the correct behaviour rather than a failure.
-    """
+    """Why the loop declined to answer. The corpus is closed, with no web fallback."""
 
     NO_RELEVANT_CONTENT = "no_relevant_content"
     OUT_OF_CORPUS_SCOPE = "out_of_corpus_scope"
@@ -107,7 +94,7 @@ class RefusalReason(StrEnum):
 
 
 class Stage(StrEnum):
-    """Pipeline stages surfaced to the UI so the adaptive loop is visible."""
+    """Pipeline stages streamed to the interface."""
 
     CLASSIFYING = "classifying"
     RETRIEVING = "retrieving"

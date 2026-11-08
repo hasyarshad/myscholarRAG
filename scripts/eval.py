@@ -2,19 +2,8 @@
 
     make eval
 
-Four measurements, in increasing order of cost and decreasing order of
-certainty:
-
-  extraction  does the corpus say what the PDFs say?      seconds, deterministic
-  retrieval   is the right document found?                a minute, deterministic
-  routing     is the right strategy chosen?               a minute, one small model
-  generation  is the answer supported, and does it        tens of minutes, every model
-              decline what it cannot answer?
-
-The order matters when something regresses. A drop in generation quality with
-retrieval unchanged is a generation problem; a drop in both is a retrieval
-problem wearing a generation costume. Reading them in this order stops an
-afternoon being spent on the wrong stage — which has happened here, twice.
+When something regresses, read retrieval before generation: a generation drop
+with retrieval unchanged is a generation problem; a drop in both starts in retrieval.
 """
 
 from __future__ import annotations
@@ -32,11 +21,9 @@ RESULTS = Path("results")
 
 #: name -> (script, what it measures, roughly how long)
 STAGES: dict[str, tuple[str, str, str]] = {
-    # First, because it gates the credibility of the generation numbers. A
-    # miscalibrated judge does not produce a soft result, it produces a
-    # confident wrong one — measured here, an uncalibrated version reported 57%
-    # of the adaptive system's claims as unsupported when the sampled failures
-    # were all correct and cited.
+    # First, because the generation numbers depend on the judge. An uncalibrated
+    # version reported 57% of the adaptive system's claims as unsupported when the
+    # sampled failures were all correct and cited.
     "judge": (
         "scripts/eval_judge.py",
         "can the faithfulness judge be trusted",
@@ -101,9 +88,7 @@ def headline() -> list[str]:
     for name in ("naive", "retrieved", "adaptive"):
         if (config := generation.get(name)) is None:
             continue
-        # Recomputed from the per-question outcomes rather than read from the
-        # stored summary, so the headline cannot disagree with the by-kind
-        # table underneath it.
+        # Recomputed from the outcomes so the headline matches the by-kind table.
         refusing = [o for o in config["outcomes"] if o["kind"] in must_refuse]
         answering = [o for o in config["outcomes"] if o["kind"] not in must_refuse]
         correct_refusal = sum(o["correct"] for o in refusing) / max(len(refusing), 1)
@@ -126,32 +111,24 @@ def headline() -> list[str]:
 
     lines += [
         "",
-        "`naive` is the pipeline this project replaces, reimplemented against "
-        "the same index, the same embedder and the same generator — so the "
-        "difference is pipeline design and nothing else. `retrieved` keeps the "
-        "one-shot generation and swaps in hybrid retrieval and "
-        "parent expansion. `adaptive` is the full system.",
+        "`naive` reimplements the baseline pipeline this project replaces, with the "
+        "same index, embedder and generator as the others, so the differences come "
+        "from pipeline design. `retrieved` pairs hybrid retrieval and parent "
+        "expansion with the naive one-shot generator, so it isolates the effect of "
+        "retrieval quality. `adaptive` is the full system.",
         "",
         f"Basis: {basis}.",
         "",
-        "The denominators differ because the configurations write differently. "
-        "That does not mechanically move the *rate*, which is per sentence — "
-        "but it does mean the adaptive figure rests on far fewer judgements, "
-        "so each one is worth about two and a half points. Read the direction, "
-        "not the decimal.",
+        "The configurations write different amounts, so the denominators differ. "
+        "The rate is per sentence, but the adaptive figure rests on far fewer "
+        "judgements, so each one moves it further and small gaps between rows are "
+        "not meaningful.",
         "",
-        "Part of what separates the rows is style rather than retrieval: the "
-        "adaptive system's prompt requires every factual sentence to carry a "
-        "citation, which shapes what it is willing to write. That is a design "
-        "choice being measured, not a confound — but it is why the middle row "
-        "matters.",
+        "Part of the gap comes from the prompt: the adaptive system must cite every "
+        "factual sentence, which limits what it writes. That is part of the design "
+        "under test, and the `retrieved` row separates it from the effect of retrieval.",
         "",
         _attribution(generation),
-        "",
-        "`retrieved` keeps the cross-encoder, which the shipped configuration "
-        "no longer uses — it measured worse on this corpus (see "
-        "[retrieval](./retrieval.md)). The row is an ablation of retrieval "
-        "quality, not a description of what runs.",
         "",
     ]
     return lines
@@ -170,10 +147,9 @@ def _attribution(generation: dict[str, Any]) -> str:
     loop_delta = (rates["retrieved"] - rates["adaptive"]) * 100
     return (
         f"Retrieval alone moved the unsupported-claim rate by "
-        f"{retrieval_delta:.1f} points. The verification loop moved it by "
-        f"{loop_delta:.1f}. Whatever else the retrieval work bought, it was "
-        f"not groundedness — and without the middle row the loop's share would "
-        f"have been credited to it."
+        f"{retrieval_delta:.1f} points, and the verification loop by a further "
+        f"{loop_delta:.1f}. Without the `retrieved` row, the loop's share would be "
+        f"credited to retrieval."
     )
 
 
@@ -201,9 +177,8 @@ def compose(ran: dict[str, tuple[bool, float]]) -> str:
             "",
             "## Judge calibration",
             "",
-            "The faithfulness numbers above are only as good as the model "
-            "producing them, so it is measured first, on cases where the right "
-            "answer is not in doubt.",
+            "The unsupported-claim rate depends on the faithfulness judge, so the "
+            "judge is measured first, on cases where the right answer is not in doubt.",
             "",
             "| Measure | Value |",
             "|---|---|",
@@ -221,9 +196,8 @@ def compose(ran: dict[str, tuple[bool, float]]) -> str:
             "## Document selection",
             "",
             "Which papers a cross-paper question is about, decided before any "
-            "passage is fetched. The retrieval set below cannot measure this — "
-            "it is 27 single-paper questions and 9 methodological ones, with no "
-            "synthesis at all.",
+            "passage is fetched. The retrieval set below has no synthesis questions "
+            "(27 single-paper and 9 methodological), so it cannot measure this.",
             "",
             "| Measure | Value |",
             "|---|---|",
@@ -232,9 +206,7 @@ def compose(ran: dict[str, tuple[bool, float]]) -> str:
         ]
 
     if retrieval := _load("retrieval"):
-        # Recomputed from the per-question ranks rather than read from a stored
-        # summary. One number to maintain, and it cannot drift out of step with
-        # the outcomes it claims to summarise.
+        # Recomputed from the per-question ranks so it cannot drift from them.
         lines += [
             "",
             "## Retrieval",
@@ -256,14 +228,13 @@ def compose(ran: dict[str, tuple[bool, float]]) -> str:
         "",
         "## Reading these",
         "",
-        "Correct refusal and over-refusal are only meaningful together. A "
-        "system that declines everything scores 100% on the first and is "
-        "useless; one that answers everything scores 0% on the second and is "
-        "dangerous. The pair measures discrimination.",
+        "Read correct refusal together with over-refusal. A system that declines "
+        "everything scores 100% on correct refusal, and one that answers everything "
+        "scores 0% on over-refusal; only the pair shows whether it tells the two "
+        "kinds of question apart.",
         "",
-        "Unsupported claims are counted per *sentence*, not per answer, and "
-        "only over answers that were actually given. A refusal contains no "
-        "claims, so declining more cannot improve the number.",
+        "Unsupported claims are counted per sentence, over the answers actually "
+        "given. A refusal contains no claims, so declining more cannot improve the rate.",
         "",
         "Full detail for each stage is in the linked file.",
         "",
@@ -299,8 +270,7 @@ def main() -> int:
     (RESULTS / "report.md").write_text(compose(ran), "utf-8")
     print(f"\nwritten to {RESULTS / 'report.md'}")
 
-    # A failed stage fails the run. Reporting a partial evaluation as though it
-    # were complete is how a regression gets shipped.
+    # A failed stage fails the run, so a partial evaluation is never reported as complete.
     return 0 if all(ok for ok, _ in ran.values()) else 1
 
 

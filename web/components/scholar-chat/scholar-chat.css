@@ -1,19 +1,10 @@
-/* Styles for the assistant widget, scoped so it can be dropped into a site
-   that already has its own design system.
- *
- * Every rule is nested under `.scholar`, which is the widget's root element.
- * That matters: the class names this uses — .chip, .error, .active, .question,
- * .sources, .composer — are common enough that an unscoped stylesheet would
- * both break the host site and be broken by it. Scoping makes the widget
- * self-contained and the integration a copy rather than a merge.
- *
- * Colours come from CSS custom properties with fallbacks, so a host site can
- * override any of them by setting the variable on a parent element:
+/* Assistant widget styles. Every rule is scoped under `.scholar` because class
+ * names such as .chip and .error are common enough to clash with a host site.
+ * Colours are custom properties a host can override on a parent element:
  *
  *     .my-page { --scholar-accent: #ff6b35; }
  *
- * Deliberately plain otherwise: this styles structure and lets typography
- * inherit from the page it lands in.
+ * Typography inherits from the page.
  */
 
 .scholar {
@@ -51,7 +42,7 @@
   clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 
-/* --- shell --------------------------------------------------------------- */
+/* Shell */
 
 .scholar .scholar-header h2 { font-size: 1.05rem; margin: 0 0 .25rem; }
 .scholar .scholar-scope { color: var(--scholar-muted); font-size: .85rem; margin: 0 0 1rem; }
@@ -69,7 +60,7 @@
 .scholar .turn { display: block; }
 .scholar .question { font-weight: 600; margin: 0 0 .6rem; }
 
-/* --- stages -------------------------------------------------------------- */
+/* Stages */
 
 .scholar .stages {
   list-style: none; padding: .6rem .75rem; margin: 0 0 .75rem;
@@ -90,11 +81,10 @@
 }
 @keyframes scholar-pulse { 50% { opacity: .3; } }
 .scholar .stage-label { color: inherit; }
-.scholar .stage-retry { color: var(--scholar-warn); font-style: normal; }
 .scholar .stage-detail { color: var(--scholar-muted); }
 .scholar .stage-time { color: var(--scholar-muted); font-variant-numeric: tabular-nums; }
 
-/* --- answer -------------------------------------------------------------- */
+/* Answer */
 
 .scholar .answer p { margin: 0 0 .6rem; }
 .scholar .answer-refused { color: var(--scholar-muted); }
@@ -122,9 +112,7 @@
 }
 .scholar .chip-meta { color: var(--scholar-muted); }
 
-/* The citation title, when the document resolves to a DOI or a page. Weighted
-   like the <strong> it replaces so the popover does not shift when one source
-   has a link and the next does not. */
+/* Linked citation title, weighted like the <strong> used when there is no link. */
 .scholar .chip-link {
   font-weight: 600;
   color: var(--scholar-accent, #1f6feb);
@@ -148,7 +136,7 @@
   border: 1px solid currentColor; border-radius: 6px; padding: .1rem .45rem;
 }
 
-/* --- composer ------------------------------------------------------------ */
+/* Composer */
 
 .scholar .composer { display: flex; gap: .5rem; margin-top: 1.5rem; }
 .scholar .composer input {

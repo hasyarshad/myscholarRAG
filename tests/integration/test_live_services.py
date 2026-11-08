@@ -4,10 +4,8 @@ Marked ``integration`` and excluded from ``make test``. Run with:
 
     make up && uv run pytest -m integration
 
-These exist because the unit suite deliberately mocks the transport layer, so
-it can verify request shapes but not that a real server accepts them. Something
-has to close that gap, and it is better done by a test than by a surprise in
-Phase 1.
+The unit suite mocks the transport, so it checks request shapes but not that a real
+server accepts them.
 """
 
 from __future__ import annotations
@@ -40,8 +38,6 @@ requires_ollama = pytest.mark.skipif(
 
 
 class Relevance(BaseModel):
-    """Shaped like the grader's real output, so this exercises the actual path."""
-
     relevant: bool
     reason: str
 
@@ -63,11 +59,6 @@ async def test_completion_against_a_live_model() -> None:
 
 @requires_ollama
 async def test_constrained_decoding_produces_valid_json() -> None:
-    """The property every classifier and grader in the pipeline depends on.
-
-    If schema-constrained decoding does not hold, each of those call sites needs
-    its own parsing and retry logic. Worth proving once, here.
-    """
     model = OllamaChatModel(UTILITY_MODEL, base_url=OLLAMA_URL)
 
     verdict = await model.structured(
@@ -105,14 +96,8 @@ async def test_streaming_yields_incrementally() -> None:
 
 @requires_ollama
 async def test_utility_model_answers_within_a_small_token_budget() -> None:
-    """The utility model must not spend its budget on reasoning.
-
-    A regression guard for a real failure: ``qwen3:4b`` (without ``-instruct``)
-    is reasoning-only, so with ``max_tokens=16`` it emitted 16 tokens of
-    reasoning and returned empty content. Every grading and classification call
-    in the pipeline is exactly this shape, so a reasoning model here would make
-    the whole adaptive loop fail silently.
-    """
+    # ``qwen3:4b`` without ``-instruct`` is reasoning-only: it spends a 16-token budget
+    # on reasoning and returns empty content.
     model = OllamaChatModel(UTILITY_MODEL, base_url=OLLAMA_URL)
 
     reply = await model.complete(

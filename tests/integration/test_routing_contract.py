@@ -1,35 +1,18 @@
-"""Pins how a question about someone's work on a subject is routed.
+"""Routing of questions about someone's work on a subject.
 
-A question like "his work on chaos theory" spans several papers, so it must be
-classified into a class that runs document selection. Classified
-`single_paper_factual` instead, `select_documents` is 0 and no per-document cap
-applies, and the answer is drawn from whichever paper retrieval liked best — the
-second paper on the subject is never fetched. That is a silent failure: the
-answer is fluent, correctly cited, and incomplete.
+Such a question spans several papers, so it must reach a class that runs document
+selection; ``single_paper_factual`` answers from one paper. The probes in
+``tests/eval/work_on_probes.yaml`` cross four phrasings with five topics, each spanning
+at least two papers. Cases go through ``assembly.build_router``, wired as the server is.
 
-Three of the twenty probes in `tests/eval/work_on_probes.yaml` do this today, and
-the assertions below are a ceiling on that rather than a target. Classification
-is one model call whose output every later stage branches on, so the cost of a
-change here is paid across the whole pipeline; this file makes that cost visible.
-
-The probe set crosses four phrasings with five topics, every topic verified to
-span at least two papers. Phrasing D ("how has his work on X developed over
-time?") states multiplicity outright and is asserted exactly, at 5 of 5; the
-other three phrasings leave it implicit and are asserted in aggregate.
-
-Cases are classified through `assembly.build_router`, so this exercises the same
-wiring the server does. A test that constructs its own classifier can pass while
-production behaves differently — the prompt interpolates the configured person
-name, among other things, and a hand-built classifier silently gets the default.
-
-Marked ``integration`` because catching a routing regression requires running
-the classifier. Run with
+Marked ``integration`` because it runs the classifier. Run with
 
     uv run pytest -m integration -k routing
 """
 
 from __future__ import annotations
 
+import getpass
 import os
 from pathlib import Path
 from typing import Any
@@ -48,30 +31,22 @@ pytestmark = pytest.mark.integration
 
 DATABASE_URL = os.environ.get(
     "MYSCHOLAR_TEST_DATABASE_URL",
-    "postgresql+asyncpg://haseeb@127.0.0.1:5433/myscholar",
+    f"postgresql+asyncpg://{getpass.getuser()}@127.0.0.1:5433/myscholar",
 )
 EMBEDDING_DEVICE = os.environ.get("MYSCHOLAR_TEST_EMBEDDING_DEVICE", "cuda")
 
 
-# The model backend the canaries run against. Defaults to the local pair, which
-# is what the published numbers were measured on and needs no key. Point it at
-# the deployed configuration to check the prompt against the model that will
-# actually serve it:
+# The model backend for these checks. The default is the local Ollama pair the published
+# numbers were measured on. To run against the deployed model instead:
 #
 #     MYSCHOLAR_TEST_LLM_PROVIDER=openai_compatible \
 #     MYSCHOLAR_TEST_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai \
 #     MYSCHOLAR_TEST_LLM_MODEL=gemini-3.5-flash-lite \
 #     MYSCHOLAR_TEST_LLM_KEY=... \
-#     uv run pytest -m integration -k prompt
+#     uv run pytest -m integration -k routing
 #
-# Worth having as a switch rather than a second test file: the prompt is 87% of
-# this system's accuracy, and "it holds on the model we measured" says nothing
-# about the model in production.
-# Read at import time, not inside the fixture. The autouse `_isolate_environment`
-# fixture hides every MYSCHOLAR_* variable from `os.environ` so a developer's
-# exported settings cannot change whether the suite passes — and these share that
-# prefix, so a fixture-time lookup silently returns the default and the run
-# quietly tests the wrong backend. That is why DATABASE_URL above is a constant.
+# Read at import time: the autouse ``_isolate_environment`` fixture hides MYSCHOLAR_*
+# variables, so a lookup inside a fixture would always return the default.
 LLM_PROVIDER = os.environ.get("MYSCHOLAR_TEST_LLM_PROVIDER", "ollama")
 LLM_BASE_URL = os.environ.get("MYSCHOLAR_TEST_LLM_BASE_URL", "")
 LLM_MODEL = os.environ.get("MYSCHOLAR_TEST_LLM_MODEL", "")
@@ -85,7 +60,7 @@ def _llm_settings() -> dict[str, object]:
         if not LLM_KEY:
             pytest.skip(f"provider {LLM_PROVIDER} needs MYSCHOLAR_TEST_LLM_KEY")
         settings["api_key"] = LLM_KEY
-        # This endpoint rejects unknown parameters rather than ignoring them.
+        # The hosted endpoint rejects unknown parameters, so no seed is sent.
         settings["seed"] = None
         if LLM_BASE_URL:
             settings["base_url"] = LLM_BASE_URL
@@ -97,9 +72,7 @@ def _llm_settings() -> dict[str, object]:
 
 PROBES = Path("tests/eval/work_on_probes.yaml")
 
-# A measured ceiling, not a goal. Three of twenty probes land in a class that
-# does not select documents. Raising this number needs a measurement that says
-# why; lowering it is the point of the file.
+# A measured ceiling: three of twenty probes reach a class that skips document selection.
 MAX_PROBES_WITHOUT_SELECTION = 3
 
 
@@ -110,9 +83,8 @@ def _cases(kind: str) -> list[dict[str, Any]]:
 
 @pytest.fixture
 async def router() -> QueryRouter:
-    # Built from documented development defaults rather than `.env`, so this
-    # skips cleanly on a machine that has not run `make up` instead of testing
-    # whatever that machine happens to be configured for.
+    # Built from the constants above instead of ``.env``, so it skips cleanly when the
+    # local services are not running.
     settings = make_settings(
         database={"url": DATABASE_URL},
         llm=_llm_settings(),
@@ -129,25 +101,14 @@ async def router() -> QueryRouter:
 
 
 async def _classify_and_plan(router: QueryRouter, question: str) -> tuple[str, int]:
-    """Classify and plan through the production objects.
-
-    Reaches past the router's privates deliberately: going through
-    `build_router` means a change to how production wires the classifier cannot
-    pass here while breaking the real thing. Calling `route()` instead would
-    retrieve for all twenty-eight cases, which none of these assertions needs.
-    """
+    """Classify and plan through the production router, without the retrieval ``route()`` runs."""
     classification = await router._classifier.classify(question)  # noqa: SLF001
     plan = router._planner.plan(classification)  # noqa: SLF001
     return classification.query_class.value, plan.select_documents
 
 
 class TestTheClassifierIsBuiltWithTheConfiguredPerson:
-    """The prompt names the person, so classification depends on that name.
-
-    Cheap to assert and worth asserting: anything that builds a classifier
-    without passing `person_name` gets the placeholder default, and then
-    measures — or serves — a prompt that differs from the configured one.
-    """
+    """The classification prompt interpolates the configured person's name."""
 
     def test_the_router_names_the_configured_person(self) -> None:
         settings = make_settings()
@@ -160,18 +121,14 @@ class TestTheClassifierIsBuiltWithTheConfiguredPerson:
         )
 
     def test_the_classifier_default_is_never_what_ships(self) -> None:
-        # With person.name left at the placeholder every prompt reads like an
-        # unfinished template. Asserted so the coupling is documented.
+        # The placeholder name would make every prompt read like an unfinished template.
         assert make_settings().person.name != "the researcher"
 
 
 class TestQuestionsAboutWorkOnASubjectSearchMoreThanOnePaper:
-    """Asserted on the plan rather than on the class label.
+    """Asserted on the plan rather than the class label.
 
-    The label is not what breaks the answer. `methodological` still selects
-    eight documents and caps them at three, so it produces an answer spanning
-    papers even though it is the wrong name for the question. Only the classes
-    that skip selection lose the second paper, so that is what is measured.
+    ``methodological`` also selects documents, so only classes that skip selection lose papers.
     """
 
     async def test_no_more_probes_lose_selection_than_already_do(self, router: QueryRouter) -> None:
@@ -192,10 +149,8 @@ class TestQuestionsAboutWorkOnASubjectSearchMoreThanOnePaper:
     async def test_an_explicit_multiplicity_cue_always_routes_to_synthesis(
         self, router: QueryRouter
     ) -> None:
-        # "how has his work on X developed over time?" states multiplicity
-        # outright, and the gold synthesis cases in routing_set.yaml share that
-        # cue. If this breaks, the synthesis class has stopped being reachable
-        # by its clearest signal and the aggregate above will follow.
+        # "how has his work on X developed over time?" states multiplicity outright,
+        # like the gold synthesis cases in routing_set.yaml.
         developmental = [c for c in _cases("probe") if c.get("phrasing") == "D"]
         assert len(developmental) == 5, "probe set changed shape"
 
@@ -211,12 +166,9 @@ class TestQuestionsAboutWorkOnASubjectSearchMoreThanOnePaper:
 
 
 class TestWideningSynthesisDoesNotBreakSinglePaperQuestions:
-    """The cost side of the trade, on the project's own gold labels.
+    """Controls copied from ``routing_set.yaml`` keep their gold labels.
 
-    Every control is copied verbatim from `routing_set.yaml`. Six name one paper
-    and ask one fact about it; two count papers in the collection, the class
-    where a misroute fabricates a number rather than merely narrowing an answer.
-    Any change that widens synthesis is paid for here.
+    Six ask one fact about one named paper; two count papers in the collection.
     """
 
     async def test_every_control_holds_its_gold_label(self, router: QueryRouter) -> None:

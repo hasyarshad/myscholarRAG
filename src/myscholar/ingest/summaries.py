@@ -1,33 +1,15 @@
 """Describing each paper in the words a reader would use.
 
-Chunk-level retrieval answers "which passage says X". It cannot reliably
-answer "which of these papers is about X", and the difference is not academic:
-
-    Q: how would you rate Haseeb's contribution to machine learning?
-    A: he applied machine learning to analyse survey data for an association.
-
-That answer was correct about its sources and wrong about the corpus. Six of
-his papers apply machine learning; none of them says so. They say LFBLSTM,
-AFL-1DCNN, gradient-boosted meta-learner, unified feature fusion. The one
-document that says "machine learning" on every page is a *survey* of learning
-algorithms, so it won every slot, and the only passage tying the person to the
-phrase was a line on the leadership page about a membership survey.
-
-No amount of query rewriting fixes that, and it was measured rather than
-assumed: five transform combinations were tried and none retrieved the applied
-papers, because the gap is between the question's vocabulary and the corpus's,
-not between one phrasing and another.
-
-A summary closes it. Written per document, in ordinary terminology, and
-embedded separately, it lets a document be found for what it *is* rather than
-for what one of its passages happens to say.
+Chunk retrieval finds passages but not which paper is about a topic. Six papers here apply
+machine learning while naming only LFBLSTM, AFL-1DCNN and the like, and none of five
+query-transform combinations retrieved them. A per-document summary in ordinary terms,
+embedded separately, lets document selection find them.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
 
 from pydantic import Field
 
@@ -36,9 +18,8 @@ from myscholar.ports.llm import ChatModel, Message, ModelOutput, Role
 
 logger = logging.getLogger(__name__)
 
-#: How much of the paper the summariser reads. The abstract, introduction and
-#: methods carry what a paper is about; the rest is detail that a summary would
-#: leave out anyway.
+#: How much of the paper the summariser reads; the abstract, introduction and
+#: methods come first and carry what the paper is about.
 _MAX_SOURCE_CHARS = 8000
 
 
@@ -96,15 +77,9 @@ Title: {title}
 
 #: Titles that announce a survey.
 #:
-#: The model was asked and would not say. Given a paper called "An Overview of
-#: Sequential Learning Algorithms for Single Hidden Layer Networks: Current
-#: Issues & Future Trends", a 4B summariser still reported it as original work,
-#: and the assistant then credited Haseeb with inventing GGAP-RBF.
-#:
-#: The title is the more reliable signal and cannot drift. The model's verdict
-#: is kept as well and the two are OR-ed: a survey whose title hides it is
-#: still worth catching, and the cost of a false positive is only that the
-#: assistant declines to credit him with something.
+#: The summariser model reported "An Overview of Sequential Learning Algorithms ..."
+#: as original work. The title check is OR-ed with the model's verdict; a false
+#: positive only stops the assistant crediting the author with a method.
 _REVIEW_TITLE = re.compile(
     r"\b(a\s+)?(overview|review|survey|taxonomy|tutorial|state[\s-]of[\s-]the[\s-]art|"
     r"comparative\s+stud(y|ies)|systematic\s+(review|literature)|current\s+issues|"
@@ -118,20 +93,8 @@ def looks_like_review(title: str) -> bool:
     return bool(_REVIEW_TITLE.search(title))
 
 
-@dataclass(frozen=True, slots=True)
-class Summary:
-    document_id: object
-    text: str
-    embedding: list[float]
-
-
 def render(summary: PaperSummary, *, title: str, is_review: bool | None = None) -> str:
-    """Flatten the structured summary into the text that gets embedded.
-
-    The title is included: it is the most reliable sentence about a paper, and
-    the summary is a description of *this* document rather than free-floating
-    prose.
-    """
+    """Flatten the structured summary into the text that gets embedded, led by the title."""
     parts = [title, summary.topic]
     if summary.is_review if is_review is None else is_review:
         parts.append("A review of methods proposed by other researchers.")
@@ -150,11 +113,10 @@ class Summariser:
         self._embedder = embedder
 
     async def summarise(self, *, title: str, text: str) -> tuple[str, bool] | None:
-        """One summary, or None if the model could not produce one.
+        """The rendered summary and whether the paper is a review, or None on failure.
 
-        A failure is not fatal. A document without a summary is simply absent
-        from document-level selection and still reachable by chunk search,
-        which is how the system behaved before summaries existed.
+        A document without a summary is absent from document selection but still
+        reachable by chunk search.
         """
         try:
             result = await self._model.structured(

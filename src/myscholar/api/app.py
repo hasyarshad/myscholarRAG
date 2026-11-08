@@ -1,12 +1,10 @@
 """The HTTP service.
 
-One endpoint that matters: ``POST /v1/ask``, which streams the pipeline's
-progress and then the verified answer.
+``POST /v1/ask`` streams the pipeline's progress and then the verified answer.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 import secrets
@@ -61,7 +59,7 @@ SUGGESTIONS = [
 
 @dataclass
 class Services:
-    """Built once at startup. Model loading is slow and must not happen per request."""
+    """Built once at startup, because model loading is slow."""
 
     settings: Settings
     engine: Engine
@@ -81,27 +79,23 @@ async def build_services(settings: Settings | None = None) -> Services:
         settings=settings,
         engine=build_engine(settings, container, store),
         store=store,
-        # The small model, not the generator. Expanding an ellipsis is a
-        # rewriting task, and paying 14b latency for it on every follow-up
-        # would be most of the win given back.
+        # Rewriting a follow-up is a small task, so it uses the utility model.
         resolver=FollowUpResolver(container.utility),
     )
 
     try:
-        # Local convenience only. Against a hosted database the serving role
-        # holds no DDL rights, and `myscholar db migrate` has already run.
+        # Local development only. A hosted database's serving role has no DDL
+        # rights, and `myscholar db migrate` runs separately.
         if settings.database.migrate_on_startup:
             await store.create_schema()
         documents = await store.list_documents()
         services.slugs = {str(d.id): d.slug for d in documents}
-        # The index/embedder agreement check from Phase 1. Failing here at
-        # startup beats serving plausible nonsense: searching an index built by
-        # a different model returns ranked, meaningless results.
+        # An index built by a different embedding model returns ranked but meaningless results.
         await store.assert_embedder_matches(container.embedder.model_id)
         services.ready = bool(documents)
         if not documents:
             services.detail["index"] = "no documents indexed"
-    except Exception as exc:  # startup reports problems, it does not crash
+    except Exception as exc:  # reported through /readyz instead of crashing
         services.detail["startup"] = f"{type(exc).__name__}: {exc}"
         logger.exception("service startup checks failed")
 
@@ -113,8 +107,6 @@ def create_app(services: Services | None = None, *, origins: list[str] | None = 
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
-        # Models and database connections are built once. Doing it per request
-        # would add seconds of model loading to every question.
         if state["services"] is None:
             state["services"] = await build_services()
         yield
@@ -124,14 +116,13 @@ def create_app(services: Services | None = None, *, origins: list[str] | None = 
         title="myScholar",
         version="0.1.0",
         description=(
-            "Ask about a personal research corpus — papers, CV and project "
+            "Ask about a personal research corpus: papers, CV and project "
             "write-ups. Answers carry verified citations."
         ),
     )
 
-    # Exact origins, never a wildcard. Worth being clear that CORS is a
-    # browser-only control and stops nothing from curl — the real gate in
-    # production is a shared secret injected by the Next.js proxy.
+    # Exact origins, no wildcard. CORS only constrains browsers; other clients
+    # are stopped by the shared secret that the Next.js proxy adds.
     allowed = origins or (services.settings.api.allowed_origins if services else None)
     if allowed is None:
         allowed = load_settings().api.allowed_origins
@@ -149,16 +140,11 @@ def create_app(services: Services | None = None, *, origins: list[str] | None = 
 
     @app.middleware("http")
     async def require_secret(request: Request, call_next: Any) -> Response:
-        """Guard the data endpoints, leave the probes open.
+        """Require the shared secret on ``/v1/`` routes.
 
-        Health checks come from the host's own monitor, which has no secret and
-        should not need one — a liveness probe that can fail authentication is a
-        liveness probe that reports the wrong thing. Neither route touches the
-        corpus or costs anything to serve.
-
-        CORS preflight is exempt for the same reason it must be: the browser
-        sends OPTIONS without custom headers, so rejecting it here would block
-        the very requests the secret exists to permit.
+        Health probes stay open: the host's monitor has no secret, and a probe
+        that can fail authentication misreports liveness. CORS preflight is
+        exempt because browsers send OPTIONS without custom headers.
         """
         if request.method == "OPTIONS" or not request.url.path.startswith("/v1/"):
             return await call_next(request)  # type: ignore[no-any-return]
@@ -172,26 +158,21 @@ def create_app(services: Services | None = None, *, origins: list[str] | None = 
     gate = Gate()
 
     async def get_services() -> Services:
-        if state["services"] is None:
-            state["services"] = await build_services()
         current = state["services"]
-        if current is None:  # pragma: no cover - just assigned above
-            msg = "services failed to build"
-            raise RuntimeError(msg)
+        if current is None:
+            current = state["services"] = await build_services()
         return current
 
     @app.get("/healthz", response_model=HealthResponse)
     async def healthz() -> HealthResponse:
-        """Liveness. Deliberately checks nothing — it answers if the process runs."""
+        """Liveness: answers whenever the process is running."""
         return HealthResponse(status="ok")
 
     @app.get("/readyz", response_model=HealthResponse)
     async def readyz(response: Response) -> HealthResponse:
-        """Readiness, which is a different question from liveness.
+        """Readiness: the database answers and the index is non-empty.
 
-        Checks that the database answers and that the index is non-empty. A
-        process that is up with an empty index is the most likely real failure,
-        and a TCP connect would not notice it.
+        An empty index is the most likely real failure, and a TCP check would not notice it.
         """
         current = await get_services()
         database = await current.store.health()
@@ -201,11 +182,7 @@ def create_app(services: Services | None = None, *, origins: list[str] | None = 
         checks = {"database": database, "index": indexed}
         ok = all(checks.values())
 
-        # Startup notes describe the state at boot; the counts above are live.
-        # Reporting both unfiltered meant a service that started against an
-        # empty database and was populated afterwards answered "ready" while
-        # still carrying "no documents indexed" — which is the most misleading
-        # possible output in exactly the situation someone is debugging.
+        # Startup notes describe the state at boot, so drop them once their check passes.
         notes = {k: v for k, v in current.detail.items() if not (ok and k in checks)}
         response.status_code = status.HTTP_200_OK if ok else status.HTTP_503_SERVICE_UNAVAILABLE
         return HealthResponse(
@@ -231,10 +208,9 @@ def create_app(services: Services | None = None, *, origins: list[str] | None = 
 
     @app.get("/v1/corpus", response_model=CorpusInfo)
     async def corpus() -> CorpusInfo:
-        """What the assistant covers, so the widget states it rather than guessing."""
+        """What the assistant covers, for the widget to display."""
         current = await get_services()
-        # Papers only. The widget renders this as "N papers, YYYY-YYYY", and
-        # counting the CV and the site pages made it claim twenty-five.
+        # Papers only: the widget renders this as "N papers, YYYY-YYYY".
         documents = [
             d for d in await current.store.list_documents() if d.kind == DocumentKind.PAPER
         ]
@@ -250,14 +226,14 @@ def create_app(services: Services | None = None, *, origins: list[str] | None = 
     async def ask(payload: AskRequest, request: Request) -> Response:
         """Answer a question, streaming the pipeline's progress.
 
-        Progress rather than tokens: verification runs after generation, so
-        streaming raw output would show text that is then rejected.
+        Tokens are not streamed: verification runs after generation, so raw
+        output could show text that is then rejected.
         """
         current = await get_services()
         caller = _caller(request)
 
-        # Failures knowable before the stream opens get a real HTTP status.
-        # Only failures *during* streaming use an error event.
+        # Failures known before the stream opens get an HTTP status; later ones
+        # are sent as error events.
         try:
             limiter.check(caller)
         except RateLimitedError as exc:
@@ -289,11 +265,7 @@ async def _stream(
     session_id: str | None = None,
 ) -> AsyncIterator[str]:
     """Emit stage events as the pipeline runs, then the verified answer."""
-    started = time.monotonic()
-
-    # Issued here, never taken from the request. A client-chosen identifier
-    # could be guessed or reused, which would hand one visitor another
-    # visitor's questions as the context for resolving a follow-up.
+    # Session ids are issued by the server; one without the issued shape is replaced.
     conversation = (
         session_id if session_id and _looks_issued(session_id) else secrets.token_urlsafe(24)
     )
@@ -306,28 +278,17 @@ async def _stream(
 
             yield frame("session", SessionEvent(session_id=conversation))
 
-            # Restarted after the concurrency gate. Measured from before it,
-            # the elapsed time includes however long the request queued behind
-            # another, so a metadata lookup that takes 6ms was reported as 28
-            # seconds — describing the server's load rather than the work, in
-            # the one place the interface claims to show the work.
+            # Timed from here so elapsed_ms excludes time spent queued at the gate.
             started = time.monotonic()
 
             yield frame(
                 "stage",
-                # No detail: the widget already labels this stage, and repeating
-                # the label as its own detail read as a stutter.
+                # No detail: the widget already labels this stage.
                 StageEvent(stage=Stage.CLASSIFYING.value),
             )
 
-            # Each stage as the pipeline reaches it, not replayed afterwards.
-            # A visitor watching "verifying: 2 citation issues" followed by a
-            # regeneration learns something true about the system that no
-            # amount of README prose conveys.
-            # The follow-up is expanded once, here, and everything downstream
-            # sees an ordinary self-contained question. Failure is a no-op:
-            # the question as asked is used, which is exactly the behaviour
-            # before conversations existed.
+            # A follow-up is expanded once, here, so the engine sees a
+            # self-contained question. If that fails, the question is used as asked.
             resolution = await services.resolver.resolve(
                 question, await _history(services, conversation)
             )
@@ -369,8 +330,6 @@ async def _stream(
             ),
         )
         return
-    except asyncio.CancelledError:
-        raise
     except Exception as exc:  # a mid-stream failure is reported in-band
         logger.exception("answering failed")
         yield frame(
@@ -379,10 +338,8 @@ async def _stream(
         )
         return
 
-    # Recorded after the fact, and only once an answer exists. Storing the
-    # question up front would leave a dangling turn whenever a visitor closed
-    # the tab mid-answer, and a follow-up would then resolve against a
-    # question that was never answered.
+    # Recorded only once an answer exists, so an abandoned request leaves no
+    # unanswered turn for a later follow-up to resolve against.
     try:
         await services.store.append_turn(
             conversation,
@@ -397,16 +354,10 @@ async def _stream(
 
 
 async def _history(services: Services, conversation: str) -> list[Turn]:
-    """Previous turns, or none if they cannot be read.
-
-    Conversation memory is a convenience layered on top of answering, and it
-    must never be able to prevent it. This was not hypothetical: an unmigrated
-    database turned every question into an "internal error" event, because a
-    lookup for a feature nobody had asked for was on the path to the answer.
-    """
+    """Previous turns, or none if they cannot be read (an unmigrated database, for example)."""
     try:
         return await services.store.recent_turns(conversation)
-    except Exception:  # a conversation feature must not break answering
+    except Exception:  # conversation history must not block answering
         logger.exception("could not read conversation history; answering without it")
         return []
 
@@ -416,11 +367,10 @@ _ISSUED = re.compile(r"^[A-Za-z0-9_-]{32,64}$")
 
 
 def _looks_issued(session_id: str) -> bool:
-    """Reject anything that did not come from ``token_urlsafe``.
+    """Whether an id has the shape of one from ``token_urlsafe``.
 
-    Not a security control by itself — the ids are random enough that guessing
-    one is infeasible — but it stops a client inventing "session-1" and
-    colliding with another visitor by accident.
+    Not a security control (issued ids are infeasible to guess). It stops a
+    client sending an id like "session-1" and colliding with another visitor.
     """
     return bool(_ISSUED.match(session_id))
 
@@ -455,10 +405,10 @@ def _answer_event(services: Services, response: Answer | Refusal) -> AnswerEvent
 def _caller(request: Request) -> str:
     """Identify the caller for rate limiting.
 
-    Behind a proxy the socket address is the proxy, so the forwarded header is
-    used when present. That header is client-controlled and therefore spoofable
-    — acceptable here because rate limiting is a courtesy control, not a
-    security boundary, and the real one is at the edge.
+    Behind a proxy the socket address is the proxy's, so the first
+    ``X-Forwarded-For`` entry is used when present. Clients can spoof it, which
+    is acceptable because the rate limit is a courtesy control; access is
+    controlled by the shared secret.
     """
     forwarded = request.headers.get("x-forwarded-for", "")
     if forwarded:

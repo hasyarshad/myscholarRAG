@@ -1,21 +1,13 @@
-"""Answering questions about the collection with SQL.
+"""Answering questions about the publication list with SQL over verified metadata.
 
-"How many papers did he publish in 2023?" has no answer inside any paper — it
-is a property of the collection. Retrieval nonetheless returns chunks that
-mention 2023 (a copyright line, a citation, a results table), and a model handed
-those will state a number. It will be wrong and it will sound certain.
-
-So these questions never reach the vector index. The count comes from the
-database, and the model's only job is to phrase a result it was handed.
-
-Only verified rows are used. Answering from unverified extraction would swap one
-confident-but-wrong source for another.
+No passage states how many papers appeared in 2023. Given chunks that mention the year,
+a model states a wrong count, so these questions never reach the vector index.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 
 from myscholar.adapters.persistence.repository import DocumentRow, PostgresStore
@@ -35,9 +27,8 @@ _YEAR = re.compile(r"\b(19[89]\d|20[0-4]\d)\b")
 
 _INTENT_PATTERNS: tuple[tuple[re.Pattern[str], BibliographicIntent], ...] = (
     (
-        # "recent" without "most" counts: "what is his recent paper?" asks the
-        # same thing, and classification has already established that this is a
-        # question about the collection.
+        # A bare "recent" counts: classification has already established that the
+        # question is about the collection.
         re.compile(r"\brecent\b|\blatest\b|\bnewest\b", re.IGNORECASE),
         BibliographicIntent.MOST_RECENT,
     ),
@@ -66,7 +57,7 @@ _INTENT_PATTERNS: tuple[tuple[re.Pattern[str], BibliographicIntent], ...] = (
 
 @dataclass(frozen=True, slots=True)
 class BibliographicAnswer:
-    """A result computed from the database, with the facts it was built from."""
+    """A result computed from the database."""
 
     text: str
     intent: BibliographicIntent
@@ -74,23 +65,12 @@ class BibliographicAnswer:
     unverified: int = 0
     """Documents excluded because their metadata is not yet verified."""
 
-    facts: dict[str, object] = field(default_factory=dict)
-    """The raw numbers, so a generator can phrase them without recomputing."""
-
 
 def detect_intent(question: str) -> BibliographicIntent | None:
     """What the question wants from the metadata, or None if nothing does.
 
-    Defaulting to LIST was a quiet trap. Asked "which of his papers covers wind
-    turbine pitch control?" the classifier answered `bibliographic`, no intent
-    pattern matched, the default fired, and the assistant printed all twenty
-    papers as the answer to a question about a topic the corpus does not cover.
-    Retrieval would have found nothing and refused, correctly.
-
-    A deterministic guard on a model decision, which is the pattern used
-    throughout: the classifier may say a question is bibliographic, but if
-    nothing about the question asks for a count, a date, a venue or a list,
-    then it is asking about content and belongs in retrieval.
+    None sends the question to retrieval. A LIST default answered "which of his
+    papers covers wind turbine pitch control?" with every paper in the corpus.
     """
     for pattern, intent in _INTENT_PATTERNS:
         if pattern.search(question):
@@ -108,14 +88,10 @@ class BibliographicQuery:
 
     async def answer(self, question: str) -> BibliographicAnswer | None:
         """The metadata answer, or None if the question does not want one."""
-        # Papers only. The CV and the site pages are indexed documents but they
-        # are not publications, and counting them would answer "how many
-        # papers" with five too many. Until now they were excluded incidentally
-        # by being unverified, which stops being true the moment anything marks
-        # a page verified.
         if (intent := detect_intent(question)) is None:
             return None
 
+        # Papers only: the CV and site pages are indexed but are not publications.
         papers = [d for d in await self._store.list_documents() if d.kind == DocumentKind.PAPER]
         verified = [d for d in papers if d.verified]
         excluded = len(papers) - len(verified)
@@ -161,7 +137,6 @@ class BibliographicQuery:
             intent=BibliographicIntent.COUNT,
             documents=tuple(documents),
             unverified=excluded,
-            facts={"count": count, "years": years},
         )
 
     def _list(
@@ -177,7 +152,6 @@ class BibliographicQuery:
             intent=BibliographicIntent.LIST,
             documents=tuple(ordered),
             unverified=excluded,
-            facts={"count": len(ordered), "titles": [d.title for d in ordered]},
         )
 
     def _by_recency(
@@ -200,7 +174,6 @@ class BibliographicQuery:
             intent=intent,
             documents=tuple(matching),
             unverified=excluded,
-            facts={"year": target, "count": len(matching)},
         )
 
     def _by_year(self, documents: list[DocumentRow], excluded: int) -> BibliographicAnswer:
@@ -214,7 +187,6 @@ class BibliographicQuery:
             intent=BibliographicIntent.BY_YEAR,
             documents=tuple(documents),
             unverified=excluded,
-            facts={"by_year": counts},
         )
 
     def _venues(self, documents: list[DocumentRow], excluded: int) -> BibliographicAnswer:
@@ -237,5 +209,4 @@ class BibliographicQuery:
             intent=BibliographicIntent.VENUES,
             documents=tuple(documents),
             unverified=excluded,
-            facts={"venues": counts},
         )

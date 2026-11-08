@@ -1,24 +1,14 @@
-"""Measure where questions about someone's work on a subject are routed.
+"""Probe how questions about someone's work on a subject are routed.
 
     uv run python scripts/probe_routing.py
 
-Answers a question `scripts/eval_routing.py` cannot: does a whole *family* of
-phrasings misroute, or did one question happen to? The routing set has five
-synthesis questions, too few to tell.
+Checks whether a family of phrasings misroutes, which the routing set has too few
+synthesis questions to show. The metric is the plan: `select_documents == 0`
+means document selection never runs. Each probe runs twice and disagreement is
+flagged, since classification is not always stable across processes.
 
-Two things it does that the routing eval does not:
-
-* It reports the **plan**, not just the class. What breaks an answer is document
-  selection never running, so `select_documents == 0` is the metric. That groups
-  `single_paper_factual` with `biographical` and separates `methodological`,
-  which does select and so still spans papers.
-* It runs each probe twice and flags disagreement. Classification is stable
-  within a process at temperature 0 but not always across processes, and a
-  one-off reading should not be mistaken for a systematic one.
-
-Reads 3 of 20 probes skipping selection, with all eight controls holding. That
-state is pinned by `tests/integration/test_routing_contract.py`; run this after
-touching the classifier for the per-probe detail the test does not print.
+The expected state (3 of 20 probes skip selection, all controls hold) is pinned
+by tests/integration/test_routing_contract.py; this prints the per-probe detail.
 """
 
 from __future__ import annotations
@@ -135,9 +125,7 @@ async def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--out", default="probe_routing")
-    # Defaults to the served name rather than the classifier's own placeholder.
-    # The prompt interpolates {person} and assembly.py passes
-    # settings.person.name, so anything else measures a different prompt.
+    # Defaults to settings.person.name, which assembly.py passes to the prompt.
     parser.add_argument("--person", default=None)
     args = parser.parse_args()
 

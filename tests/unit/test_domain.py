@@ -26,7 +26,6 @@ class TestPaperMetadata:
         assert "An untitled work" in meta.citation_label
 
     def test_metadata_is_unverified_until_a_human_confirms_it(self) -> None:
-        """Bibliographic answers are only trusted once curated."""
         assert PaperMetadata(title="x").verified is False
 
 
@@ -45,7 +44,6 @@ class TestChunk:
         )
 
     def test_embed_text_prepends_the_context_header(self) -> None:
-        """Without this, the bare sentence names neither topic nor paper."""
         chunk = self._chunk("Paper: Chaos-based SVPWM (2021). Section: Results.")
 
         assert chunk.embed_text.startswith("Paper: Chaos-based SVPWM")
@@ -77,7 +75,6 @@ class TestContextBlock:
 
 class TestSectionKinds:
     def test_references_are_excluded_from_the_index(self) -> None:
-        """References are a fifth of a paper and pure noise for question answering."""
         assert SectionKind.REFERENCES in NON_INDEXED_SECTIONS
         assert SectionKind.METHODS not in NON_INDEXED_SECTIONS
 

@@ -11,11 +11,7 @@ import type { Citation } from "./types";
 const MAX_QUESTION = 1200;
 
 export function ScholarChat({
-  // Same-origin by default, through the route handler in app/api/scholar. The
-  // backend URL and the shared secret live there, on the server; a client
-  // component cannot read either, and `process.env` here would only ever return
-  // undefined for anything not prefixed NEXT_PUBLIC_ — which is exactly what a
-  // secret must never be.
+  // The same-origin proxy in app/api/scholar, which holds the backend URL and secret.
   apiBase = "/api/scholar",
 }: {
   apiBase?: string;
@@ -23,8 +19,7 @@ export function ScholarChat({
   const { turns, corpus, busy, ask, stop } = useScholarChat(apiBase);
   const [draft, setDraft] = useState("");
 
-  // Every source cited so far, deduplicated — a reader wants the reading list
-  // as much as the answers.
+  // Every source cited so far, deduplicated.
   const sources = new Map<string, Citation>();
   for (const turn of turns) {
     for (const citation of turn.answer?.citations ?? []) {
@@ -41,11 +36,7 @@ export function ScholarChat({
     <section className="scholar">
       <header className="scholar-header">
         <h2>Ask about the research</h2>
-        {/* Deliberately no counts and no year range. They were accurate and
-            they aged badly: every published paper made the sentence wrong until
-            someone remembered to re-ingest, and a number that is sometimes stale
-            undermines the one claim this widget makes for itself — that what it
-            says can be checked. The scope is described instead of measured. */}
+        {/* No counts or year range: they go stale whenever a paper is added. */}
         <p className="scholar-scope">
           Research papers, CV and project write-ups. Answers cite the passage
           they came from; if the corpus does not cover something, it says so.
@@ -127,8 +118,7 @@ export function ScholarChat({
         )}
       </form>
 
-      {/* Live region announces completion rather than every stage: stage-level
-          updates make a screen reader unusable. */}
+      {/* Announces completion only; per-stage updates would flood a screen reader. */}
       <p className="visually-hidden" aria-live="polite">
         {busy ? "Working" : turns.at(-1)?.answer ? "Answer ready" : ""}
       </p>

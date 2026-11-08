@@ -40,7 +40,7 @@ class TestGroupIntoSections:
         assert "Torque ripple" in sections[1].blocks[0].text
 
     async def test_content_before_any_heading_is_kept(self) -> None:
-        """On most IEEE papers this is the abstract — among the best text there is."""
+        # In most IEEE papers this is the abstract.
         blocks = [
             prose("This paper proposes a weighting factor optimisation scheme."),
             heading("I. INTRODUCTION"),
@@ -64,7 +64,6 @@ class TestGroupIntoSections:
         assert [s.kind for s in sections] == [SectionKind.RELATED_WORK]
 
     async def test_a_section_of_only_equations_is_dropped(self) -> None:
-        """No prose means nothing retrievable and nothing citable."""
         blocks = [
             heading("III. DERIVATION"),
             equation(r"$$T = \frac{3}{2} p \psi i_q$$"),
@@ -90,7 +89,6 @@ class TestGroupIntoSections:
         assert any(b.kind is ChunkKind.EQUATION for b in sections[0].blocks)
 
     async def test_page_range_spans_the_section(self) -> None:
-        """Citations report a page range, so it must be derived correctly."""
         blocks = [
             heading("VII. RESULTS", page=7),
             prose("First result.", page=7),
@@ -112,7 +110,6 @@ class TestGroupIntoSections:
         assert await group_into_sections([], sectionizer=_sectionizer()) == []
 
     async def test_references_are_grouped_but_left_for_the_caller_to_exclude(self) -> None:
-        """Grouping labels; the pipeline decides what to index."""
         blocks = [
             heading("VII. RESULTS"),
             prose("Findings."),

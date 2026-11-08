@@ -1,15 +1,12 @@
-"""Paths through the adaptive loop that bypass generation.
+"""Paths through the adaptive loop.
 
-Three question classes are answered without ever reaching the generator, and
-each one has a way of losing its answer on the way out. The bibliographic case
-regressed twice — once from a missing guard and once when an unrelated
-``git checkout`` reverted the fix — which is why it is tested rather than only
-commented.
+Bibliographic, out-of-scope and ambiguous questions bypass generation; other questions
+are generated, then verified and checked for grounding.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
@@ -18,11 +15,10 @@ import pytest
 from myscholar.domain.answers import Answer, Refusal
 from myscholar.domain.documents import ContextBlock
 from myscholar.domain.enums import QueryClass, RefusalReason
-from myscholar.generation.answerer import GradedContext
 from myscholar.query.bibliographic import BibliographicAnswer, BibliographicIntent
 from myscholar.query.classifier import Classification
 from myscholar.query.planner import Plan
-from myscholar.reasoning.engine import Engine, LoopState, _refusal_text
+from myscholar.reasoning.engine import Engine, _refusal_text
 from myscholar.reasoning.graph import Budget
 
 
@@ -46,16 +42,7 @@ class _Router:
 
 
 class _Answerer:
-    """Fails loudly if the loop reaches it.
-
-    These paths must not generate: doing so would mean a model was asked to
-    phrase a count it could get wrong, which is the failure the SQL path exists
-    to remove.
-    """
-
-    async def grade(self, *args: Any, **kwargs: Any) -> Any:
-        msg = "grading should not run on a bypassed path"
-        raise AssertionError(msg)
+    """Fails the test if the loop reaches generation."""
 
     async def generate(self, *args: Any, **kwargs: Any) -> str:
         msg = "generation should not run on a bypassed path"
@@ -75,8 +62,6 @@ def _engine(routed: _Routed) -> Engine:
 
 class TestBibliographicPath:
     async def test_the_sql_answer_survives_to_the_caller(self) -> None:
-        """The regression: the terminal node rebuilt the response from the
-        (empty) draft, replacing "4 papers in 2023." with an empty string."""
         routed = _Routed(
             classification=Classification(query_class=QueryClass.BIBLIOGRAPHIC),
             plan=Plan(query_class=QueryClass.BIBLIOGRAPHIC, retrieve=False, use_sql=True),
@@ -91,7 +76,6 @@ class TestBibliographicPath:
         assert response.text == "4 papers in 2023."
 
     async def test_it_is_reported_with_full_confidence(self) -> None:
-        """It came from the database, not from a model's recollection."""
         routed = _Routed(
             classification=Classification(query_class=QueryClass.BIBLIOGRAPHIC),
             plan=Plan(query_class=QueryClass.BIBLIOGRAPHIC, retrieve=False, use_sql=True),
@@ -104,7 +88,7 @@ class TestBibliographicPath:
         assert response.confidence == 1.0
 
     async def test_no_generation_happens(self) -> None:
-        """The _Answerer raises if reached, so reaching it fails the test."""
+        # _Answerer.generate raises if reached.
         routed = _Routed(
             classification=Classification(query_class=QueryClass.BIBLIOGRAPHIC),
             plan=Plan(query_class=QueryClass.BIBLIOGRAPHIC, retrieve=False, use_sql=True),
@@ -138,7 +122,6 @@ class TestCannedPaths:
         assert response.text == "A canned reply."
 
     async def test_the_stream_ends_with_the_response(self) -> None:
-        """The API renders on the response, so it has to arrive last."""
         routed = _Routed(
             classification=Classification(query_class=QueryClass.BIBLIOGRAPHIC),
             plan=Plan(query_class=QueryClass.BIBLIOGRAPHIC, retrieve=False, use_sql=True),
@@ -149,11 +132,6 @@ class TestCannedPaths:
 
         assert isinstance(items[-1], Answer)
         assert items[-1].text == "7 papers."
-
-
-# ---------------------------------------------------------------------------
-# The final attempt must be checked as thoroughly as the first.
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -174,27 +152,13 @@ class _Block:
     source_url: str = "https://doi.org/10.0000/test"
 
 
-@dataclass
-class _Graded:
-    kept: tuple[Any, ...]
-    rejected: tuple[Any, ...] = ()
-    unavailable: bool = False
-
-    @property
-    def sufficient(self) -> bool:
-        return bool(self.kept)
-
-
 class _Generator:
-    """Emits a fixed draft, and calls every claim ungrounded."""
+    """Emits a fixed draft and answers every grounding check with ``grounded``."""
 
     def __init__(self, draft: str, *, grounded: bool = False) -> None:
         self.draft = draft
         self._grounded = grounded
         self.generations = 0
-
-    async def grade(self, question: str, blocks: Any) -> _Graded:
-        return _Graded(kept=tuple(blocks))
 
     async def check_premise(self, *args: Any, **kwargs: Any) -> None:
         return None
@@ -238,14 +202,6 @@ def _loop_engine(answerer: _Generator) -> Engine:
 
 
 class TestTheLastAttemptIsStillChecked:
-    """Found in use, not in testing.
-
-    A three-attempt answer ended with citation issues and a spent regeneration
-    budget, so the loop went straight to the terminal node — making the text
-    actually returned the one output the groundedness check never saw. A
-    fabricated accuracy figure carrying a valid marker survived on that path.
-    """
-
     async def test_grounding_runs_even_when_citations_had_to_be_salvaged(self) -> None:
         answerer = _Generator("Supported claim [C1]. Invented claim [C9].")
         _, trace = await _loop_engine(answerer).answer_with_trace("anything")
@@ -256,7 +212,6 @@ class TestTheLastAttemptIsStillChecked:
         )
 
     async def test_an_unsupported_statement_is_dropped_when_others_survive(self) -> None:
-        """Partial rejection removes the bad sentence and keeps the rest."""
         answerer = _GeneratorPartial(
             "The framework uses an LSTM [C1]. It reached 98.53% accuracy [C1].",
             reject="98.53",
@@ -268,13 +223,8 @@ class TestTheLastAttemptIsStillChecked:
         assert "LSTM" in text, f"the supported statement was lost too: {text!r}"
 
     async def test_a_wholly_rejected_draft_is_kept_and_marked_degraded(self) -> None:
-        """A judgement that would delete everything is treated as suspect.
-
-        Refusing here measured 11.8% over-refusal — the system declining
-        questions the corpus answers. The deterministic checks are the gate:
-        every marker resolves to a retrieved, graded passage, so a draft that
-        passes them stands, flagged rather than discarded.
-        """
+        # Every marker already resolves to a retrieved passage, and refusing here
+        # measured 11.8% over-refusal.
         answerer = _Generator("The framework uses an LSTM [C1].")
         response, _ = await _loop_engine(answerer).answer_with_trace("anything")
 
@@ -283,7 +233,6 @@ class TestTheLastAttemptIsStillChecked:
         assert response.degraded, "lower confidence was not signalled"
 
     async def test_a_grounded_answer_is_returned_untouched(self) -> None:
-        """The guard must not eat good answers."""
         answerer = _Generator("A supported claim [C1].", grounded=True)
         response, _ = await _loop_engine(answerer).answer_with_trace("anything")
 
@@ -292,18 +241,10 @@ class TestTheLastAttemptIsStillChecked:
 
 
 class TestVerificationSeverity:
-    """A missing marker and an invented one both cost their sentence, not the answer.
+    """A missing or invented marker costs its sentence, not the answer.
 
-    They were once treated differently: `uncited` dropped the sentence,
-    `dangling` forced a regeneration, because an invented source is the failure
-    the whole mechanism exists to catch. That distinction only ever chose
-    between dropping and retrying, and retrying is gone — it was measured to
-    cost +0.08 wrong claims per question, twenty points of correct refusal, and
-    fourteen points of attribution precision.
-
-    The guarantee is unchanged and is the one that matters: **a marker pointing
-    at a passage that was never retrieved never reaches the reader.** It leaves
-    with its sentence instead of triggering another attempt.
+    Regenerating instead added 0.08 wrong claims per question and cost 20 points of correct
+    refusal and 14 of attribution precision.
     """
 
     async def test_a_missing_marker_costs_the_sentence_not_the_answer(self) -> None:
@@ -320,7 +261,6 @@ class TestVerificationSeverity:
         )
 
     async def test_an_invented_marker_never_reaches_the_reader(self) -> None:
-        """A citation pointing at nothing is the failure this exists to catch."""
         answerer = _Generator(
             "The framework uses an LSTM [C1]. A claim about the work [C9].",
             grounded=True,
@@ -332,23 +272,16 @@ class TestVerificationSeverity:
         assert "LSTM" in response.text, "the sound sentence was lost with the bad one"
 
     async def test_an_invented_marker_costs_no_regeneration(self) -> None:
-        """The behaviour that changed, pinned so the deletion is not undone by accident."""
         answerer = _Generator("A claim about the work [C9].", grounded=True)
         await _loop_engine(answerer).answer_with_trace("anything")
 
         assert answerer.generations == 1, (
-            f"a dangling citation cost {answerer.generations} generations; retrying was removed"
+            f"a dangling citation cost {answerer.generations} generations, expected 1"
         )
 
 
 class TestRefusalTextMatchesTheReason:
-    """A refusal has to say which of three different things went wrong.
-
-    They shared one sentence — "I don't have anything on that in these papers"
-    — while the loop computed the reason correctly and then dropped it. That
-    turned a stalled model call on the development machine into a confident and
-    false claim about the corpus, on a question the papers answer in detail.
-    """
+    """Each refusal reason has its own wording, so a timeout never claims the corpus is silent."""
 
     def test_running_out_of_time_does_not_claim_the_corpus_is_empty(self) -> None:
         text = _refusal_text(RefusalReason.BUDGET_EXHAUSTED, ("motor drives",))
@@ -375,7 +308,6 @@ class TestRefusalTextMatchesTheReason:
         assert "MPC and fault detection" in text
 
     def test_every_reason_produces_a_distinct_message(self) -> None:
-        """The point of the change, stated as a property rather than by example."""
         texts = {
             _refusal_text(reason, ("a topic",))
             for reason in (
@@ -388,46 +320,8 @@ class TestRefusalTextMatchesTheReason:
         assert len(texts) == 3, f"reasons collapsed onto the same wording: {texts}"
 
 
-class TestTheBestAttemptIsTheOneReturned:
-    """Regeneration is not guaranteed to improve a draft.
-
-    Asked about someone's strengths in machine learning the loop produced 1272
-    characters with four unsupported statements, then 679 with one, then 730
-    with three — and returned the third, because each attempt overwrote the
-    last. The second was the best answer the system ever held and the reader
-    never saw it.
-    """
-
-    def test_the_attempt_that_lost_least_is_kept(self) -> None:
-        state = LoopState(question="q", budget=Budget())
-        # Attempt one: two rejections, recorded as the best so far.
-        state = replace(state, draft="A [C1]. B [C1].", best_draft="", best_ungrounded=())
-        first_rejected = ("A [C1].", "B [C1].")
-        state = replace(state, best_draft=state.draft, best_ungrounded=first_rejected)
-        # Attempt two loses only one, so it displaces the first.
-        second = "C [C1]. D [C1]."
-        state = replace(state, draft=second, best_draft=second, best_ungrounded=("C [C1].",))
-        # Attempt three is worse again and must not displace it.
-        third_rejected = ("E [C1].", "F [C1].", "G [C1].")
-        state = replace(state, draft="E [C1]. F [C1]. G [C1].", ungrounded=third_rejected)
-
-        better = state.best_draft and len(state.best_ungrounded) < len(state.ungrounded)
-
-        assert better, "the worse final attempt would have been returned"
-        assert state.best_draft == second
-
-
 class TestAFailedGenerationRefusesRatherThanReturningNothing:
-    """An outage must produce a refusal, not a blank answer.
-
-    `_generate` catches a dead or rate-limited model and ends the loop without a
-    draft, on the reasoning that an outage is not a programming error. But the
-    edge out of `generate` went unconditionally to `verify`, which verified the
-    empty string and fell through to `done` — so the visitor received an
-    *Answer* whose text was "". Observed against a hosted model that rejected
-    the generation request outright: the trace said "generation unavailable" and
-    the reply was blank.
-    """
+    """A generator outage ends in a refusal, not an Answer with empty text."""
 
     def _block(self) -> ContextBlock:
         return ContextBlock(
@@ -449,12 +343,7 @@ class TestAFailedGenerationRefusesRatherThanReturningNothing:
         )
 
     async def test_a_generator_outage_produces_a_refusal(self) -> None:
-        block = self._block()
-
         class _Failing(_Answerer):
-            async def grade(self, *args: Any, **kwargs: Any) -> Any:
-                return GradedContext(kept=(block,), rejected=())
-
             async def check_premise(self, *args: Any, **kwargs: Any) -> Any:
                 return None
 

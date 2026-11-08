@@ -17,8 +17,7 @@ from myscholar.domain.answers import Answer
 from myscholar.domain.enums import DocumentKind
 
 if TYPE_CHECKING:
-    # Typing only. Adapters stay lazily imported at the call sites so that
-    # `myscholar --help` does not pay for SQLAlchemy.
+    # Adapters are imported lazily at call sites, so `myscholar --help` skips SQLAlchemy.
     from myscholar.adapters.persistence.repository import PostgresStore
 
 app = typer.Typer(
@@ -31,13 +30,7 @@ console = Console()
 
 
 def open_store(settings: Settings, *, echo: bool = False) -> PostgresStore:
-    """The store, opened the same way everywhere.
-
-    Twelve commands built this by hand. Each was one line, which is why it
-    stayed — but it is the line that changes for a connection pool, a read
-    replica or a hosted database, and twelve of them is twelve chances to
-    change eleven.
-    """
+    """Open the Postgres store described by the settings."""
     from myscholar.adapters.persistence.repository import PostgresStore, create_engine
 
     return PostgresStore(create_engine(settings.database.url, echo=echo))
@@ -100,8 +93,7 @@ app.add_typer(db_app, name="db")
 def db_migrate() -> None:
     """Create extensions and tables. Run once, as an admin, before deploying.
 
-    Separate from the API because the role that serves traffic should not be
-    able to alter the schema it reads. Idempotent, so re-running is safe.
+    Kept out of the API so the role that serves traffic needs no DDL rights. Idempotent.
     """
     from sqlalchemy import text
 
@@ -147,15 +139,6 @@ def config() -> None:
         f"embedder=[bold]{container.embedder.model_id}[/bold] "
         f"({container.embedder.dim}d) "
     )
-
-
-if __name__ == "__main__":  # pragma: no cover
-    app()
-
-
-# ---------------------------------------------------------------------------
-# Ingestion
-# ---------------------------------------------------------------------------
 
 
 def _build_pipeline(settings: Any) -> tuple[Any, Any]:
@@ -211,9 +194,9 @@ def ingest_run(
 
         report = await pipeline.run(pdfs, known_metadata=known, force=force)
         await store.create_vector_indexes()
-        return report, store
+        return report
 
-    report, _store = asyncio.run(_run())
+    report = asyncio.run(_run())
 
     console.print(
         f"\n[green]indexed[/green] {report.documents} document(s), "
@@ -248,24 +231,18 @@ def ingest_run(
         )
 
 
-# ---------------------------------------------------------------------------
-# Corpus inspection
-# ---------------------------------------------------------------------------
-
-
 @papers_app.command("list")
 def papers_list() -> None:
     """List indexed documents."""
     settings = load_settings()
 
     async def _list() -> Any:
-
         store = open_store(settings)
         return await store.list_documents(), await store.counts()
 
     rows, counts = asyncio.run(_list())
     if not rows:
-        console.print("[yellow]nothing indexed yet — run: myscholar ingest run[/yellow]")
+        console.print("[yellow]nothing indexed yet; run: myscholar ingest run[/yellow]")
         return
 
     table = Table("Year", "Title", "Venue", "Sec", "Chunks", "OK", box=None)
@@ -283,9 +260,7 @@ def papers_list() -> None:
         f"\n[dim]{counts['documents']} documents, {counts['sections']} sections, "
         f"{counts['chunks']} chunks, {counts['embeddings']} embeddings[/dim]"
     )
-    # Papers only. Site pages and the CV have no publisher record and never
-    # appear in the review file, so counting them here reported five documents
-    # as needing a review that does not exist for them.
+    # Papers only: site pages and the CV have no publisher record to verify against.
     if unverified := sum(1 for r in rows if not r.verified and r.kind == DocumentKind.PAPER):
         console.print(
             f"[yellow]{unverified} paper(s) have unverified metadata.[/yellow] "
@@ -300,7 +275,6 @@ def papers_sections() -> None:
     settings = load_settings()
 
     async def _stats() -> dict[str, int]:
-
         store = open_store(settings)
         return await store.section_kind_counts()
 
@@ -318,8 +292,8 @@ def papers_sections() -> None:
         total = sum(counts.values())
         console.print(
             f"\n[yellow]{other} of {total} sections ({other * 100 // total}%) are "
-            f"unclassified.[/yellow] A high share means the sectionizer needs work — "
-            f"section filtering depends on these."
+            f"unclassified.[/yellow] A high share means the sectionizer needs work, "
+            f"since section filtering depends on these."
         )
 
 
@@ -329,14 +303,11 @@ def papers_import_metadata(
 ) -> None:
     """Apply reviewed bibliographic metadata to the index.
 
-    Updates the document rows, then rebuilds and re-embeds every affected
-    chunk's contextual header — because the header names the paper, so
-    correcting a title changes what those chunks embed as.
-
-    This does not re-extract the PDFs, which is what makes it take seconds
-    rather than the half hour a full `ingest run --force` costs.
+    Updates the document rows, then rebuilds and re-embeds the contextual header of every
+    affected chunk, since the header names the paper. PDFs are not re-extracted, so this
+    takes seconds.
     """
-    from myscholar.ingest.metadata import MetadataFileError, read_review_file
+    from myscholar.ingest.metadata import MetadataFileError, read_review_file, slugify
 
     settings = load_settings()
     target = path or settings.data_dir / "metadata.yaml"
@@ -364,19 +335,12 @@ def papers_import_metadata(
         container = build_container(settings)
         store = open_store(settings)
 
-        from myscholar.ingest.metadata import slugify
-
         updated_documents: dict[Any, Any] = {}
         taken = await store.taken_slugs()
         current = await store.slugs_by_filename()
         for filename, meta in verified.items():
-            # The slug is derived from the title, so correcting a title leaves
-            # a stale identifier behind. Slugs are the public handle for a
-            # document, so they have to follow.
-            #
-            # A document's own current slug is excluded from the collision set:
-            # treating it as taken makes every regeneration look like a clash
-            # and appends a counter to every slug in the corpus.
+            # Slugs derive from titles, so a corrected title gets a new slug. The
+            # document's own slug is not a collision, or every slug would gain a counter.
             own = current.get(filename)
             others = taken - {own} if own else taken
             new_slug = slugify(meta.title, Path(filename).stem, taken=others)
@@ -449,14 +413,8 @@ def papers_import_metadata(
 def papers_check() -> None:
     """Check the index against the invariants a healthy corpus satisfies.
 
-    Ingestion is where this project has gone wrong most often, and every time
-    it went wrong quietly — a text layer repeating every line, a year read off
-    an education date, a title taken from a publisher banner. All produced an
-    index that loaded cleanly and answered plausibly.
-
-    These are invariants rather than accuracy measurements: statements true of
-    every well-formed document here, so a violation means something upstream
-    broke even where nobody can say what the right answer was.
+    A violation means ingestion broke upstream, for example a repeated text layer, a year
+    read off an education date, or a title taken from a publisher banner.
     """
     from myscholar.ingest.health import Severity, check
 
@@ -495,9 +453,7 @@ def papers_show(
 ) -> None:
     """Inspect the chunks stored for one document.
 
-    The Phase 1 review step: check that section labels are right and that
-    contextual headers name the paper and section, since a chunk whose header
-    is wrong is retrievable only by accident.
+    Use it to check section labels and that each contextual header names the paper and section.
     """
     settings = load_settings()
 
@@ -554,13 +510,8 @@ def papers_show(
         console.print(body)
 
 
-# ---------------------------------------------------------------------------
-# Retrieval
-# ---------------------------------------------------------------------------
-
-
 def _build_router(settings: Any) -> Any:
-    """The routed pipeline, assembled exactly as the API assembles it."""
+    """The routed pipeline, assembled as the API assembles it."""
     from myscholar.assembly import build_router
 
     container = build_container(settings)
@@ -569,45 +520,26 @@ def _build_router(settings: Any) -> Any:
 
 
 def _build_retriever(settings: Any) -> Any:
-    from myscholar.retrieval.retriever import HybridRetriever
+    from myscholar.assembly import build_retriever
 
-    container = build_container(settings)
-    store = open_store(settings)
-
-    return HybridRetriever(
-        store=store,
-        embedder=container.embedder,
-        top_k=settings.retrieval.top_k,
-        context_blocks=settings.retrieval.context_blocks,
-        window=settings.retrieval.window,
-        dense_weight=settings.retrieval.dense_weight,
-        lexical_weight=settings.retrieval.lexical_weight,
-        rrf_k=settings.retrieval.rrf_k,
-        max_span_chunks=settings.retrieval.max_span_chunks,
-    )
+    return build_retriever(settings, build_container(settings), open_store(settings))
 
 
 @app.command()
 def search(
     query: Annotated[str, typer.Argument(help="What to search for.")],
-    mode: Annotated[
-        str, typer.Option(help="dense | hybrid | full (adds the cross-encoder).")
-    ] = "full",
+    mode: Annotated[str, typer.Option(help="dense | hybrid (adds the lexical branch).")] = "hybrid",
     limit: Annotated[int, typer.Option(help="How many results to show.")] = 5,
     show_text: Annotated[bool, typer.Option("--text", help="Show passage text.")] = False,
 ) -> None:
-    """Search the corpus. Generation is not involved.
-
-    The three modes are the Phase 2 ablation: dense reproduces the Phase 1
-    baseline, hybrid adds the lexical branch, full adds the cross-encoder.
-    """
+    """Search the corpus. Generation is not involved."""
     from myscholar.retrieval.retriever import RetrievalMode
 
     settings = load_settings()
     try:
         retrieval_mode = RetrievalMode(mode)
     except ValueError:
-        console.print(f"[red]unknown mode {mode!r}; use dense, hybrid or full[/red]")
+        console.print(f"[red]unknown mode {mode!r}; use dense or hybrid[/red]")
         raise typer.Exit(1) from None
 
     async def _run() -> Any:
@@ -646,8 +578,8 @@ def route(
 ) -> None:
     """Show how a question is classified and what the router does with it.
 
-    Retrieval only — no answer is generated. This is the Phase 3 gate: the
-    classification, the plan it produced, and the queries actually searched for.
+    Retrieval only; no answer is generated. Prints the classification, the plan and the
+    queries searched for.
     """
     settings = load_settings()
     result = asyncio.run(_build_router(settings).route(question))
@@ -667,9 +599,9 @@ def route(
 
     routing = []
     if plan.use_sql:
-        routing.append("[bold]SQL over verified metadata[/bold] — no vector search")
+        routing.append("[bold]SQL over verified metadata[/bold]: no vector search")
     elif not plan.retrieve:
-        routing.append("[bold]canned reply[/bold] — no retrieval, no generation")
+        routing.append("[bold]canned reply[/bold]: no retrieval, no generation")
     else:
         routing.append(f"transforms: {', '.join(t.value for t in plan.transforms) or 'none'}")
         routing.append(f"top_k={plan.top_k} context_blocks={plan.context_blocks}")
@@ -715,11 +647,7 @@ def serve(
     port: Annotated[int, typer.Option(help="Port.")] = 8000,
     reload: Annotated[bool, typer.Option("--reload", help="Reload on code changes.")] = False,
 ) -> None:
-    """Run the HTTP API.
-
-    Binds to localhost by default. Exposing it publicly is Phase 7's job, and
-    goes through a proxy that adds the controls a bare port does not have.
-    """
+    """Run the HTTP API. Binds to localhost by default."""
     import uvicorn
 
     console.print(f"[dim]http://{host}:{port}/docs[/dim]")
@@ -733,15 +661,10 @@ def ingest_web(
 ) -> None:
     """Index pages from the portfolio site.
 
-    The CV, projects and roles are not in any paper, so without them the
-    assistant refuses every biographical question — correctly, but unhelpfully.
-
-    Fetched from the live site rather than from its source repository: the
-    published page is what a visitor sees, it needs no credentials, and this
-    can be re-run whenever the site changes.
+    The CV, projects and roles are in no paper, so without them biographical questions are
+    refused. Pages are fetched from the live site; re-run this whenever it changes.
     """
     from myscholar.adapters.extraction.html_extractor import HtmlExtractor
-    from myscholar.domain.enums import DocumentKind
     from myscholar.ingest.metadata import MetadataExtractor
     from myscholar.ingest.pipeline import IngestionPipeline
     from myscholar.ingest.sectionizer import Sectionizer
@@ -764,10 +687,7 @@ def ingest_web(
         )
         await store.create_schema()
 
-        # The CV is filed as a CV rather than as another page. It was already
-        # sectioned with the CV patterns; giving it its own kind lets the
-        # interface say "the CV" instead of folding it into "the site", which
-        # is what a visitor asking about awards or degrees is actually reading.
+        # Filed as its own kind so the interface can name the CV as the source.
         cv = [u for u in targets if u.rstrip("/").endswith("/cv")]
         pages = [u for u in targets if u not in cv]
 
@@ -796,18 +716,11 @@ def ingest_web(
         console.print(f"[red]failed:[/red] {name}: {error[:110]}")
 
 
-# ---------------------------------------------------------------------------
-# Keeping the corpus current
-# ---------------------------------------------------------------------------
-
-
 def _published_dois(url: str, *, timeout: float) -> set[str]:
     """DOIs listed on the publications page.
 
-    The page is scanned for DOI-shaped strings rather than parsed with a
-    selector. That is coarse, but a DOI's shape is distinctive and it survives
-    the page being restyled, which is the whole point of pointing at a page
-    that changes.
+    Scans for DOI-shaped strings instead of using a selector, so restyling the page does
+    not break it.
     """
     import httpx
 
@@ -827,15 +740,11 @@ def sync(
         bool, typer.Option("--ingest/--no-ingest", help="Also index new PDFs and site pages.")
     ] = True,
 ) -> None:
-    """Bring the index back in step with what has actually been published.
+    """Bring the index in step with what has been published.
 
-    Run after adding an accepted paper to the papers directory. Bibliographic
-    fields come from the publisher's own record via the DOI, so nothing needs
-    reviewing by hand — which is not merely less work but measurably more
-    accurate, three of twenty reviewed years having been wrong.
-
-    Defaults to a dry run. A sync that silently rewrites twenty documents is
-    not something to discover after the fact.
+    Run after adding an accepted paper to the papers directory. Bibliographic fields come
+    from the publisher's record via the DOI, so nothing needs reviewing by hand. Defaults
+    to a dry run.
     """
     from myscholar.ingest.sync import plan
 
@@ -845,19 +754,13 @@ def sync(
         console.print("[yellow]registry lookups are disabled (registry.enabled=false)[/yellow]")
         raise typer.Exit(1)
 
-    # Indexing runs first so that a paper added in this run is corrected in
-    # this run. Correcting first left anything new carrying its extracted
-    # metadata until the next sync, which is the state this command exists to
-    # prevent.
+    # Index first, so a paper added in this run is also corrected in this run.
     if ingest_new:
         console.print("[bold]indexing new sources[/bold]")
         ingest_run()
         ingest_web()
-        # Re-ingesting replaces the document row, and the summary goes with it.
-        # Left to a separate command that nobody remembers to run, the corpus
-        # sits half-summarised and the un-summarised documents are invisible to
-        # document selection — silently, which is how the CV and every site
-        # page dropped out of scope after a routine page re-ingest.
+        # Re-ingesting drops a document's summary, and a document without one is
+        # invisible to document selection.
         ingest_summarise()
         console.print()
 
@@ -875,11 +778,10 @@ def sync(
             published = _published_dois(
                 settings.registry.publications_url, timeout=settings.registry.timeout_seconds
             )
-        except Exception as exc:  # noqa: BLE001 - the page is advisory, not required
+        except Exception as exc:  # noqa: BLE001 - the page is advisory
             console.print(f"[yellow]could not read the publications page:[/yellow] {exc}")
 
-        # Retention runs here rather than as a command of its own: a policy
-        # nobody remembers to run is not a policy.
+        # Conversation retention runs with every sync, so it needs no schedule of its own.
         if pruned := await store.prune_conversations():
             console.print(f"[dim]pruned {pruned} conversation turn(s) older than 30 days[/dim]")
 
@@ -907,9 +809,7 @@ def sync(
     if result.corrections:
         from collections import Counter
 
-        # Summarised by field first. A first run rewrites author formatting on
-        # nearly every document, and three genuinely wrong years are invisible
-        # inside twenty paragraphs of diff.
+        # A per-field tally first, so a few wrong years stand out among author reformatting.
         tally = Counter(c.field for correction in result.corrections for c in correction.changes)
         console.print(
             f"\n[bold]{len(result.corrections)} document(s) disagree with the publisher "
@@ -917,8 +817,7 @@ def sync(
             + ", ".join(f"{field} x{count}" for field, count in tally.most_common())
             + ")[/dim]"
         )
-        # Years and titles first: they change what the assistant answers,
-        # whereas a reformatted author list changes only how it reads.
+        # Years and titles first, since they change what the assistant answers.
         order = {"year": 0, "title": 1, "venue": 2, "authors": 3, "cited_by": 4}
         for correction in sorted(
             result.corrections, key=lambda c: min(order.get(x.field, 9) for x in c.changes)
@@ -940,7 +839,7 @@ def sync(
     if result.missing_from_index:
         console.print(
             f"\n[yellow]{len(result.missing_from_index)} paper(s) on the site are not "
-            f"indexed[/yellow] — add the PDF to {settings.papers_dir}/ and re-run:"
+            f"indexed.[/yellow] Add the PDF to {settings.papers_dir}/ and re-run:"
         )
         for doi in result.missing_from_index:
             console.print(f"  https://doi.org/{doi}")
@@ -955,7 +854,7 @@ def sync(
     if apply:
         console.print(f"\n[green]applied[/green] {applied} correction(s)")
     elif result.corrections:
-        console.print("\n[dim]dry run — re-run with --apply to write these[/dim]")
+        console.print("\n[dim]dry run; re-run with --apply to write these[/dim]")
 
 
 @ingest_app.command("summarise")
@@ -964,14 +863,8 @@ def ingest_summarise(
 ) -> None:
     """Describe each paper in the words a reader would use.
 
-    Chunk retrieval answers "which passage says X"; it cannot answer "which
-    paper is about X". Six papers here apply machine learning and none of them
-    says so — they say LFBLSTM, AFL-1DCNN, gradient-boosted meta-learner — so
-    the one document that *is* about learning algorithms won every slot and the
-    applied work was never retrieved.
-
-    A summary names the techniques twice, specifically and ordinarily, which is
-    what lets a document be found for what it is.
+    Document selection searches these summaries to find which paper is about a topic. Each
+    names its techniques both specifically (LFBLSTM) and in general terms (machine learning).
     """
     from myscholar.ingest.summaries import Summariser
 
@@ -1007,7 +900,7 @@ def ingest_summarise(
                 written.append((document_id, summary, []))
                 if is_review:
                     reviews.append(document_id)
-                    console.print("        [yellow]review — its methods are not his[/yellow]")
+                    console.print("        [yellow]review: its methods are not his[/yellow]")
 
         if written:
             vectors = await summariser.embed([s for _, s, _ in written])
@@ -1021,3 +914,7 @@ def ingest_summarise(
 
     written, total = asyncio.run(_run())
     console.print(f"\n[green]summarised[/green] {written} document(s); {total} in total")
+
+
+if __name__ == "__main__":  # pragma: no cover
+    app()

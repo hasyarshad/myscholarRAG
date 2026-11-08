@@ -10,7 +10,6 @@ from tests.conftest import make_settings
 
 
 def test_defaults_select_fakes() -> None:
-    """Out of the box the system needs no models, no GPU and no network."""
     settings = make_settings()
 
     assert settings.llm.provider is LLMProvider.FAKE
@@ -31,11 +30,6 @@ def test_nested_env_vars_override(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_hosted_provider_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Selecting the hosted provider without a key fails at startup, not at first request.
-
-    A configuration error surfacing on the first visitor question rather than at
-    boot is the kind of thing that only shows up in production.
-    """
     monkeypatch.setenv("MYSCHOLAR_LLM__PROVIDER", "openai_compatible")
     monkeypatch.delenv("MYSCHOLAR_LLM__API_KEY", raising=False)
 
@@ -54,7 +48,6 @@ def test_hosted_provider_accepts_api_key(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_api_key_is_not_printed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Secrets must not leak into logs or tracebacks via repr."""
     monkeypatch.setenv("MYSCHOLAR_LLM__PROVIDER", "openai_compatible")
     monkeypatch.setenv("MYSCHOLAR_LLM__API_KEY", "gsk-super-secret")
 
@@ -62,20 +55,17 @@ def test_api_key_is_not_printed(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_the_suite_is_isolated_from_a_developers_env_file() -> None:
-    """A local .env must never decide whether the tests pass.
-
-    Found the hard way: filling in MYSCHOLAR_API__SHARED_SECRET for a real
-    deployment made seventeen unrelated tests fail, because `load_settings()`
-    reads `.env` and the API then demanded a secret the tests do not send. The
-    suite had been quietly coupled to one machine's configuration.
-    """
     import pathlib
     import re
 
     offenders = [
         path.name
         for path in pathlib.Path("tests").rglob("*.py")
-        if re.search(r"^from myscholar\.config import .*load_settings", path.read_text(), re.M)
+        if re.search(
+            r"^from myscholar\.config import .*load_settings",
+            path.read_text(encoding="utf-8"),
+            re.M,
+        )
     ]
     assert offenders == [], (
         f"{offenders} call load_settings(), which reads .env. "

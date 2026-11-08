@@ -1,28 +1,18 @@
-"""Compare three pipelines end to end.
+"""Compare pipelines end to end on the adversarial question set.
 
     uv run python scripts/eval_generation.py
 
-The comparison the whole project exists to make, and the one almost no
-portfolio RAG can produce:
+  naive      dense-only retrieval, one model call, no citations, no verification
+  retrieved  the same one-shot generation over hybrid, expanded context
+  adaptive   the full system: routing, citation verification, grounding,
+             corrective retrieval and refusal
 
-  naive      dense-only retrieval, one model call,
-             no citations, no verification, no way to decline
-  retrieved  the same one-shot generation, fed hybrid + expanded
-             context. Isolates what retrieval alone is worth.
-  adaptive   the full system — routing, grading, citation verification,
-             grounding, corrective retry, refusal
-
-Same corpus, same embedder, same generator across all three. The only variable
-is pipeline design, which is what makes any difference attributable.
-
-Three families of number, and none of them means much alone:
+The ablation rungs in myscholar.evaluation.ablation can be selected with --configs.
+All configurations share the corpus, embedder and generator.
 
   unsupported claims  factual sentences the retrieved context does not support
-  correct refusal     declines the questions the corpus genuinely cannot answer
+  correct refusal     declines the questions the corpus cannot answer
   over-refusal        declines questions it could have answered
-
-Refusing everything scores perfectly on the second, which is why the third is
-measured on a control group and reported beside it.
 """
 
 from __future__ import annotations
@@ -72,12 +62,8 @@ from myscholar.retrieval.retriever import HybridRetriever, RetrievalMode  # noqa
 TEST_SET = Path("tests/eval/adversarial_set.yaml")
 RESULTS = Path("results")
 
-#: Longest a single question may take before it is abandoned.
-#:
-#: Generous — the adaptive loop's own deadline is 90s and three regenerations
-#: fit inside it — but finite. A run of this length must not be able to stall
-#: invisibly on one wedged request, which is what a silent 20-minute hang
-#: during the first full run looked like from outside.
+#: Longest a single question may take before it is abandoned. Well above the
+#: loop's own 90s deadline, but stops one wedged request stalling the whole run.
 QUESTION_TIMEOUT = 300.0
 
 #: Kinds where declining is the correct answer.
@@ -99,21 +85,15 @@ class Outcome:
     dangling: int = 0
     markers: int = 0
 
-    #: Distinct source documents the generator was given, after grading.
-    #:
-    #: The denominator for coverage, and deliberately the *graded* blocks
-    #: rather than everything retrieved: retrieval returns a fixed number
-    #: whether or not that many sources are relevant, so dividing by it would
-    #: punish a narrow question for having a correct narrow answer.
+    #: Distinct source documents in the blocks the generator was given; the
+    #: denominator for coverage.
     papers_available: int = 0
 
     #: Distinct source documents the answer actually cites.
     papers_cited: int = 0
 
     path: str = ""
-    """Nodes visited, for the adaptive configuration. The distribution shows
-    how often the loop corrects itself, which is the behaviour it exists for
-    and is invisible in any of the rates."""
+    """Nodes visited, for the adaptive configuration and the ablation rungs."""
 
     @property
     def should_refuse(self) -> bool:
@@ -121,13 +101,10 @@ class Outcome:
 
     @property
     def correct(self) -> bool:
-        """Refusing is not the only right answer to a false premise.
+        """Declining or contradicting the premise is correct on a must-refuse question.
 
-        On a question that should be declined, either declining or explicitly
-        contradicting the premise counts — the second is the better answer. On
-        an answerable question, only declining is wrong; contradiction is
-        irrelevant there and deliberately not consulted, so that an answer
-        which happens to say "instead" is never scored as a refusal.
+        On an answerable question only declining is wrong. Contradiction is not
+        consulted there, so an answer that happens to say "instead" is not a refusal.
         """
         if self.should_refuse:
             return self.declined or self.contradicted
@@ -144,13 +121,7 @@ class ConfigResult:
 
     @property
     def correct_refusal(self) -> float | None:
-        """Did not endorse the premise — by declining or by contradicting it.
-
-        Counting only refusals contradicted the per-kind table in the same
-        report, which already scored a correction as correct. Two definitions
-        of the same word in one document is how a reader stops trusting all of
-        them.
-        """
+        """Share of must-refuse questions declined or contradicted, as in the per-kind table."""
         cases = self._subset(refusing=True)
         return None if not cases else sum(o.correct for o in cases) / len(cases)
 
@@ -161,11 +132,7 @@ class ConfigResult:
 
     @property
     def unsupported_rate(self) -> float | None:
-        """Across every answer that was actually given.
-
-        Refusals contribute nothing: they contain no claims, so counting them
-        would let a system improve this number by declining more.
-        """
+        """Across answers actually given. Refusals contain no claims and add nothing."""
         judged = sum(o.claims_judged for o in self.outcomes)
         return None if not judged else sum(o.claims_unsupported for o in self.outcomes) / judged
 
@@ -180,12 +147,7 @@ class ConfigResult:
 
 
 async def _build(settings: Any) -> tuple[Any, HybridRetriever, PostgresStore, Engine, Any]:
-    """Assembled through myscholar.assembly, exactly as the API assembles it.
-
-    This used to duplicate the wiring, which meant the evaluation could measure
-    an arrangement that never shipped — and would report nothing unusual while
-    doing it.
-    """
+    """Assembled through myscholar.assembly, exactly as the API assembles it."""
     container = build_container(settings)
     store = PostgresStore(create_engine(settings.database.url))
     documents = await store.list_documents()
@@ -202,13 +164,10 @@ async def _score_all(
     judge: FaithfulnessJudge,
     pending: list[tuple[Outcome, str, tuple[ContextBlock, ...]]],
 ) -> None:
-    """Judge every answer once the generating is finished.
+    """Judge every answer once generation is finished.
 
-    Deliberately not interleaved. Generation uses the 14b model and judging the
-    4b one, and alternating them makes Ollama evict and reload a model between
-    every question — which dominated the runtime of the first full run. Doing
-    all the generating, then all the judging, cuts the swaps from two per
-    question to two per configuration.
+    Not interleaved: alternating the generator and the judge model makes Ollama
+    swap models on every question.
     """
     print(f"  judging {len(pending)} answer(s) ...", flush=True)
     for outcome, text, blocks in pending:
@@ -263,9 +222,7 @@ async def run_adaptive(
     judge: FaithfulnessJudge,
     name: str = "adaptive",
 ) -> ConfigResult:
-    """Any pipeline exposing ``answer_with_context``: the engine, or one rung
-    of the ablation ladder. They are measured by identical code so a difference
-    between rows cannot come from the harness."""
+    """Run any pipeline exposing ``answer_with_context``: the engine or an ablation rung."""
     result = ConfigResult(name=name)
     pending: list[tuple[Outcome, str, tuple[ContextBlock, ...]]] = []
     for index, case in enumerate(cases, 1):
@@ -276,8 +233,7 @@ async def run_adaptive(
         except Exception as exc:  # noqa: BLE001 - one bad question must not end the run
             print(f"  [{name}] {index}/{len(cases)} FAILED: {type(exc).__name__}", flush=True)
             continue
-        # A structural refusal and a paragraph that says "the excerpts do not
-        # mention this" are the same outcome for a reader, so both count.
+        # A Refusal and a paragraph saying "the excerpts do not mention this" both count.
         declined = isinstance(response, Refusal) or declines(response.text)
 
         markers = dangling = papers_cited = 0
@@ -322,20 +278,18 @@ def report(results: list[ConfigResult], cases: list[dict[str, str]]) -> str:
     lines = [
         "# Pipeline comparison",
         "",
-        f"{len(cases)} questions, three configurations, one corpus.",
+        f"{len(cases)} questions, {len(results)} configuration"
+        f"{'' if len(results) == 1 else 's'}, one corpus.",
         "",
-        "Same index, same embedder, same generator throughout. The only "
-        "variable is pipeline design, so every difference below is "
-        "attributable to it rather than to a bigger model or a cleaner corpus.",
+        "Every configuration uses the same index, embedder and generator, so the "
+        "differences below come from pipeline design.",
         "",
         "| Configuration | unsupported claims | claims/question | correct refusal "
         "| over-refusal | citation validity | mean latency |",
         "|---|---|---|---|---|---|---|",
     ]
     for r in results:
-        # Claims per question is here because an unsupported-claim *rate*
-        # rewards saying less. Two configurations at the same rate are not
-        # equivalent if one of them makes a third as many statements.
+        # Claims per question, because an unsupported-claim rate rewards saying less.
         judged = sum(o.claims_judged for o in r.outcomes)
         per_question = judged / max(len(r.outcomes), 1)
         lines.append(
@@ -346,14 +300,12 @@ def report(results: list[ConfigResult], cases: list[dict[str, str]]) -> str:
 
     lines += [
         "",
-        "**unsupported claims** — factual sentences the retrieved passages do "
-        "not support, judged one at a time. Refusals contain no claims and so "
-        "contribute nothing, which stops a system improving the number by "
-        "declining more.",
+        "**unsupported claims**: factual sentences the retrieved passages do not "
+        "support, judged one at a time. Refusals contain no claims, so declining "
+        "more cannot improve the rate.",
         "",
-        "**correct refusal** paired with **over-refusal** — either alone is a "
-        "bias rather than a measurement. A system that refuses everything "
-        "scores 100% on the first.",
+        "**correct refusal** and **over-refusal** must be read together: a system "
+        "that refuses everything scores 100% on correct refusal.",
         "",
         "## Correct behaviour by question kind",
         "",
@@ -369,26 +321,17 @@ def report(results: list[ConfigResult], cases: list[dict[str, str]]) -> str:
             )
         lines.append(f"| {r.name} | " + " | ".join(cells) + " |")
 
-    # --- coverage ------------------------------------------------------------
-    #
-    # Deliberately descriptive. There is no target here and no pass mark,
-    # because the obvious target is wrong: a narrow factual question deserves a
-    # narrow answer, and a metric rewarding breadth everywhere would reward
-    # padding — the exact failure the citation checks exist to prevent.
-    #
-    # It exists because the complaint that recurs in use — "it cited one paper
-    # when six were relevant" — is invisible to every other number here. Those
-    # answers refuse nothing, support every claim and cite validly, so they
-    # score as correct. Something unmeasured cannot be argued about honestly.
+    # Coverage is descriptive, with no target: a narrow question deserves a narrow
+    # answer. It catches "cited one paper when six were relevant", which every
+    # other number here scores as correct.
     lines += [
         "",
-        "## Coverage — did the answer use what it was given",
+        "## Coverage",
         "",
-        "Distinct source documents cited, against the number the generator held",
-        "after grading. Reported per question kind because breadth is only a",
-        "virtue where the corpus has several relevant sources: a question about",
-        "one measurement should cite one paper, and a question about the span of",
-        "someone's work should not.",
+        "Distinct source documents cited, against the number the generator held.",
+        "Reported per question kind, because the right breadth depends on the",
+        "question: one about a single measurement should cite one paper, and one",
+        "about the span of someone's work should cite several.",
         "",
         "| Configuration | kind | n | mean available | mean cited | coverage |",
         "|---|---|---|---|---|---|",
@@ -439,8 +382,7 @@ def report(results: list[ConfigResult], cases: list[dict[str, str]]) -> str:
         lines += [
             "## Paths through the adaptive loop",
             "",
-            "Each retry is the system rejecting its own draft. That is the "
-            "behaviour the loop exists for and it does not appear in any rate.",
+            "How many questions took each path through the pipeline.",
             "",
             "| count | path |",
             "|---|---|",
@@ -500,15 +442,7 @@ async def main() -> None:
         results.append(
             await run_naive(
                 cases,
-                # HYBRID, not FULL. This configuration is "the same naive
-                # generator, given better retrieval", and until the reranker was
-                # removed the best retrieval available was dense + lexical +
-                # cross-encoder. FULL went with it, and this line did not, so
-                # the script raised AttributeError partway through every run —
-                # after the naive configuration had finished, which is why it
-                # looked like a completed run that had merely written stale
-                # numbers. Hybrid is now the strongest retrieval there is, so it
-                # is what the contrast should use.
+                # The naive generator given the strongest retrieval available.
                 pipeline=NaivePipeline(
                     retriever=retriever, model=container.generator, mode=RetrievalMode.HYBRID
                 ),
@@ -516,9 +450,7 @@ async def main() -> None:
                 name="retrieved",
             )
         )
-    # The ablation ladder. Each rung adds exactly one mechanism to the one
-    # below it, and every rung is measured by the same runner as `adaptive`, so
-    # a difference between rows cannot come from the harness.
+    # Each rung adds one mechanism to the one below; all use the same runner as `adaptive`.
     answerer = build_answerer(settings, container)
     for rung in LADDER:
         if rung.name in wanted:
@@ -559,14 +491,7 @@ async def main() -> None:
                     "correct": o.correct,
                     "claims_judged": o.claims_judged,
                     "claims_unsupported": o.claims_unsupported,
-                    # Written because a stored answer alone cannot distinguish a
-                    # refusal the system reasoned its way to from one it fell
-                    # into by running out of wall clock. A local model swap was
-                    # stalling one call per question past the 90s deadline, and
-                    # the graph's budget_exhausted edge returned "I don't have
-                    # anything on that in these papers" for questions the corpus
-                    # answers. Nothing in the stored results showed it; the
-                    # timings did, as soon as anything recorded them.
+                    # Distinguishes a reasoned refusal from one caused by the deadline.
                     "seconds": o.seconds,
                     "papers_available": o.papers_available,
                     "papers_cited": o.papers_cited,

@@ -1,8 +1,7 @@
 """The document extraction interface.
 
-Turns a PDF into structured text: a heading hierarchy, blocks of prose, tables
-and equations, each tagged with the page it came from. Page provenance matters
-because citations resolve to a page number.
+Turns a document into headings, prose, tables and equations, each tagged with its
+page, because citations resolve to page numbers.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ class ExtractedBlock:
     text: str
     page: int
     heading: str | None = None
-    """Set when this block *is* a heading, rather than content beneath one."""
+    """Set only when this block is itself a heading."""
 
     @property
     def is_heading(self) -> bool:
@@ -40,14 +39,12 @@ class ExtractedDocument:
     page_count: int
     blocks: tuple[ExtractedBlock, ...]
     first_page_text: str
-    """Used for bibliographic metadata extraction — authors, venue, DOI."""
+    """Used for bibliographic metadata extraction (authors, venue, DOI)."""
 
     title: str = ""
-    """The document's own title, as the extractor labelled it.
+    """The document's title, kept out of the block stream.
 
-    Captured separately rather than left in the block stream: treating it as a
-    section heading produces a section spanning the abstract and author block,
-    headed by the entire paper title.
+    As a heading it would open a section spanning the abstract and author block.
     """
 
     warnings: tuple[str, ...] = field(default_factory=tuple)
@@ -62,9 +59,7 @@ class DocumentExtractor(ABC):
     def extract(self, source: Path | str) -> ExtractedDocument:
         """Parse a document from a file path or a URL.
 
-        The union is deliberate. Squeezing a URL into a ``Path`` looks tidy and
-        silently corrupts it — ``Path("https://x.com/y")`` normalises the double
-        slash away and produces ``https:/x.com/y``.
+        A URL stays a string: ``Path("https://x.com/y")`` collapses the double slash.
         """
 
 

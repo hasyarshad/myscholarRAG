@@ -1,14 +1,6 @@
-"""Measure query classification accuracy.
+"""Measure query classification accuracy, with the most common error per class.
 
-    uv run python scripts/eval_routing.py
-
-Routing is only worth doing if the classifier is right. A confidently wrong
-route is worse than no routing at all — it sends a whole category of question
-down a pipeline built for something else, so the failure is systematic.
-
-The confusion breakdown matters more than the headline: which classes get
-mistaken for which tells you whether the prompt needs a better description or
-the taxonomy needs a different boundary.
+uv run python scripts/eval_routing.py
 """
 
 from __future__ import annotations
@@ -31,14 +23,9 @@ from myscholar.config import load_settings  # noqa: E402
 from myscholar.container import build_container  # noqa: E402
 from myscholar.query.classifier import QueryClassifier  # noqa: E402
 
-#: Content classes. A question expected to be `content` may be classified as
-#: any of them.
-#:
-#: Needed because out_of_scope was removed from the classifier's schema. A
-#: general-knowledge question now takes the content path deliberately, is
-#: searched, and is refused by the grader on the evidence — so which content
-#: class it lands in carries no information and pinning one would test the
-#: model's mood.
+#: A question expected as `content` may land in any of these. The model cannot
+#: choose out_of_scope, so a general-knowledge question takes a content path and
+#: is refused later on the evidence; which content class it gets is arbitrary.
 CONTENT_CLASSES = frozenset(
     {"single_paper_factual", "cross_paper_synthesis", "methodological", "biographical"}
 )
@@ -53,9 +40,8 @@ def _matches(expected: str, actual: str) -> bool:
 TEST_SET = Path("tests/eval/routing_set.yaml")
 RESULTS = Path("results")
 
-#: Classes where a misroute causes confident fabrication or wasted generation,
-#: rather than merely a suboptimal search. Reported separately because their
-#: cost is different in kind, not just degree.
+#: Classes where a misroute causes fabrication or wasted generation, not just a
+#: worse search.
 CRITICAL = {"bibliographic", "out_of_scope"}
 
 
@@ -65,9 +51,8 @@ async def main() -> int:
     container = build_container(settings)
     store = PostgresStore(create_engine(settings.database.url))
 
-    # `person_name` must match what assembly.py serves. The prompt interpolates
-    # it four times, and classifications change with it — omitting it here would
-    # measure a prompt the system never runs.
+    # Must match assembly.py: the prompt interpolates the name and classifications
+    # change with it.
     classifier = QueryClassifier(
         container.utility,
         titles=[d.title for d in await store.list_documents()],
@@ -124,8 +109,8 @@ async def main() -> int:
         f"{len(rows)} questions. Accuracy **{correct / len(rows):.1%}**, "
         f"critical classes **{critical_correct / len(critical):.1%}**.",
         "",
-        "Critical classes are bibliographic and out-of-scope: a misroute there causes",
-        "confident fabrication or wasted generation, rather than merely a worse search.",
+        "Critical classes are bibliographic and out-of-scope. A misroute there causes",
+        "fabrication or wasted generation; in other classes it only worsens the search.",
         "",
         "| Expected class | n | correct | most common error |",
         "|---|---|---|---|",

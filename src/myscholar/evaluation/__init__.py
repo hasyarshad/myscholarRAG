@@ -1,1 +1,1 @@
-"""Measuring the system against the thing it replaced."""
+"""Evaluation: the naive baseline, the ablation ladder and the faithfulness judge."""

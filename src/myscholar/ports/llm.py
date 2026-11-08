@@ -1,7 +1,6 @@
 """The language model interface.
 
-Implemented by Ollama (local GPU), any OpenAI-compatible hosted endpoint, and a
-fake used in tests. Nothing above this layer knows which is in play.
+Implemented by Ollama, any OpenAI-compatible endpoint, and a fake used in tests.
 """
 
 from __future__ import annotations
@@ -18,28 +17,14 @@ T = TypeVar("T", bound=BaseModel)
 
 
 class ModelOutput(BaseModel):
-    """A schema a language model fills in, tolerant of its own stated bounds.
+    """A schema a language model fills in, coerced to its declared bounds.
 
-    Constrained decoding guarantees the *shape* of a response — the fields, their
-    types, the allowed enum members — and nothing more. It does not enforce
-    `maxLength` or `maxItems`, and the backends disagree about how much they even
-    try: Ollama's local grammar ignores them, and so does every hosted
-    OpenAI-compatible endpoint measured here, Google's included.
-
-    That matters because every caller of `structured` treats a validation error
-    as an outage and degrades quietly. A model writing 260 characters into a
-    200-character field therefore does not raise anything a reader would notice
-    — it makes the classifier fall back to one class for every question, or a
-    query transform silently stop running, or the groundedness check report
-    "unavailable" and pass every statement through. All three were observed.
-
-    So bounds declared on these schemas are treated as *limits to enforce*
-    rather than *conditions to assert*: over-long strings are truncated,
-    over-full lists are trimmed, out-of-range numbers are clamped. The bound
-    still holds downstream; it just stops being a way to lose the whole answer.
-
-    Inherited rather than repeated per field, because the failure is systemic —
-    nine schemas across query, generation and ingest carry such bounds.
+    Constrained decoding enforces a response's shape but not ``maxLength`` or
+    ``maxItems``: Ollama and the hosted OpenAI-compatible endpoints tested,
+    Google's included, ignore them. Callers of ``structured`` treat a validation
+    error as a failure and fall back, so one over-long field would silently
+    disable a step. Long strings are therefore truncated, long lists trimmed and
+    out-of-range numbers clamped.
     """
 
     @model_validator(mode="before")
@@ -79,12 +64,10 @@ class Message:
 
 
 class ChatModel(ABC):
-    """A chat-completion backend.
+    """A chat-completion backend: free text, streamed text and schema-constrained output.
 
-    Three methods, deliberately: free text, streamed text, and schema-constrained
-    structured output. The pipeline uses ``structured`` for every classification
-    and grading decision, because parsing prose for a verdict is a reliability
-    problem you do not need.
+    The pipeline uses ``structured`` for classification and verification
+    decisions, so no verdict is parsed out of prose.
     """
 
     @property
@@ -122,6 +105,5 @@ class ChatModel(ABC):
     ) -> T:
         """Generate a response conforming to ``schema``.
 
-        Implementations should constrain decoding to the schema where the
-        backend supports it, rather than parsing free text and hoping.
+        Implementations constrain decoding to the schema where the backend supports it.
         """

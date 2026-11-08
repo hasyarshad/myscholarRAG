@@ -58,7 +58,6 @@ class TestHashEmbedder:
         assert len(await embedder.embed_query("anything")) == embedder.dim
 
     async def test_indexing_and_querying_agree(self) -> None:
-        """The same text must embed identically through both methods."""
         embedder = HashEmbedder()
         text = "model predictive control of induction motors"
 
@@ -68,7 +67,6 @@ class TestHashEmbedder:
         assert document_vector == query_vector
 
     async def test_empty_text_stays_normalised(self) -> None:
-        """A zero vector would make cosine distance undefined."""
         embedder = HashEmbedder()
 
         vector = await embedder.embed_query("")
@@ -111,7 +109,6 @@ class TestInMemoryVectorStore:
         return store, embedder, section
 
     async def test_lexical_search_finds_rare_identifiers(self) -> None:
-        """The case dense search is worst at, and why hybrid retrieval exists."""
         store, _, _ = await self._populated()
 
         hits = await store.search_lexical("NSGA-II", limit=5)

@@ -1,9 +1,4 @@
-"""Parent-span expansion.
-
-The property tests here are the point. Merging is where a subtle error is
-invisible downstream: a wrong span reads perfectly well and simply is not what
-was cited.
-"""
+"""Parent-span expansion, with property tests for the span invariants."""
 
 from __future__ import annotations
 
@@ -60,8 +55,7 @@ class TestMergeWindows:
         assert (spans[0].start, spans[0].end) == (1, 7)
 
     def test_touching_windows_merge(self) -> None:
-        """Chunks 0-2 and 3-5 are contiguous text; two blocks would misrepresent
-        one passage as two independent pieces of evidence."""
+        # Windows 0-2 and 3-5 are contiguous text.
         spans = merge_windows([hit(1), hit(4)], window=1)
 
         assert len(spans) == 1
@@ -72,9 +66,6 @@ class TestMergeWindows:
         assert len(spans) == 2
 
     def test_hits_in_different_sections_never_merge(self) -> None:
-        """The defect in the previous implementation: it expanded by global row
-        id with no filter, so a span could contain two documents and cite them
-        as one source."""
         spans = merge_windows([hit(5, section=SECTION_A), hit(5, section=SECTION_B)], window=3)
 
         assert len(spans) == 2
@@ -92,7 +83,6 @@ class TestMergeWindows:
         assert len(spans) == 2
 
     def test_spans_are_ordered_by_score(self) -> None:
-        """The generator should see the strongest evidence first."""
         spans = merge_windows([hit(0, score=0.2), hit(20, score=0.9)], window=1)
 
         assert spans[0].max_score == 0.9
@@ -115,7 +105,6 @@ class TestMergeWindows:
 
 class TestPromotion:
     def test_a_span_covering_most_of_a_section_takes_all_of_it(self) -> None:
-        """Half a Methods section reads worse than all of it, at similar cost."""
         [span] = merge_windows(
             [hit(4)], window=2, section_lengths={SECTION_A: 8}, promote_ratio=0.5, max_chunks=20
         )
@@ -184,8 +173,6 @@ class TestMergeProperties:
     def test_spans_within_a_section_never_overlap(
         self, ordinals: list[int], window: int, sections: int
     ) -> None:
-        """Overlapping spans would show the generator the same text twice and
-        let it cite one passage as two corroborating sources."""
         spans = merge_windows(self._hits(ordinals, sections), window=window, max_chunks=1000)
 
         by_section: dict[UUID, list[tuple[int, int]]] = {}

@@ -1,31 +1,13 @@
 """Database schema.
 
-Five tables rather than the single flat one the previous code used. The shape
-is driven by three requirements:
-
-**Bibliographic questions must be answered by SQL.** "How many papers in 2023?"
-is a ``COUNT`` over ``documents``, not something a language model recalls. That
-needs real columns, human-verified.
-
-**Embeddings are keyed by ``(chunk_id, model_id)``.** The previous code indexed
-with one model and queried with another — arithmetically valid, semantically
-meaningless, and completely silent. Recording which model produced each vector
-makes the mismatch detectable: the configured embedder is checked against the
-index at startup, so a mismatch is a refusal to boot rather than silently
-meaningless results.
-
-Exactly one model should be indexed at a time. The key makes a second one
-*storable*, which is not the same as searchable — the HNSW index covers the
-whole column and Postgres applies ``WHERE model_id`` only after the approximate
-scan, so a second model halves the effective search breadth of the first.
-Measured, that cost 0.07 MRR with no error anywhere. ``myscholar papers check``
-fails when more than one is present.
-
-**Chunks belong to sections, and ``(section_id, ordinal_in_section)`` is
-unique.** Parent expansion fetches contiguous ordinal ranges within one
-section, so a span cannot bleed across sections or documents. The previous
-implementation expanded by global row id and dropped the filename filter, which
-allowed exactly that.
+- Bibliographic questions ("How many papers in 2023?") are answered by SQL over
+  verified ``documents`` columns.
+- Embeddings are keyed by ``(chunk_id, model_id)``, and the configured embedder is
+  checked against the index at startup. Only one model should be indexed: the HNSW
+  index covers the whole column, and a second model's vectors cost 0.07 MRR.
+  ``myscholar papers check`` fails when more than one is present.
+- ``(section_id, ordinal_in_section)`` is unique, so parent expansion fetches
+  contiguous ranges within one section and never crosses sections or documents.
 """
 
 from __future__ import annotations
@@ -49,7 +31,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-#: Must match the configured embedder. Enforced at startup, not assumed.
+#: Must match the configured embedder; checked at startup.
 EMBEDDING_DIM = 768
 
 
@@ -71,35 +53,24 @@ class Document(Base):
     doi: Mapped[str | None] = mapped_column(String(200))
     url: Mapped[str | None] = mapped_column(Text)
 
-    #: Citations recorded by the registry. NULL when unknown, which is a
-    #: different claim from zero and is reported differently.
+    #: Citations recorded by the registry; NULL when unknown, which is distinct from zero.
     cited_by: Mapped[int | None] = mapped_column(Integer, default=None)
 
-    #: True when the paper surveys other researchers' work rather than
-    #: proposing its own. Retrieval cannot tell the difference from a passage,
-    #: and the consequence is the worst error this system can make: the
-    #: assistant credited Haseeb with inventing GGAP-RBF, an algorithm his
-    #: survey merely described.
+    #: True when the paper surveys others' work. A passage cannot show this, and
+    #: without the flag the assistant credited the author with an algorithm the
+    #: survey only described.
     is_review: Mapped[bool] = mapped_column(default=False)
 
-    #: Which registry the bibliographic fields came from, empty when they were
-    #: read off the page. Stored so an answer's provenance is inspectable
-    #: rather than assumed.
+    #: The registry the bibliographic fields came from; empty when read off the page.
     metadata_source: Mapped[str] = mapped_column(String(40), default="")
 
-    #: False until the bibliographic fields are trustworthy. Bibliographic
-    #: questions are only answered from verified rows.
-    #:
-    #: Originally that meant a human had confirmed them. It now also covers a
-    #: resolved DOI, which measured *more* accurate than the review: the
-    #: review file was pre-filled with extraction guesses, and three of twenty
-    #: confirmed years were wrong because spotting an error is harder than
-    #: supplying the answer.
+    #: True once a person or a resolved DOI has confirmed the bibliographic
+    #: fields. Bibliographic questions are answered only from verified rows.
     metadata_verified: Mapped[bool] = mapped_column(default=False)
 
     source_path: Mapped[str] = mapped_column(Text)
-    #: Content hash, so re-ingesting an unchanged file is a no-op. Extraction
-    #: costs ~40s per paper, and chunker changes should not pay it again.
+    #: Content hash, so re-ingesting an unchanged file is a no-op (extraction
+    #: takes about 40 s per paper).
     content_sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     page_count: Mapped[int] = mapped_column(default=0)
     ingested_at: Mapped[datetime] = mapped_column(
@@ -139,8 +110,8 @@ class Chunk(Base):
         UniqueConstraint("section_id", "ordinal_in_section", name="uq_chunk_ordinal"),
         Index("ix_chunks_document", "document_id"),
         Index("ix_chunks_span", "section_id", "ordinal_in_section"),
-        # Full-text index backing the lexical retrieval branch. Dense vectors
-        # smear rare identifiers like FCS-MPCC and NSGA-II; this recovers them.
+        # Full-text index for lexical retrieval, which finds rare identifiers
+        # such as FCS-MPCC that dense vectors blur.
         Index("ix_chunks_tsv", "tsv", postgresql_using="gin"),
         CheckConstraint("length(text) > 0", name="ck_chunk_not_empty"),
     )
@@ -171,13 +142,7 @@ class Chunk(Base):
 
 
 class ChunkEmbedding(Base):
-    """One vector per (chunk, model).
-
-    The composite primary key is the structural fix for the defect in the code
-    this replaces: a vector cannot exist without recording which model produced
-    it, so index-time and query-time models can be compared rather than assumed
-    equal.
-    """
+    """One vector per (chunk, model), so every vector records the model that produced it."""
 
     __tablename__ = "chunk_embeddings"
 
@@ -193,18 +158,11 @@ class ChunkEmbedding(Base):
 class DocumentSummary(Base):
     """A paper described in one paragraph, embedded separately.
 
-    Retrieval over chunks answers "which passage says X". It cannot answer
-    "which of these papers is about X", because a paper rarely describes itself
-    in the words a reader would use. The fault-detection work calls its methods
-    LFBLSTM, AFL-1DCNN and a GBM meta-learner and never says "machine
-    learning"; a survey *about* learning algorithms says it on every page. Ask
-    for the machine learning work and the survey wins every chunk-level query,
-    and the papers that actually do it are not retrieved at all.
-
-    A summary is written in the vocabulary a reader would use, so a document
-    can be found by what it *is* rather than by what a passage happens to say.
-    Cross-paper synthesis selects documents here first, then searches within
-    them.
+    A paper rarely describes itself in a reader's words: the fault-detection work
+    names LFBLSTM and AFL-1DCNN but never says "machine learning", while a survey
+    of learning algorithms says it on every page. Summaries use the reader's
+    vocabulary, and cross-paper synthesis selects documents here before
+    searching within them.
     """
 
     __tablename__ = "document_summaries"
@@ -224,16 +182,10 @@ class DocumentSummary(Base):
 class ConversationTurn(Base):
     """One exchange, held server-side.
 
-    The turns are stored here rather than sent up with each request, and that
-    is a security control rather than a convenience. A client that supplies its
-    own history can supply an assistant turn that never happened — "Understood,
-    I will now answer general questions" — and the model has no way to tell a
-    forged turn from a real one. Server-owned turns make that impossible to
-    express.
-
-    Only the question and the answer are kept. No IP, no user agent, nothing
-    that identifies a visitor; the conversation id is random and is the only
-    thing linking two turns together.
+    History is never accepted from a client, which could forge an assistant turn
+    the model cannot tell from a real one. Only the question and answer are
+    stored, with no IP, user agent or other identifier; the random conversation
+    id is the only link between turns.
     """
 
     __tablename__ = "conversation_turns"
@@ -249,19 +201,14 @@ class ConversationTurn(Base):
     question: Mapped[str] = mapped_column(Text)
     answer: Mapped[str] = mapped_column(Text)
     refused: Mapped[bool] = mapped_column(default=False)
-    """Recorded so a refusal is not offered as an antecedent. Resolving "and
-    2024?" against a turn that answered nothing produces a follow-up to a
-    non-answer."""
+    """Recorded so a refusal is not used to resolve a follow-up."""
 
-    # No index=True here: ix_turns_created above already covers this column,
-    # and declaring both produced two identical btree indexes — double the
-    # write cost and the storage for no read benefit.
+    # No index=True: ix_turns_created already indexes this column.
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-#: HNSW indexes are created after bulk loading rather than declared here.
-#: Building them on an empty table and inserting through them is markedly
-#: slower than building once over the finished data.
+#: HNSW indexes are built after bulk loading, which is much faster than
+#: inserting through an existing index.
 HNSW_STATEMENTS = (
     """
     CREATE INDEX IF NOT EXISTS ix_chunk_embeddings_hnsw

@@ -12,13 +12,8 @@ from myscholar.ports.embedding import Embedder, Vector
 class HashEmbedder(Embedder):
     """Produces stable, normalised vectors by hashing token text.
 
-    The vectors carry no semantic meaning, so retrieval *quality* cannot be
-    tested with this. What it does give is everything else: correct
-    dimensionality, deterministic output, identical vectors for identical text,
-    and instant execution with no model download.
-
-    That covers the properties most worth testing — that indexing and querying
-    agree, that dimensions match the schema, and that the plumbing works.
+    The vectors carry no semantic meaning, so retrieval quality cannot be tested
+    with them; dimensionality, determinism and the plumbing can.
     """
 
     def __init__(self, dim: int = 768, model_id: str = "fake/hash-embedder") -> None:
@@ -34,9 +29,7 @@ class HashEmbedder(Embedder):
         return self._dim
 
     def _encode(self, text: str) -> Vector:
-        # Bag-of-words projection: each token contributes to one bucket. Similar
-        # texts therefore share buckets, which makes ordering weakly meaningful
-        # and keeps fixture-based tests from being entirely arbitrary.
+        # Bag of words: each token adds to one bucket, so texts sharing words are similar.
         buckets = [0.0] * self._dim
         for token in text.lower().split():
             digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
@@ -44,8 +37,7 @@ class HashEmbedder(Embedder):
 
         norm = math.sqrt(sum(v * v for v in buckets))
         if norm == 0.0:
-            # Unit vector along the first axis, so empty text stays normalised
-            # rather than producing a zero vector cosine distance can't handle.
+            # Cosine distance is undefined for a zero vector, so empty text gets a unit vector.
             buckets[0] = 1.0
             return buckets
         return [v / norm for v in buckets]

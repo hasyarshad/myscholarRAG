@@ -1,11 +1,7 @@
-"""The adaptive loop: retrieve, grade, generate, verify, correct or refuse.
+"""The answering loop: route, check the premise, generate, verify, then answer or refuse.
 
-Replaces the Phase 0 walking skeleton. The signature is unchanged, which was
-the point of settling it then.
-
-Ordering is deliberate. The deterministic citation checks run before the
-semantic groundedness check, so the cheap checks catch the common failures and
-the expensive one only ever sees answers whose citations already resolve.
+The deterministic citation checks run before the model-based grounding check, so the
+grounding check only sees sentences whose citations already resolve.
 """
 
 from __future__ import annotations
@@ -38,43 +34,20 @@ class LoopState:
     budget: Budget
 
     search_text: str = ""
-    """What retrieval is actually given — the question, or a rewrite of it."""
+    """The text sent to retrieval: the question, or a rewrite of it."""
 
     blocks: tuple[ContextBlock, ...] = ()
     draft: str = ""
-    correction: str | None = None
     premise_correction: str | None = None
-    """Set when the question assumes something the sources contradict.
-
-    Carried separately from ``correction``, which is consumed and cleared by
-    each regeneration. A false premise stays true across every attempt, so it
-    has to survive them."""
+    """Set when the question assumes something the sources contradict; passed to the
+    generator as an instruction."""
 
     verification: citations.VerificationResult | None = None
     degraded: bool = False
     grounding_failed: bool = False
 
     ungrounded: tuple[str, ...] = ()
-    """Statements the grounding check rejected on the most recent attempt.
-
-    Kept so they can be removed if the loop runs out of attempts, rather than
-    being returned with the answer."""
-
-    best_draft: str = ""
-    best_ungrounded: tuple[str, ...] = ()
-    """The attempt that survived verification most intact, and what it lost.
-
-    Regeneration does not reliably improve a draft. Asked to describe someone's
-    strengths in machine learning the loop produced 1272 characters with four
-    unsupported statements, then 679 with one, then 730 with three — and
-    returned the third, because each attempt overwrote the last. The second was
-    the best answer the system ever held and the visitor never saw it.
-
-    Rewriting under a correction is a genuinely harder task than writing: the
-    model has to keep what worked, drop what did not, and stay grounded, and
-    the instruction that names the failed statements also draws attention back
-    to them. So attempts are kept rather than assumed to improve, and the
-    fewest-rejections one is what the salvage path works from."""
+    """Statements the grounding check rejected, removed before the answer is returned."""
 
     response: Response | None = None
     events: tuple[TraceEvent, ...] = field(default_factory=tuple)
@@ -115,17 +88,12 @@ class Engine:
     async def answer_with_context(
         self, question: str
     ) -> tuple[Response, Trace, tuple[ContextBlock, ...]]:
-        """The response, the path taken, and the passages the model was given.
+        """The response, the path taken, and the passages the generator was given.
 
-        The context is exposed for evaluation: judging whether a claim is
-        supported means judging it against what the generator actually saw.
-        Reconstructing that from the citations is not equivalent — a citation
-        carries a quote at most, and the loop may have retrieved, graded and
-        broadened several times before settling.
+        The passages are exposed for evaluation: faithfulness is judged against what
+        the generator saw, which the citations alone do not capture.
         """
-        # A fresh budget per question. The stored one is a template of limits;
-        # reusing the instance would carry the previous question's elapsed time
-        # and step count into this one.
+        # The stored budget is a template; a fresh copy restarts the clock and counters.
         state, trace = await self._graph.run(
             LoopState(question=question, search_text=question, budget=self._budget.fresh())
         )
@@ -134,8 +102,8 @@ class Engine:
     async def stream_events(self, question: str) -> AsyncIterator[TraceEvent | Answer | Refusal]:
         """Yield each stage as it happens, then the finished response.
 
-        Stages rather than tokens: verification runs after generation, so raw
-        output would show the visitor text that is subsequently rejected.
+        Tokens are not streamed because verification runs after generation and can
+        remove sentences.
         """
         queue: asyncio.Queue[TraceEvent | None] = asyncio.Queue()
         self._listeners.append(queue)
@@ -164,17 +132,10 @@ class Engine:
             if not task.done():
                 task.cancel()
 
-    # -- graph ------------------------------------------------------------
-
     def _publishing(
         self, node: Callable[[LoopState], Awaitable[LoopState]]
     ) -> Callable[[LoopState], Awaitable[LoopState]]:
-        """Wrap a node so the events it adds are published as it finishes.
-
-        Without this the API can only replay the trace once the answer is
-        complete, so a visitor watches a generic spinner for twenty seconds and
-        then receives every stage at once. Streaming progress is the point.
-        """
+        """Wrap a node so the events it adds reach stream listeners as soon as it finishes."""
 
         async def wrapped(state: LoopState) -> LoopState:
             before = len(state.events)
@@ -205,12 +166,8 @@ class Engine:
             edges={
                 "route": self._after_route,
                 "screen": self._after_screen,
-                # A failed generation leaves no draft, and verifying an empty
-                # string produces an empty *answer* rather than a refusal — the
-                # blank reply a visitor least deserves. `_generate` already
-                # treats an outage as "end the loop without a draft"; this makes
-                # that end at the refusal, which is what its comment intends.
-                # Same guard as `drop_ungrounded` below, for the same reason.
+                # Without a draft, verification would produce an empty answer
+                # instead of a refusal.
                 "generate": lambda state: "verify" if state.draft else "refuse",
                 "verify": self._after_verify,
                 "check_grounding": self._after_grounding,
@@ -221,14 +178,12 @@ class Engine:
             on_budget_exhausted="refuse",
         )
 
-    # -- nodes ------------------------------------------------------------
-
     async def _route(self, state: LoopState) -> LoopState:
         routed = await self._router.route(state.search_text)
         budget = state.budget.step().retrieved()
 
-        # Phase 3 already answers three classes without retrieval. Those results
-        # pass straight through rather than entering the loop.
+        # Bibliographic, out-of-scope and ambiguous questions are answered by the
+        # router and skip the rest of the loop.
         if routed.bibliographic is not None:
             return replace(
                 state,
@@ -250,10 +205,8 @@ class Engine:
                 Stage.DONE, describe_class(routed.classification.query_class, short_name=self._name)
             )
 
-        # Names what was actually searched, not what the plan intended. The
-        # retriever always runs one unrestricted branch, so a biographical
-        # question can and does return paper passages — a label predicted from
-        # the query class would be wrong exactly when it mattered.
+        # Named from the retrieved blocks, not the query class: the retriever always
+        # runs an unrestricted branch, so a biographical question can return papers.
         sources = describe_sources((b.document_kind, b.document_id) for b in routed.blocks)
         detail = f"{len(routed.blocks)} passages" + (f" from {sources}" if sources else "")
         return replace(
@@ -261,30 +214,15 @@ class Engine:
         ).with_event(Stage.RETRIEVING, detail)
 
     async def _screen(self, state: LoopState) -> LoopState:
-        """Check the question's premise. Relevance grading used to happen here.
+        """Check whether the question rests on a premise the retrieved passages contradict.
 
-        The grader was removed on two measurements. On the adversarial set it
-        cost +0.05 wrong claims per question and ten points of correct refusal.
-        On `tests/eval/confusable_set.yaml` — fifteen questions built
-        specifically to give it its best case, where several papers cover the
-        subject and one is right — it moved attribution precision by **zero**
-        points: four configurations with and without it produced identically
-        13/15. The reason is structural rather than a tuning failure.
-        Contamination was 0% throughout, so the system never cited the wrong
-        member of a pair; both failures were papers retrieval never returned,
-        and a filter cannot recover a document it was never given.
-
-        The premise check stays, and is why this node still exists. It is what
-        answers a question that asserts something untrue, and it runs on the
-        retrieved passages directly now that nothing filters them.
+        A relevance grader was measured here and removed: it added wrong claims on the
+        adversarial set and left attribution precision unchanged on the confusable set.
         """
         state = replace(state, budget=state.budget.step())
 
-        # A false premise is not a retrieval failure and retrieving harder
-        # cannot fix it: the right passages are already here, and they are what
-        # disprove the question. Checked after grading so the check sees only
-        # passages judged relevant, and before generation so the answer can
-        # correct the question rather than elaborate on it.
+        # Checked before generation so the answer corrects the question instead of
+        # explaining something that did not happen.
         premise = await self._answerer.check_premise(state.question, state.blocks)
         if premise is None:
             return state
@@ -300,29 +238,21 @@ class Engine:
         ).with_event(Stage.GRADING, f"false premise: {premise.premise[:80]}")
 
     async def _generate(self, state: LoopState) -> LoopState:
-        # Both, when both apply: the premise correction holds for every attempt
-        # while the verification correction is specific to the last one.
-        correction = " ".join(c for c in (state.premise_correction, state.correction) if c) or None
         try:
             draft = await self._answerer.generate(
-                state.question, state.blocks, correction=correction
+                state.question, state.blocks, correction=state.premise_correction
             )
         except Exception:
-            # A model that times out or dies mid-loop is an outage, not a
-            # programming error, and the loop already knows how to end without
-            # a draft. Letting it propagate turned a slow generation into an
-            # HTTP 500 and a red "something went wrong" in the widget, which is
-            # both less useful and less honest than a refusal — and it threw
-            # away any verified draft from an earlier attempt.
-            #
-            logger.exception("generation failed; ending the loop without a new draft")
+            # A timeout or model error is an outage: end without a draft, which
+            # routes to a refusal instead of an HTTP 500.
+            logger.exception("generation failed; ending the loop without a draft")
             budget = state.budget.step()
-            return replace(state, budget=budget, correction=None, degraded=True).with_event(
+            return replace(state, budget=budget, degraded=True).with_event(
                 Stage.GENERATING, "generation unavailable"
             )
 
         budget = state.budget.step()
-        return replace(state, budget=budget, draft=draft, correction=None).with_event(
+        return replace(state, budget=budget, draft=draft).with_event(
             Stage.GENERATING, f"{len(draft)} chars"
         )
 
@@ -330,38 +260,9 @@ class Engine:
         result = citations.verify(state.draft, state.blocks)
         budget = state.budget.step()
 
-        # A missing marker is a formatting slip; an invented one is not.
-        #
-        # These were treated identically: any issue meant regenerate the whole
-        # answer, up to three times, then salvage destructively. Measured on
-        # one question, a ten-sentence draft citing six papers was reduced to
-        # two sentences citing one — and the drafts got shorter each retry as
-        # the model shrank to avoid the penalty. With eight to ten factual
-        # sentences and roughly a ten percent chance of the model forgetting a
-        # marker on any of them, the probability of at least one failure is
-        # around sixty percent, so this fired on most long answers.
-        #
-        # `uncited` now costs the sentence rather than the answer, and no
-        # attempt: dropping it leaves everything that *was* attributed intact.
-        # `dangling` — a marker pointing at a passage that was never retrieved —
-        # still forces a regeneration, because that is the model inventing a
-        # source and is the failure the whole mechanism exists to catch.
-        # One salvage path, not two. There used to be a severity distinction —
-        # `uncited` cost the sentence, `dangling` forced a regeneration — and it
-        # existed only to choose between dropping and retrying. With retrying
-        # gone the choice is gone, and an invented marker is handled the way a
-        # missing one always was: the sentence is removed and the rest stands.
-        #
-        # The guarantee is unchanged and is the one that matters. A marker
-        # pointing at a passage that was never retrieved never reaches the
-        # reader. It simply leaves with its sentence instead of triggering
-        # another attempt that measurement showed to be worse.
-        #
-        # Salvaging here rather than at the end is deliberate: salvaging late
-        # meant the loop went straight to the terminal node, so the *returned*
-        # text was the one piece of output the groundedness check never saw.
-        # Re-verifying leaves a draft whose citations resolve, which then routes
-        # through grounding like any other.
+        # A sentence that fails a citation check (no marker, a marker for a passage
+        # that was never retrieved, or a misquote) is removed and the rest re-verified.
+        # The salvaged draft then goes through the grounding check like any other.
         if not result.valid:
             salvaged = citations.drop_unsupported(state.draft, result.issues).strip()
             if salvaged:
@@ -372,53 +273,27 @@ class Engine:
                     else f"{len(result.issues)} citation issue(s); kept what verified"
                 )
                 return replace(
-                    state, budget=budget, draft=salvaged, verification=rechecked, correction=None
+                    state, budget=budget, draft=salvaged, verification=rechecked
                 ).with_event(Stage.VERIFYING, detail)
 
-        # The summary names the specific failures and is fed back verbatim, so
-        # a regeneration fixes those rather than rerolling the same prompt.
-        correction = None if result.valid else result.summary()
-        return replace(state, budget=budget, verification=result, correction=correction).with_event(
+        return replace(state, budget=budget, verification=result).with_event(
             Stage.VERIFYING,
             "citations valid" if result.valid else f"{len(result.issues)} citation issue(s)",
         )
 
     async def _drop_ungrounded(self, state: LoopState) -> LoopState:
-        """Remove statements the grounding check could not support.
-
-        Previously the
-        loop returned the draft unchanged in this situation, which meant a
-        claim the system had *already decided was unsupported* was shown to the
-        visitor anyway.
-        """
-        # The attempt that lost least, not the attempt that happened to be last.
-        draft, rejected = (
-            (state.best_draft, state.best_ungrounded)
-            if state.best_draft and len(state.best_ungrounded) < len(state.ungrounded)
-            else (state.draft, state.ungrounded)
-        )
+        """Remove statements the grounding check could not support."""
         kept = [
             sentence
-            for sentence in citations.split_sentences(draft)
-            if sentence.strip() not in rejected
+            for sentence in citations.split_sentences(state.draft)
+            if sentence.strip() not in state.ungrounded
         ]
-        # Same tidy-up as the citation salvage path. Joining the survivors
-        # directly leaves the seams showing: an answer that opens "In another
-        # work, ..." after the work it referred to has been removed.
         text = citations.rejoin(kept)
         budget = state.budget.step()
         if not text:
-            # The judge rejected every sentence of a draft whose citations all
-            # resolve. Taken at face value that means refusing, and measured
-            # over the question set it pushed over-refusal from 0% to 11.8% —
-            # the system declining questions the corpus answers.
-            #
-            # A model judgement that would delete an entire verified answer is
-            # more likely wrong than the answer is. The deterministic checks
-            # are the gate: every marker resolves to a passage that was
-            # retrieved and graded relevant, and any quotation is real. So the
-            # draft stands, marked degraded so the interface can say confidence
-            # is lower, rather than being thrown away on one model's opinion.
+            # The judge rejected every sentence of a draft whose citations all resolve.
+            # Refusing here raised over-refusal from 0% to 11.8% on the question set,
+            # so the draft is kept and marked degraded.
             return replace(state, budget=budget, degraded=True).with_event(
                 Stage.VERIFYING, "grounding uncertain; citations verified"
             )
@@ -427,23 +302,18 @@ class Engine:
             budget=budget,
             draft=text,
             verification=citations.verify(text, state.blocks),
-            correction=None,
         ).with_event(Stage.VERIFYING, f"dropped {len(state.ungrounded)} unsupported statement(s)")
 
     async def _check_grounding(self, state: LoopState) -> LoopState:
-        """Check each cited sentence against the block it cites.
+        """Check each cited sentence against the blocks it cites.
 
-        Only runs once citation markers already resolve, so every statement
-        here has a real block to check against.
+        Runs only after the citation markers resolve, so every cited block exists.
         """
         by_label = {b.label.upper(): b for b in state.blocks}
         unsupported: list[str] = []
 
         for sentence in citations.split_sentences(state.draft):
             labels = citations.parse_markers(sentence)
-            # Only sentences making a checkable claim. See
-            # citations.makes_checkable_claim for why this is narrower than
-            # "every factual sentence".
             if not labels or not citations.makes_checkable_claim(sentence):
                 continue
             excerpt = "\n\n".join(by_label[label].text for label in labels if label in by_label)
@@ -456,34 +326,19 @@ class Engine:
         if not unsupported:
             return replace(state, budget=budget).with_event(Stage.VERIFYING, "grounded")
 
-        # Recorded before regenerating, because the next attempt may be worse
-        # and this one is about to be overwritten. Ties go to the earlier
-        # attempt, which is the longer one in practice.
-        better = not state.best_draft or len(unsupported) < len(state.best_ungrounded)
-
-        quoted = "; ".join(f'"{s[:100]}"' for s in unsupported[:3])
         return replace(
             state,
             ungrounded=tuple(s.strip() for s in unsupported),
-            best_draft=state.draft if better else state.best_draft,
-            best_ungrounded=tuple(s.strip() for s in unsupported)
-            if better
-            else state.best_ungrounded,
             budget=budget,
             grounding_failed=True,
-            correction=f"These statements are not supported by the excerpts cited: {quoted}",
         ).with_event(Stage.VERIFYING, f"{len(unsupported)} unsupported statement(s)")
 
     async def _correct(self, state: LoopState) -> LoopState:
-        """Try to fix inadequate retrieval, one strategy at a time.
+        """Search again after retrieval returned nothing, one strategy at a time.
 
-        Strategies are recorded in the budget so none repeats, which is what
-        keeps the corrective path from cycling.
+        The budget records each strategy tried, so none repeats.
         """
-        # Empty, always: nothing grades any more, so the rewrite is driven by
-        # the question alone. The reason string this yields — "nothing
-        # retrieved was relevant" — is exactly right for the one case that
-        # still reaches here, which is retrieval returning nothing at all.
+        # Nothing is graded in the loop, so the rewrite has no rejection reasons.
         graded = GradedContext(kept=(), rejected=())
         budget = state.budget.step()
 
@@ -496,8 +351,7 @@ class Engine:
                 )
 
         if not budget.has_tried(BROADEN):
-            # Broaden by searching the original question again with no
-            # rewriting, which reaches different passages than the rewrite did.
+            # The original question again, which reaches different passages than the rewrite.
             budget = budget.tried(BROADEN)
             return replace(state, budget=budget, search_text=state.question).with_event(
                 Stage.RETRIEVING, "broadened"
@@ -509,14 +363,8 @@ class Engine:
         if state.response is not None:
             return state
 
-        # Running out of budget while holding a verified answer is the worst
-        # possible outcome: the work is done and correct, and throwing it away
-        # produces a refusal the corpus did not deserve. Measured, this was
-        # three of seven answerable questions — the groundedness check kept
-        # asking for a regeneration until the deadline passed, and the drafts
-        # it rejected had valid citations throughout.
-        #
-        # So a refusal only happens when there is nothing usable to return.
+        # A draft with verified citations is returned instead of a refusal, even when
+        # the budget ran out.
         if state.draft and state.verification is not None:
             salvaged = (
                 state.draft
@@ -538,16 +386,13 @@ class Engine:
         if state.budget.reason_for_stopping():
             reason = RefusalReason.BUDGET_EXHAUSTED
         elif state.grounding_failed:
-            # Distinct from "nothing relevant found": passages *were* found and
-            # the answer built on them could not be supported.
+            # Passages were found, but the answer built on them could not be supported.
             reason = RefusalReason.UNGROUNDED_AFTER_RETRY
         else:
             reason = RefusalReason.NO_RELEVANT_CONTENT
 
-        # Only asked when the reply is going to be about absence. A question
-        # that ran out of clock has established nothing about the corpus, and
-        # the call is another model round trip on a budget already overspent —
-        # it was adding a second to answers that had just spent ninety.
+        # Skipped when the budget ran out: nothing has been established about the
+        # corpus, and the call would add another model round trip.
         topics: tuple[str, ...] = ()
         if reason is not RefusalReason.BUDGET_EXHAUSTED:
             topics = await self._answerer.nearest_topics(state.blocks)
@@ -561,12 +406,7 @@ class Engine:
         ).with_event(Stage.DONE, reason.value)
 
     async def _done(self, state: LoopState) -> LoopState:
-        # A response set earlier stands. The bibliographic path answers in the
-        # route node and routes straight here; rebuilding from the (empty)
-        # draft silently replaced "4 papers in 2023." with an empty string.
-        #
-        # This regressed once when an unrelated `git checkout` reverted the
-        # fix, so it is covered by a test rather than only a comment.
+        # A response set earlier (the bibliographic answer from the route node) stands.
         if state.response is not None:
             return state
 
@@ -575,8 +415,6 @@ class Engine:
 
         text = state.draft
         if verification and not verification.valid:
-            # Last resort: keep the sound sentences, drop the rest. If that
-            # leaves nothing, the refusal node handles it.
             text = citations.drop_unsupported(text, verification.issues)
 
         return replace(
@@ -590,36 +428,21 @@ class Engine:
             ),
         ).with_event(Stage.DONE)
 
-    # -- edges ------------------------------------------------------------
-
     def _after_route(self, state: LoopState) -> str:
         if state.response is not None:
             return "done" if isinstance(state.response, Answer) else "refuse"
         return "screen" if state.blocks else "correct"
 
     def _after_screen(self, state: LoopState) -> str:
-        """Always generate. `_after_route` has already established there are blocks.
-
-        This used to consult the grader's sufficiency verdict and send an
-        insufficient one back to retrieval. With nothing filtering the blocks
-        that verdict is always true, so the branch is gone rather than left as
-        a condition that cannot fail.
-        """
+        """Always generate: `_after_route` only sends states with blocks here."""
         return "generate"
 
     def _after_verify(self, state: LoopState) -> str:
-        """No retry. Salvage, or refuse.
+        """Check grounding if the citations verify, otherwise refuse.
 
-        Regeneration was removed on measurement, not taste. Rewriting under a
-        correction is a harder task than writing, and the instruction naming
-        the failed statements draws the model back to them: across the
-        adversarial set it cost +0.08 wrong claims per question and twenty
-        points of correct refusal, and across the confusable set it cost
-        fourteen points of attribution precision. Three measurements, all in
-        the same direction, on a step that also made every answer slower.
-
-        `_verify` has already salvaged by this point, so an invalid result here
-        means nothing survived.
+        `_verify` has already salvaged what it could. Regenerating under a correction
+        was measured and removed: it added wrong claims and lowered both correct
+        refusal and attribution precision (results/generation_phase1.md, confusable.md).
         """
         result = state.verification
         if result is None or result.valid:
@@ -627,18 +450,10 @@ class Engine:
         return "refuse"
 
     def _after_grounding(self, state: LoopState) -> str:
-        if state.correction is None:
-            return "done"
-        # Remove what could not be supported rather than returning it, and
-        # rather than regenerating: showing a claim the system has already
-        # judged unsupported is worse than showing a shorter answer, and
-        # trying again was measured to produce a worse answer still.
-        return "drop_ungrounded"
+        return "drop_ungrounded" if state.grounding_failed else "done"
 
     def _after_correct(self, state: LoopState) -> str:
         return "route" if state.budget.can_retrieve_again else "refuse"
-
-    # -- assembly ---------------------------------------------------------
 
     def _finish(self, state: LoopState, trace: Trace) -> Response:
         response = state.response or Refusal(
@@ -652,8 +467,6 @@ class Engine:
                 for name, ms in trace.timings_ms[-1:]
             ),
         )
-        if isinstance(response, Answer):
-            return replace(response, trace=events)
         return replace(response, trace=events)
 
 
@@ -664,25 +477,10 @@ def _join(items: tuple[str, ...]) -> str:
 
 
 def _refusal_text(reason: RefusalReason, topics: tuple[str, ...]) -> str:
-    """What the visitor reads, decided by why the loop actually stopped.
+    """The refusal message for the reason the loop stopped.
 
-    All three reasons used to share one sentence — "I don't have anything on
-    that in these papers" — which is a claim about the corpus that only one of
-    them is entitled to make. The loop was already computing the reason
-    correctly and then discarding it here.
-
-    What that cost was not hypothetical. A stalled model call on the
-    development machine was pushing one call per question past the reasoning
-    deadline, and questions the corpus answers in detail came back saying the
-    corpus did not cover them — on roughly every second attempt, with no error
-    logged anywhere. A message that had said "I ran out of time" would have
-    named the bug the first time anyone saw it, instead of sending three of us
-    looking at retrieval, the grader and the prompt in turn.
-
-    Saying so is also just honest. A system that cannot tell "I found nothing"
-    apart from "I did not finish looking" is guessing on the visitor's behalf,
-    and guessing wrong in the direction that makes the corpus look emptier than
-    it is.
+    Only ``NO_RELEVANT_CONTENT`` says the corpus lacks the answer, so a timeout is
+    not mistaken for a gap in the corpus.
     """
     if reason is RefusalReason.BUDGET_EXHAUSTED:
         return (
@@ -700,4 +498,4 @@ def _refusal_text(reason: RefusalReason, topics: tuple[str, ...]) -> str:
     return text
 
 
-__all__ = ["Engine", "LoopState", "Refusal"]
+__all__ = ["Engine", "LoopState"]

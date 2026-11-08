@@ -52,26 +52,14 @@ def _stem(source: Path | str) -> str:
 
 #: Chunks per page beyond which a document is probably damaged.
 #:
-#: Measured across this corpus, healthy papers produce 8-20 chunks per page.
-#: One produced 132 — a stacked PDF text layer repeating every line — and it
-#: sat in the index for four phases, flooding unrelated searches with garbled
-#: fragments. Nothing noticed, because a document with eight hundred chunks
-#: ingests exactly as cleanly as one with eighty.
-#:
-#: Set well above the observed maximum, so this only fires on something plainly
-#: wrong. A warning rather than an error: a genuinely dense document should not
-#: be rejected, it should be looked at.
+#: Healthy papers here produce 8-20 per page; a PDF whose stacked text layer repeated
+#: every line produced 132. Exceeding it raises a warning, so a dense document is
+#: flagged for inspection and still indexed.
 _SUSPICIOUS_CHUNKS_PER_PAGE = 40
 
 
 def _merge(proposed: PaperMetadata, resolved: ResolvedMetadata) -> PaperMetadata:
-    """Registry fields win, except where the registry has nothing to say.
-
-    A thin record must not blank a field that extraction did get. The title is
-    the one exception in the other direction — a registry always has one, and
-    the typeset title from a two-column PDF is the field extraction most often
-    mangles.
-    """
+    """Prefer registry fields, keeping extracted values where the registry record is empty."""
     return PaperMetadata(
         title=resolved.title or proposed.title,
         authors=resolved.authors or proposed.authors,
@@ -120,11 +108,9 @@ class IngestionPipeline:
     async def _resolve(
         self, doi: str | None, report: IngestReport, label: str
     ) -> ResolvedMetadata | None:
-        """Look up a DOI, treating every failure as "fall back to extraction".
+        """Look up a DOI, or return None so ingestion falls back to extraction.
 
-        A registry outage must not fail an ingestion run. The corpus is
-        buildable offline by design, and the review file is still there as the
-        path for anything a registry cannot answer.
+        A registry outage must not fail an ingestion run.
         """
         if self._resolver is None or not doi:
             return None
@@ -169,8 +155,7 @@ class IngestionPipeline:
     ) -> None:
         extracted = self._extractor.extract(path)
 
-        # Content-hash skip: extraction costs ~40s per paper, and a chunker
-        # change should not pay that again for unchanged files.
+        # Skip unchanged files by content hash: extraction takes about 40s per paper.
         if not force and await self._store.document_exists(extracted.content_sha256):
             report.skipped.append(f"{_label(path)} (unchanged)")
             return
@@ -187,32 +172,20 @@ class IngestionPipeline:
             )
             metadata = proposal.metadata
 
-        # A resolved DOI supersedes both the proposal and the review file. The
-        # DOI itself was matched by regex against the literal page, so it
-        # cannot have been invented, and what it resolves to is the record the
-        # publisher deposited.
-        #
-        # Outranking the human review is deliberate and was measured: the
-        # review file is pre-filled with extraction guesses, which asks a
-        # person to spot an error rather than supply an answer, and three of
-        # twenty confirmed years were wrong. Leaving the review on top would
-        # also make ingestion disagree with `myscholar sync`, which corrects
-        # from the same registry — so a forced re-ingest would silently
-        # reintroduce errors sync had already fixed.
+        # A resolved DOI supersedes both the proposal and the review file. The DOI
+        # is matched against the page text and resolves to the publisher's record,
+        # while reviewed entries start as extraction guesses (three of twenty
+        # confirmed years were wrong). It also keeps ingestion in step with `sync`.
         resolved = await self._resolve(metadata.doi, report, _label(path))
         if resolved is not None:
             metadata = _merge(metadata, resolved)
             report.resolved.append(_label(path))
         elif proposal is not None:
-            # Nothing authoritative to fall back on, so this one still needs a
-            # human. The review file remains the path for anything without a
-            # resolvable DOI — preprints, theses, work in submission.
+            # No resolvable DOI (preprints, theses, work in submission): needs review.
             report.proposals.append(proposal)
 
-        # A page has no publication year, venue or DOI, and guessing one is
-        # worse than leaving it empty: the year extractor read an education
-        # date off the CV and reported the corpus as running from 2016, a year
-        # in which nothing was published.
+        # Pages and the CV have no publication year, venue or DOI, and the year
+        # extractor would otherwise pick up dates such as an education year.
         if kind is not DocumentKind.PAPER:
             metadata = replace(metadata, year=None, venue=None, doi=None)
             resolved = None
@@ -228,10 +201,7 @@ class IngestionPipeline:
             report.warnings.append(f"{_label(path)}: {dropped} section(s) excluded")
 
         if force:
-            # Never keyed on the slug. Correcting a title changes the slug, so
-            # deleting by slug removes nothing and the insert then collides on
-            # the content hash — which failed every document on a forced re-run
-            # after a metadata review.
+            # Deleted by content hash and path, since a corrected title changes the slug.
             await self._store.delete_for_reingest(
                 content_sha256=extracted.content_sha256, source_path=str(path)
             )
@@ -280,9 +250,8 @@ class IngestionPipeline:
                 section_kind=pending.kind.value,
             )
 
-            # LaTeX is stripped for embedding only. The stored text stays
-            # verbatim because citation verification checks quoted spans
-            # against it.
+            # LaTeX is stripped for embedding only; citation verification checks
+            # quoted spans against the stored text.
             embed_texts = [f"{header}\n\n{strip_mathematics(c.text)}" for c in chunks]
             vectors = await self._embedder.embed_documents(embed_texts)
 
@@ -310,13 +279,11 @@ class IngestionPipeline:
             report.failed.append((_label(path), "no indexable content after sectioning"))
             return
 
-        # A corpus defect is invisible at the document level and obvious in the
-        # ratio, so the ratio is what gets checked.
         indexed_chunks = sum(len(rows) for _, rows in payload)
         pages = max(extracted.page_count, 1)
         if indexed_chunks / pages > _SUSPICIOUS_CHUNKS_PER_PAGE:
             report.warnings.append(
-                f"{_label(path)}: {indexed_chunks} chunks over {pages} page(s) — "
+                f"{_label(path)}: {indexed_chunks} chunks over {pages} page(s), "
                 f"{indexed_chunks // pages} per page against 8-20 for a normal paper. "
                 f"Check the PDF's text layer for repeated lines."
             )

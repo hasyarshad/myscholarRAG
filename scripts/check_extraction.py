@@ -1,16 +1,9 @@
-"""Report title and heading separation across the corpus, quickly.
-
-Run before committing to a full ingestion:
+"""Check title and heading extraction across the corpus before a full ingestion.
 
     uv run python scripts/check_extraction.py            # a sample
     uv run python scripts/check_extraction.py --all      # every paper
 
-Formula enrichment is off, so each paper takes seconds rather than minutes.
-Headings do not depend on it.
-
-This exists because title detection was got wrong three times, each mistake
-only visible in the output. Every one of them would have been caught here in
-under a minute, instead of costing a forty-minute re-index.
+Formula enrichment is off (headings do not depend on it), so each paper takes seconds.
 """
 
 from __future__ import annotations
@@ -68,7 +61,7 @@ def main(argv: list[str]) -> int:
             problems += 1
 
     print(f"\n{len(targets)} paper(s) checked")
-    print("OK — no title/heading confusion" if not problems else f"{problems} PROBLEM(S)")
+    print("OK: no title/heading confusion" if not problems else f"{problems} PROBLEM(S)")
     return 0 if not problems else 1
 
 

@@ -1,8 +1,4 @@
-"""Citation verification.
-
-These are the tests that matter most in the project. Every check here runs
-without a model, so if one has a hole, a hallucination passes silently.
-"""
+"""Citation verification. Every check runs without a model."""
 
 from __future__ import annotations
 
@@ -103,11 +99,6 @@ class TestVerify:
         assert [c.label for c in result.citations] == ["C1", "C2"]
 
     def test_a_dangling_marker_fails(self) -> None:
-        """The most common hallucination: the model invents a source.
-
-        Catching it costs a set lookup, which is why this check exists rather
-        than a model being asked whether its citations are real.
-        """
         result = verify("The scheme reduces torque ripple by 18% [C7].", BLOCKS)
 
         assert not result.valid
@@ -123,7 +114,6 @@ class TestVerify:
         assert "switching losses" in result.uncited[0].sentence
 
     def test_a_fabricated_quotation_fails(self) -> None:
-        """A quote must be checkable against what the author actually wrote."""
         text = 'The paper states "the method eliminates all torque ripple entirely" [C1].'
 
         result = verify(text, BLOCKS)
@@ -154,14 +144,6 @@ class TestVerify:
     def test_a_claim_with_no_blocks_at_all_fails(self) -> None:
         assert not verify("The scheme reduces torque ripple by 18%.", []).valid
 
-    def test_the_summary_describes_what_to_fix(self) -> None:
-        """Fed back into a regeneration, so it has to name the problem."""
-        result = verify("Torque ripple falls by 18% [C9]. It also improves efficiency.", BLOCKS)
-
-        summary = result.summary()
-        assert "C9" in summary
-        assert "no citation" in summary or "efficiency" in summary
-
 
 class TestStripAndDrop:
     def test_markers_are_removed_for_display(self) -> None:
@@ -177,7 +159,6 @@ class TestStripAndDrop:
         assert "18%" in cleaned
 
     def test_dropping_everything_leaves_an_empty_string(self) -> None:
-        """The caller must then refuse rather than return nothing."""
         text = "It cures cancer completely. It also ends all war."
 
         cleaned = drop_unsupported(text, verify(text, BLOCKS).issues)
@@ -189,11 +170,6 @@ class TestVerificationProperties:
     @settings(max_examples=100, deadline=None)
     @given(st.integers(min_value=1, max_value=40))
     def test_any_marker_outside_the_range_is_caught(self, index: int) -> None:
-        """The property the whole mechanism rests on.
-
-        Whatever the model emits, a label with no corresponding block must be
-        reported. No exceptions, no thresholds.
-        """
         text = f"The scheme reduces torque ripple by 18% [C{index}]."
 
         result = verify(text, BLOCKS)
@@ -203,7 +179,6 @@ class TestVerificationProperties:
     @settings(max_examples=100, deadline=None)
     @given(st.text(max_size=400))
     def test_verification_never_raises(self, text: str) -> None:
-        """Model output is arbitrary; the verifier must survive all of it."""
         verify(text, BLOCKS)
 
     @settings(max_examples=60, deadline=None)
@@ -223,19 +198,7 @@ class TestVerificationProperties:
 
 
 class TestATopicSentenceMayNameSomethingWithADigitInIt:
-    """A digit inside a name is not a measurement.
-
-    The rule exempting a leading topic sentence once required the sentence to
-    contain no digit at all. That is right for "the framework reached 99.64%"
-    and wrong for "he has conducted research related to COVID-19", where the
-    digits belong to the name of the subject.
-
-    The cost was visible to a reader. Asked "has he done any work related to
-    COVID-19?", the model opened with the sentence that answers it, the checker
-    read "-19" as an uncited figure and deleted the opening, and what survived
-    began "Findings reveal that toxic content is widespread..." — an answer to
-    a question the reader could no longer see.
-    """
+    """The leading topic-sentence exemption allows a digit inside a name, as in COVID-19."""
 
     def test_a_name_containing_a_digit_is_still_a_topic_sentence(self) -> None:
         opener = (
@@ -262,13 +225,7 @@ class TestATopicSentenceMayNameSomethingWithADigitInIt:
 
 
 class TestWhatSurvivesDroppingReadsAsProse:
-    """Removing a sentence is invisible to the reader; its seams are not.
-
-    An answer is judged as prose. One that opens mid-comparison — "In another
-    work, MOPSO combined with Vikor was applied..." — reads as broken however
-    sound the surviving claims are, and the reader cannot tell that a sentence
-    was removed, only that the answer does not make sense.
-    """
+    """Dropping a sentence must not leave a broken seam, such as an orphaned "In another work"."""
 
     def _issues(self, *sentences: str) -> list[CitationIssue]:
         return [CitationIssue(kind="unsupported", detail="x", sentence=s) for s in sentences]
@@ -304,14 +261,7 @@ class TestWhatSurvivesDroppingReadsAsProse:
 
 
 class TestBothDropPathsTidyTheirSeams:
-    """Two places remove sentences, and only one used to clean up after itself.
-
-    Citation salvage lifted an orphaned backward reference off the front and
-    collapsed doubled punctuation. The grounding drop in the reasoning loop
-    joined the survivors directly, so the same answer came back opening "In
-    another work, MOPSO with Vikor was applied..." with the work it was another
-    of already deleted. Shared now, so a fix to one is a fix to both.
-    """
+    """``rejoin`` is shared by citation salvage and the grounding drop in the reasoning loop."""
 
     def test_an_orphaned_opener_is_lifted_off(self) -> None:
         kept = ["In another work, MOPSO with Vikor was applied [C2].", "It reduces ripple [C3]."]

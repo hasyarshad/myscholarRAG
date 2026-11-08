@@ -1,8 +1,7 @@
-"""Ollama and the hosted model adapters, exercised against a stubbed HTTP transport.
+"""Ollama and hosted model adapters against a stubbed HTTP transport.
 
-No network and no running model server: httpx's MockTransport intercepts
-requests, so these tests assert the request bodies and response handling that
-would otherwise only be observable in production.
+httpx's MockTransport intercepts requests, so these tests check request bodies and
+response handling without a network or a model server.
 """
 
 from __future__ import annotations
@@ -33,8 +32,7 @@ class Verdict(BaseModel):
     reason: str
 
 
-# Captured once, at import, so repeated patching within a single test always
-# rebuilds from the genuine constructor rather than wrapping a previous wrapper.
+# Captured at import so that patching twice in one test still wraps the real constructor.
 _REAL_CLIENT_INIT = httpx.AsyncClient.__init__
 
 
@@ -63,7 +61,6 @@ class TestOllama:
         assert captured["model"] == "qwen3:14b"
 
     async def test_requests_are_deterministic(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Temperature zero and a fixed seed, so evaluation runs are comparable."""
         captured: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -81,11 +78,6 @@ class TestOllama:
     async def test_reasoning_is_suppressed_by_prompt_directive(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Reasoning traces cost latency and invite drift away from the context.
-
-        Suppression happens through a prompt directive appended to the final
-        message, not through Ollama's ``think`` parameter — see the next test.
-        """
         captured: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -100,13 +92,8 @@ class TestOllama:
         assert messages[-1]["content"].endswith(NO_THINK_DIRECTIVE)
 
     async def test_think_parameter_is_never_sent(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Regression guard for a real defect found against a live server.
-
-        Sending ``think: false`` stops Ollama separating the reasoning trace
-        into its own field, but the model still produces one — so it lands in
-        ``message.content`` and corrupts the answer. Omitting the parameter
-        keeps ``content`` clean.
-        """
+        # With ``think: false`` Ollama stops separating the reasoning trace into its own
+        # field, but the model still produces one, so it lands in ``message.content``.
         captured: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -121,7 +108,6 @@ class TestOllama:
     async def test_reasoning_suppression_can_be_disabled(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """So the effect on answer quality can be measured in Phase 5."""
         captured: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -136,7 +122,6 @@ class TestOllama:
         assert messages[-1]["content"] == "what is FCS-MPCC?"
 
     async def test_weights_are_kept_resident(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Otherwise every question after an idle gap pays a model reload."""
         captured: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -146,17 +131,11 @@ class TestOllama:
         _patch_transport(monkeypatch, httpx.MockTransport(handler))
         await OllamaChatModel("qwen3:14b").complete(QUESTION)
 
-        # A number, not the string "-1" — Ollama rejects that with
-        # 'missing unit in duration'. Found against a live server.
+        # An integer: Ollama rejects the string "-1" with 'missing unit in duration'.
         assert captured["keep_alive"] == -1
 
     async def test_cloud_sends_a_bearer_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Ollama Cloud is the same API behind an API key.
-
-        Same adapter, same request shape, different host — which is what makes
-        development and production genuinely comparable rather than merely
-        similar.
-        """
+        # Ollama Cloud serves the same API behind an API key.
         seen: dict[str, str] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -173,11 +152,6 @@ class TestOllama:
     async def test_cloud_is_not_asked_to_keep_weights_resident(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """`keep_alive` pins weights in one server's memory.
-
-        A shared cloud endpoint has no such memory to pin, so sending it asks
-        for something the host does not own.
-        """
         captured: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -192,7 +166,6 @@ class TestOllama:
         assert "keep_alive" not in captured
 
     async def test_structured_sends_the_schema(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Decoding is constrained to the schema rather than parsed hopefully."""
         captured: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -222,8 +195,6 @@ class TestOllama:
     async def test_unreachable_server_raises_a_named_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The API turns this into a 503, so the failure must be identifiable."""
-
         def handler(_request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectError("connection refused")
 
@@ -267,12 +238,7 @@ class TestOpenAICompatible:
     async def test_reasoning_effort_is_omitted_unless_configured(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Unset must mean absent, not a default value.
-
-        A model that does not accept ``reasoning_effort`` rejects the whole
-        request, so sending it speculatively would break every model that lacks
-        it in order to speed up the ones that have it.
-        """
+        # A model that does not accept ``reasoning_effort`` rejects the whole request.
         captured: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -304,9 +270,7 @@ class TestOpenAICompatible:
     async def test_reasoning_effort_reaches_schema_constrained_calls_too(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Classification is the call made most often, so it is the one where the
-        # saving matters. `structured` builds its payload through the same
-        # helper, and this pins that it keeps doing so.
+        # Classification, the most frequent call, goes through ``structured``.
         captured: dict[str, object] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -346,8 +310,6 @@ class TestOpenAICompatible:
     async def test_rate_limiting_raises_a_distinct_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Callers must degrade rather than retry into an exhausted free-tier quota."""
-
         def handler(_request: httpx.Request) -> httpx.Response:
             return httpx.Response(429, headers={"retry-after": "60"}, json={})
 
@@ -384,8 +346,6 @@ class TestOpenAICompatible:
 
 
 class TestAdapterEquivalence:
-    """Both backends must be interchangeable behind the port."""
-
     async def test_both_return_plain_text_for_the_same_call(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

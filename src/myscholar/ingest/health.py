@@ -1,20 +1,7 @@
 """Invariants a healthy corpus satisfies, checked against the index.
 
-Ingestion is the stage where this project has gone wrong most often, and every
-time it went wrong quietly: ligatures dropped, a title read off a publisher
-banner, a text layer repeating every line, a year taken from an education date,
-an award bound to the wrong date. All of them produced an index that loaded
-cleanly, answered plausibly and reported nothing unusual.
-
-The common cause is that nothing compared the output to the input. A document
-with eight hundred chunks looks exactly like one with eighty, and a section
-labelled `other` looks exactly like one labelled `methods`.
-
-These checks are deliberately not accuracy measurements — there are no
-ground-truth section labels to measure against, and inventing some would be a
-day's work for one corpus. They are invariants: statements that are true of
-every well-formed document here, so a violation means something upstream broke
-even when nobody can say what the right answer was.
+There are no ground-truth section labels, so these are structural checks: a violation
+means ingestion broke something upstream.
 """
 
 from __future__ import annotations
@@ -39,17 +26,13 @@ class Finding:
 #: Healthy papers here run 8-20; the worst produced 132.
 MAX_CHUNKS_PER_PAGE = 40
 
-#: Below this a document is probably missing most of its text — a scanned PDF
-#: with no text layer, or an extraction that silently returned headers only.
+#: Below this a document is probably missing most of its text (a scanned PDF with
+#: no text layer, or an extraction that returned headers only).
 MIN_CHUNKS_PER_PAGE = 2
 
 #: A paper whose sections are mostly unclassified is one the sectionizer failed
 #: on, and section kind drives the boost branches and the references exclusion.
 MAX_UNCLASSIFIED_SHARE = 0.6
-
-#: Sections that should never reach the index. References are a quarter of a
-#: paper and answer nothing.
-EXCLUDED_KINDS = frozenset({"references", "acknowledgements"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,11 +53,10 @@ class DocumentStats:
 
 
 def check(documents: list[DocumentStats], *, model_ids: set[str] | None = None) -> list[Finding]:
-    """Every invariant, over the whole corpus.
+    """Check every invariant over the whole corpus.
 
-    Returns findings rather than raising, because a corpus with one damaged
-    paper is still worth serving — the point is that the damage is *reported*
-    rather than absorbed.
+    Returns findings instead of raising, since a corpus with one damaged paper can still
+    be served.
     """
     findings: list[Finding] = []
 
@@ -88,17 +70,9 @@ def check(documents: list[DocumentStats], *, model_ids: set[str] | None = None) 
         return [Finding(Severity.FAIL, "corpus", "nothing indexed")]
 
     if model_ids and len(model_ids) > 1:
-        # Keying embeddings by (chunk_id, model_id) makes two models *storable*
-        # side by side. It does not make them searchable side by side, and the
-        # difference is expensive: the HNSW index covers the whole column, so a
-        # search collects its candidates from every model's vectors and only
-        # then filters to the one asked for. Half the candidates are discarded
-        # and the search silently runs at half the breadth it was configured
-        # for. Measured here, indexing a second model cost 0.07 MRR — with no
-        # error, and with both models individually correct.
-        #
-        # Fix by dropping the unused model, or by giving each one a partial
-        # HNSW index so the filter is applied before the scan rather than after.
+        # One HNSW index covers every model's vectors and is filtered by model only
+        # after the scan, so a second model halves the candidate pool (it cost 0.07
+        # MRR). Fix by dropping the unused model or giving each a partial index.
         fail(
             "corpus",
             f"{len(model_ids)} embedding models indexed ({', '.join(sorted(model_ids))}). "
@@ -116,14 +90,14 @@ def check(documents: list[DocumentStats], *, model_ids: set[str] | None = None) 
         elif d.kind == "paper" and density > MAX_CHUNKS_PER_PAGE:
             fail(
                 d.title,
-                f"{d.chunks} chunks over {pages} page(s) — {density:.0f} per page against "
+                f"{d.chunks} chunks over {pages} page(s), {density:.0f} per page against "
                 f"8-20 for a normal paper. Check the PDF's text layer for repeated lines.",
             )
         elif d.kind == "paper" and d.pages > 2 and density < MIN_CHUNKS_PER_PAGE:
             fail(
                 d.title,
-                f"only {d.chunks} chunks over {pages} pages — most of the text is missing, "
-                f"which a scanned PDF with no text layer would produce.",
+                f"only {d.chunks} chunks over {pages} pages; most of the text is missing, "
+                f"as from a scanned PDF with no text layer.",
             )
 
         if d.empty_chunks:
@@ -133,14 +107,14 @@ def check(documents: list[DocumentStats], *, model_ids: set[str] | None = None) 
             fail(
                 d.title,
                 f"{d.excluded_sections} reference or acknowledgement section(s) reached the "
-                f"index — they are a quarter of a paper and answer nothing.",
+                f"index, where they answer nothing.",
             )
 
         if d.sections and d.unclassified_sections / d.sections > MAX_UNCLASSIFIED_SHARE:
             warn(
                 d.title,
-                f"{d.unclassified_sections} of {d.sections} sections unclassified — section "
-                f"kind drives the boost branches, so this degrades routing silently.",
+                f"{d.unclassified_sections} of {d.sections} sections unclassified; section "
+                f"kind drives the boost branches, so this degrades routing.",
             )
 
         if d.kind == "paper" and not d.verified:
@@ -154,7 +128,7 @@ def check(documents: list[DocumentStats], *, model_ids: set[str] | None = None) 
 
         key = d.title.casefold()
         if key in seen_titles:
-            fail(d.title, "a second document has the same title — a re-ingest that did not replace")
+            fail(d.title, "a second document has the same title: a re-ingest that did not replace")
         seen_titles[key] = d.title
 
     return findings

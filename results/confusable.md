@@ -2,8 +2,8 @@
 
 15 questions where several papers cover the subject and one is right.
 
-`retrieved` — the expected paper reached the generator. `cited` — it appears
-in the answer. `clean` — it is cited and no decoy is. `clean` is the headline;
+`retrieved`: the expected paper reached the generator. `cited`: it appears
+in the answer. `clean`: it is cited and no decoy is. `clean` is the headline;
 the gap between `cited` and `clean` is contamination.
 
 | Configuration | retrieved | cited | **clean** | mean latency |
@@ -14,9 +14,8 @@ the gap between `cited` and `clean` is contamination.
 | graded-strict | 87% | 87% | **87%** | 14.4s |
 | adaptive | 87% | 73% | **73%** | 17.5s |
 
-Fifteen questions detect a large effect and nothing else. The rule fixed
-before running: keep the grader only on a **20 point or larger** move in
-`clean`.
+Fifteen questions can detect only a large effect. The rule fixed before
+running: keep the grader only on a move of 20 points or more in `clean`.
 
 ## Questions no configuration got clean
 

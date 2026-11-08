@@ -1,8 +1,8 @@
 # Pipeline comparison
 
-37 questions, three configurations, one corpus.
+37 questions, 9 configurations, one corpus.
 
-Same index, same embedder, same generator throughout. The only variable is pipeline design, so every difference below is attributable to it rather than to a bigger model or a cleaner corpus.
+Every configuration uses the same index, embedder and generator, so the differences below come from pipeline design.
 
 | Configuration | unsupported claims | claims/question | correct refusal | over-refusal | citation validity | mean latency |
 |---|---|---|---|---|---|---|
@@ -16,9 +16,9 @@ Same index, same embedder, same generator throughout. The only variable is pipel
 | graded-strict | 10.0% | 1.6 | 75.0% | 0.0% | 100.0% | 12.6s |
 | adaptive | 13.2% | 1.8 | 70.0% | 0.0% | 100.0% | 15.8s |
 
-**unsupported claims** — factual sentences the retrieved passages do not support, judged one at a time. Refusals contain no claims and so contribute nothing, which stops a system improving the number by declining more.
+**unsupported claims**: factual sentences the retrieved passages do not support, judged one at a time. Refusals contain no claims, so declining more cannot improve the rate.
 
-**correct refusal** paired with **over-refusal** — either alone is a bias rather than a measurement. A system that refuses everything scores 100% on the first.
+**correct refusal** and **over-refusal** must be read together: a system that refuses everything scores 100% on correct refusal.
 
 ## Correct behaviour by question kind
 
@@ -34,13 +34,12 @@ Same index, same embedder, same generator throughout. The only variable is pipel
 | graded-strict | 100% | 100% | 100% | 64% | 100% | 83% |
 | adaptive | 100% | 100% | 100% | 55% | 100% | 83% |
 
-## Coverage — did the answer use what it was given
+## Coverage
 
 Distinct source documents cited, against the number the generator held
-after grading. Reported per question kind because breadth is only a
-virtue where the corpus has several relevant sources: a question about
-one measurement should cite one paper, and a question about the span of
-someone's work should not.
+after grading. Reported per question kind, because the right breadth depends on the
+question: one about a single measurement should cite one paper, and one
+about the span of someone's work should cite several.
 
 | Configuration | kind | n | mean available | mean cited | coverage |
 |---|---|---|---|---|---|

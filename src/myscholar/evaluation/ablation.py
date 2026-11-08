@@ -1,35 +1,15 @@
-"""One rung of the pipeline at a time, so each mechanism can be priced.
+"""The pipeline built up one mechanism at a time, so each one's effect can be measured.
 
-The end-to-end comparison says the adaptive pipeline reaches 4.7% unsupported
-claims where a naive one reaches 52.0%. It does not say *which part* did that,
-and the parts are not free: grading costs a model call per question, the
-grounding check costs one per sentence, and regeneration can cost two more
-generations. A component that changes nothing should be deleted rather than
-described in a README.
-
-So this builds the same pipeline in stages, each adding exactly one mechanism:
-
+    prompted        hybrid retrieval and the system prompt, no routing
     routed          routed retrieval, one generation call, nothing checked
     cited           + deterministic citation verification
     grounded        + grounding check, used to drop sentences, never to retry
     graded          + relevance grading before generation
-    graded-strict   grading that also discards `partial`, not only `irrelevant`
+    graded-strict   grading that discards `partial` as well as `irrelevant`
 
-Read with `naive` and `hybrid` below it and `adaptive` above it, every delta is
-attributable to one change.
-
-Two things this deliberately does *not* do, because they are what `adaptive`
-adds and the ladder must not blur them: it never regenerates, and it has no
-refusal path of its own. Refusal only happens where routing already decided it
-— out of scope, ambiguous — which is shared with every other configuration.
-
-**The measurement hazard, stated here because it is easy to forget when reading
-the table.** The grounding check and the faithfulness judge that scores these
-runs are the same small model with nearly the same prompt. Configurations from
-`grounded` upward are therefore partly optimising against their own marker, and
-their advantage on that metric is inflated by an unknown amount. `cited` is the
-rung where the judge is least entangled, which is exactly why it is the one
-worth hand-labelling.
+No rung has a refusal path of its own; refusals come only from routing, as in every
+configuration. The grounding check and the faithfulness judge use the same small model with
+similar prompts, so faithfulness from `grounded` upward is inflated by an unknown amount.
 """
 
 from __future__ import annotations
@@ -52,22 +32,17 @@ class Ablation:
     name: str
 
     route: bool = True
-    """Classify, plan, select documents and anchor — or just search.
+    """Classify, plan, select documents and anchor, or just search.
 
-    False for the rung that isolates the *prompt*. `naive` and `retrieved`
-    generate through a template with no instructions at all
-    (`"<|content_start>{context}<|content_end>{query}"`), while every rung above
-    them uses the seven-rule system prompt. Without a rung that changes only the
-    prompt, the large drop between them is unattributable — it was read as
-    routing's contribution and could as easily be the instruction to cite every
-    sentence, given to a model that previously had none.
+    False for the rung that isolates the prompt: the naive baselines use a template with no
+    instructions, while every routed rung also uses the system prompt.
     """
 
     verify_citations: bool = False
     """Deterministic: every marker must resolve, every quote must be real."""
 
     ground: bool = False
-    """Model check per sentence. Here it only ever *drops*, never retries."""
+    """Model check per sentence. Here it only drops sentences."""
 
     grade: bool = False
     """Relevance filter over retrieved blocks, before generation."""
@@ -75,11 +50,8 @@ class Ablation:
     drop_partial: bool = False
     """Discard `partial` blocks as well as `irrelevant`.
 
-    The grader as shipped discards only `irrelevant`, and its prompt tells it to
-    use that verdict sparingly — so in practice it discards nothing, and
-    measuring it on and off would only confirm that. This rung asks the question
-    that matters instead: is the grader unfit for a corpus of near-identical
-    papers, or merely tuned to do nothing?
+    The default grader discards only `irrelevant`, which its prompt reserves for clear
+    mismatches, so it rarely discards anything. This rung tests stricter grading.
     """
 
 
@@ -100,7 +72,7 @@ LADDER = (
 
 
 class AblationPipeline:
-    """Runs one rung. Interface matches Engine.answer_with_context on purpose."""
+    """Runs one rung, with the same interface as ``Engine.answer_with_context``."""
 
     def __init__(
         self,
@@ -139,10 +111,8 @@ class AblationPipeline:
         path: list[str] = ["route"]
         routed = await self._router.route(question)
 
-        # Classes that routing answers without retrieval are shared with every
-        # other configuration, so they pass through unchanged. Generating over
-        # them here would make this rung look worse than `adaptive` for a reason
-        # that has nothing to do with the mechanism being priced.
+        # Classes that routing answers without retrieval pass through unchanged,
+        # as in every other configuration.
         if routed.bibliographic is not None:
             return Answer(text=routed.bibliographic.text, confidence=1.0), ("route",), ()
         if routed.plan.canned_response is not None:
@@ -172,9 +142,7 @@ class AblationPipeline:
             )
             graded = await self._answerer.grade(question, blocks, discard=discard)
             path.append("grade")
-            # Keeping nothing would make the rung refuse, which is a behaviour
-            # it is not meant to have. Falling back to the retrieved set keeps
-            # the comparison about what the grader *filters*.
+            # If grading keeps nothing, use the retrieved set: this rung never refuses.
             blocks = graded.kept or blocks
 
         draft = await self._answerer.generate(question, blocks)
@@ -202,7 +170,7 @@ class AblationPipeline:
         )
 
     async def _drop_ungrounded(self, text: str, blocks: tuple[ContextBlock, ...]) -> str:
-        """Remove sentences the excerpts do not support. No retry, by design."""
+        """Remove sentences the excerpts do not support, without retrying."""
         by_label = {b.label.upper(): b for b in blocks}
         kept: list[str] = []
         for sentence in citations.split_sentences(text):

@@ -1,23 +1,13 @@
-"""ONNX Runtime embedder — the production path.
+"""ONNX Runtime embedder on CPU, the production path.
 
-PyTorch is about two gigabytes before any weights, and the free tiers this
-deploys to give two CPU cores. ONNX Runtime is 15MB and the quantised model
-110MB, which is the difference between an image that starts and one that does
-not.
+PyTorch is about 2 GB before any weights; ONNX Runtime is about 15 MB, which keeps
+the serving image small.
 
-Two details are load-bearing and neither is obvious:
+Pooling is read from the exported ``pooling.json`` and defaults to CLS, which bge
+uses. Mean pooling, the more common default, agreed with PyTorch at only 0.973 cosine.
 
-**Pooling is read from the artifact, not assumed.** bge uses the CLS token;
-mean pooling is the more common default and is wrong here. Assuming it produced
-embeddings that agreed with PyTorch at only 0.973 — plausible-looking vectors,
-correct shape, quietly misaligned with the index. That is the same failure as
-the two-embedder bug this project replaced, and the export's parity check is
-what caught it.
-
-**The model id says what this is.** Embeddings are keyed by ``(chunk_id,
-model_id)`` and asserted at startup, so an index built with PyTorch cannot be
-searched with int8 by accident. They are close but not identical — 0.973 cosine
-— and mixing them is exactly the silent degradation the key exists to prevent.
+Embeddings are keyed by ``(chunk_id, model_id)`` and checked at startup, so a graph
+that is not equivalent to PyTorch (an int8 export) needs its own model id and index.
 """
 
 from __future__ import annotations
@@ -47,7 +37,7 @@ def pool(hidden: np.ndarray, mask: np.ndarray, mode: str) -> np.ndarray:
 
 
 class OnnxEmbedder(Embedder):
-    """Embeds with a quantised ONNX graph on CPU."""
+    """Embeds with an exported ONNX graph on CPU."""
 
     def __init__(
         self,
@@ -80,15 +70,15 @@ class OnnxEmbedder(Embedder):
         return self._dim
 
     def _load(self) -> tuple[Any, Any]:
-        """Built once. Session construction dominates the first call."""
+        """Load the session and tokenizer on first use."""
         if self._session is None or self._tokenizer is None:
             import onnxruntime as ort
             from tokenizers import Tokenizer  # type: ignore[import-untyped]
 
             options = ort.SessionOptions()
             if self._threads:
-                # Left at the runtime's default unless set. On a two-core free
-                # tier, oversubscribing threads makes latency worse, not better.
+                # Left at the runtime default unless set; oversubscribing a
+                # two-core host is slower.
                 options.intra_op_num_threads = self._threads
 
             self._session = ort.InferenceSession(
@@ -126,8 +116,8 @@ class OnnxEmbedder(Embedder):
         vectors: list[Vector] = []
         for start in range(0, len(texts), self._batch_size):
             batch = texts[start : start + self._batch_size]
-            # Off the event loop: ONNX Runtime holds the GIL through a session
-            # run, and blocking it stalls every other request on the server.
+            # A session run blocks, so it runs in a thread to keep the event
+            # loop serving other requests.
             vectors.extend(await asyncio.to_thread(self._encode, batch))
         return vectors
 

@@ -1,13 +1,7 @@
-"""The vector store interface.
+"""The vector store interface: Postgres with pgvector, and an in-memory store for tests.
 
-Two implementations matter: Postgres with pgvector (local Docker in development,
-hosted Supabase in production) and an in-memory store used by tests.
-
-Search is split into dense and lexical methods rather than hidden behind one
-call, because the caller fuses their rankings and needs them separately. Dense
-search finds passages that mean the same thing; lexical search finds passages
-containing the same rare terms. On a corpus full of identifiers like FCS-MPCC
-and NSGA-II, the second is not optional.
+Dense and lexical search are separate methods because the caller fuses their
+rankings. Lexical search catches rare identifiers such as FCS-MPCC and NSGA-II.
 """
 
 from __future__ import annotations
@@ -24,8 +18,8 @@ from myscholar.ports.embedding import Vector
 class SearchFilters:
     """Metadata constraints applied inside the search query.
 
-    Callers should always issue at least one unfiltered branch alongside any
-    filtered one, so an over-confident filter cannot empty the result set.
+    Callers should also issue an unfiltered branch, so an over-confident filter
+    cannot empty the result set.
     """
 
     document_ids: frozenset[UUID] = field(default_factory=frozenset)
@@ -55,11 +49,7 @@ class VectorStore(ABC):
 
     @abstractmethod
     async def indexed_model_ids(self) -> set[str]:
-        """Embedding models present in the index.
-
-        Checked at startup against the configured embedder. A mismatch is a
-        fatal configuration error, not a silent quality regression.
-        """
+        """Embedding models present in the index, checked at startup against the embedder."""
 
     @abstractmethod
     async def search_dense(
@@ -90,8 +80,7 @@ class VectorStore(ABC):
     ) -> list[SearchHit]:
         """Fetch a contiguous run of chunks within one section.
 
-        Scoped to a section by design: parent expansion must never stitch
-        together text from different sections or different documents.
+        Parent expansion must never join text across sections or documents.
         """
 
     @abstractmethod

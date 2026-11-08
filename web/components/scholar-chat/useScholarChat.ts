@@ -1,12 +1,8 @@
 "use client";
 
 /**
- * The SSE client.
- *
- * `EventSource` is not used, despite existing for exactly this: it is GET-only
- * and cannot set headers, so it cannot carry a session id or the shared secret
- * the production proxy injects. Parsing frames from a `fetch` body is the
- * price of using POST, and it is about forty lines.
+ * The SSE client. Frames are parsed from a `fetch` body because `EventSource` is
+ * GET-only and cannot send the question and session id as a POST body.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -24,11 +20,9 @@ interface Frame {
 }
 
 /**
- * Split a chunk of the response body into complete SSE frames.
+ * Split buffered response text into complete SSE frames.
  *
- * Returns the frames plus whatever is left over: a network read can end
- * mid-frame, and parsing a partial frame yields a JSON error rather than an
- * event. The remainder is carried into the next read.
+ * Returns the frames and the unparsed remainder, since a read can end mid-frame.
  */
 function parseFrames(buffer: string): { frames: Frame[]; rest: string } {
   const frames: Frame[] = [];
@@ -64,22 +58,18 @@ export function useScholarChat(apiBase: string): UseScholarChat {
   const [busy, setBusy] = useState(false);
   const abort = useRef<AbortController | null>(null);
 
-  // Issued by the server on the first turn and echoed on later ones, which is
-  // what lets "and 2024?" resolve against what was asked before it. Not
-  // persisted: a conversation lasts as long as the page is open, and a
-  // returning visitor starting fresh is the better default.
+  // Issued by the server on the first turn and echoed on later ones, so a
+  // follow-up such as "and 2024?" resolves. Not persisted across page loads.
   const session = useRef<string | null>(null);
 
   useEffect(() => {
-    // What the assistant covers, so the widget states it rather than guessing.
     fetch(`${apiBase}/v1/corpus`)
       .then((r) => (r.ok ? r.json() : null))
       .then(setCorpus)
       .catch(() => setCorpus(null));
   }, [apiBase]);
 
-  // Abort in flight work on unmount, so the server releases its GPU slot
-  // immediately rather than finishing an answer nobody will read.
+  // Abort in-flight work on unmount, so the server can stop answering.
   useEffect(() => () => abort.current?.abort(), []);
 
   const update = useCallback((id: string, patch: Partial<Turn>) => {
@@ -107,9 +97,7 @@ export function useScholarChat(apiBase: string): UseScholarChat {
         const response = await fetch(`${apiBase}/v1/ask`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          // The session id was issued by the server on the first turn. It is
-          // held in a ref rather than in state so that sending it never
-          // depends on a re-render having happened.
+          // A ref, so sending it does not depend on a re-render.
           body: JSON.stringify({
             question: trimmed,
             session_id: session.current,
@@ -171,8 +159,7 @@ export function useScholarChat(apiBase: string): UseScholarChat {
           }
         }
 
-        // The stream ended without an answer — a dropped connection rather
-        // than a refusal, and worth distinguishing.
+        // The stream ended without an answer: a dropped connection, not a refusal.
         setTurns((current) =>
           current.map((turn) =>
             turn.id === id && turn.pending
@@ -213,8 +200,7 @@ export function useScholarChat(apiBase: string): UseScholarChat {
   const reset = useCallback(() => {
     abort.current?.abort();
     setTurns([]);
-    // Clearing the transcript must clear the server's copy of it too, or the
-    // next question resolves against turns the visitor believes are gone.
+    // A new session, so the next question does not resolve against cleared turns.
     session.current = null;
   }, []);
 

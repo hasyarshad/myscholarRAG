@@ -1,18 +1,10 @@
-# The whole system in containers: database plus API.
+# Database plus API in containers:
 #
 #   docker compose -f docker/compose.yaml up --build
 #
-# Two things worth knowing before you run it.
-#
-# **The database here is separate from the development one.** Local development
-# uses Postgres from conda on port 5433 (`make db-up`), holding the real index.
-# This stack brings up its own empty Postgres on 5434 so the two cannot collide
-# and a container experiment can never touch the corpus. Load it with
+# This stack runs its own empty Postgres on port 5434, separate from the
+# development database on 5433. Load the local index into it with
 # `make compose-restore`.
-#
-# **The port offsets are deliberate.** 5434 rather than 5432 because a
-# developer machine usually already has something on 5432, and finding out by
-# way of a silent connection to the wrong database is a bad afternoon.
 
 name: myscholar
 
@@ -40,33 +32,21 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     ports:
-      # 8001, not 8000: `myscholar serve` uses 8000 during development, and a
-      # container that silently fails to bind while a dev server answers on the
-      # same port is a genuinely confusing five minutes.
+      # 8001, so it doesn't clash with `myscholar serve` on 8000.
       - "8001:8080"
     environment:
-      # Service name, not localhost: inside a compose network, `db` resolves to
-      # the database container. `localhost` there means the API container
-      # itself, which is running no database.
       MYSCHOLAR_DATABASE__URL: postgresql+asyncpg://myscholar:myscholar@db:5432/myscholar
 
-      # This stack is for exercising the container, not for answering questions,
-      # so generation defaults to the fake model — it needs no API key and no
-      # network. Override both to talk to a real one:
-      #
-      #   MYSCHOLAR_LLM__PROVIDER=openai_compatible
-      #   MYSCHOLAR_LLM__API_KEY=...
+      # Defaults to the fake model, which needs no key or network. To use a real
+      # one, set MYSCHOLAR_LLM__PROVIDER=openai_compatible and MYSCHOLAR_LLM__API_KEY.
       MYSCHOLAR_LLM__PROVIDER: ${MYSCHOLAR_LLM__PROVIDER:-fake}
       MYSCHOLAR_LLM__API_KEY: ${MYSCHOLAR_LLM__API_KEY:-}
 
-      # The one place this differs from production: an empty database needs its
-      # schema, and there is no admin running migrations by hand here.
+      # The database starts empty, so the API creates the schema.
       MYSCHOLAR_DATABASE__MIGRATE_ON_STARTUP: "true"
     depends_on:
       db:
-        # Not just "started": Postgres accepts TCP connections several seconds
-        # before it will answer queries, so waiting on the port alone produces
-        # an API that starts, fails its first query, and reports itself unready.
+        # Postgres accepts connections a few seconds before it answers queries.
         condition: service_healthy
     restart: unless-stopped
 

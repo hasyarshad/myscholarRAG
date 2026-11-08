@@ -1,19 +1,7 @@
-"""Building the query pipeline, in one place.
+"""Wiring of the query pipeline: retriever, router, answerer, engine and budget.
 
-``container.py`` chooses the *adapters* — which model, which embedder, which
-store. This chooses the *arrangement*: which retriever, wired to which router,
-wired to which engine, with which budgets.
-
-It exists because the arrangement was written out five times — the API, the
-CLI, and three evaluation scripts — and that is worse than duplication. An
-evaluation script that wires the pipeline slightly differently is not measuring
-the system that ships, and nothing would report the difference: the numbers
-would simply describe something else. The drift had already begun, with
-``short_name`` reaching the API's engine and not the CLI's.
-
-The rule this encodes: **the evaluation must assemble the system exactly as
-production does.** The cheapest way to guarantee that is to give them one
-function to call.
+``container.py`` chooses the adapters; this module arranges them. The API, the CLI and the
+evaluation scripts all build the pipeline here, so the evaluation measures what ships.
 """
 
 from __future__ import annotations
@@ -58,9 +46,8 @@ def build_router(
 ) -> QueryRouter:
     """The routed entry point to retrieval.
 
-    ``titles`` seeds entity linking and hypothetical-passage generation. The
-    router loads them itself on first use, so passing them is an optimisation
-    for callers that already hold the document list.
+    ``titles`` seeds entity linking and hypothetical-passage generation. The router
+    loads them on first use when omitted.
     """
     return QueryRouter(
         classifier=QueryClassifier(

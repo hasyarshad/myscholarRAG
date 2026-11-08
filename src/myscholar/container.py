@@ -1,9 +1,6 @@
 """Composition root.
 
-This is the only module permitted to import from ``adapters``. Everything else
-depends on ``ports``. Concentrating the choice here is what lets the same
-pipeline run against a local GPU in development and a hosted API in production
-without touching application code.
+The only module permitted to import from ``adapters``; everything else depends on ``ports``.
 """
 
 from __future__ import annotations
@@ -30,10 +27,10 @@ class Container:
 
     settings: Settings
     generator: ChatModel
-    """Answer synthesis. Larger model, called once or twice per question."""
+    """Answer synthesis. The larger model."""
 
     utility: ChatModel
-    """Classification and grading. Smaller model, called many times per question."""
+    """Routing, rewriting and extraction. Smaller model, called many times per question."""
 
     embedder: Embedder
     resolver: MetadataResolver | None
@@ -56,8 +53,7 @@ def _build_chat(settings: Settings, *, model: str) -> ChatModel:
                 temperature=settings.llm.temperature,
                 timeout_seconds=settings.llm.timeout_seconds,
                 suppress_reasoning=settings.llm.suppress_reasoning,
-                # Set to talk to Ollama Cloud instead of a local server; the
-                # base_url changes to https://ollama.com and nothing else does.
+                # Set for Ollama Cloud, with base_url https://ollama.com.
                 api_key=(settings.llm.api_key.get_secret_value() if settings.llm.api_key else None),
             )
 
@@ -70,9 +66,8 @@ def _build_chat(settings: Settings, *, model: str) -> ChatModel:
             if settings.llm.api_key is None:  # pragma: no cover - validated in settings
                 msg = "openai_compatible provider requires MYSCHOLAR_LLM__API_KEY"
                 raise ConfigurationError(msg)
-            # The Ollama default base_url is a local address, which is not a
-            # sensible endpoint for a hosted provider — so fall back to the
-            # adapter's own default rather than inheriting it.
+            # The default base_url is Ollama's local address; a hosted provider
+            # falls back to the adapter's own default endpoint.
             local_default = settings.llm.base_url.startswith(("http://localhost", "http://127."))
             return OpenAICompatibleChatModel(
                 model,
@@ -123,9 +118,7 @@ def _build_embedder(settings: Settings) -> Embedder:
 def build_container(settings: Settings | None = None) -> Container:
     """Assemble the application from settings.
 
-    Adapter modules are imported lazily inside each branch so that running with
-    fakes needs neither torch nor onnxruntime installed. That keeps the unit
-    test suite and CI free of heavyweight dependencies.
+    Adapters are imported lazily, so running with fakes needs neither torch nor onnxruntime.
     """
     settings = settings or load_settings()
 

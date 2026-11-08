@@ -1,13 +1,7 @@
 """A small state machine with a hard budget.
 
-Hand-rolled rather than taken from a framework, for two reasons: the semantics
-needed here are about 120 lines, and a compiled graph's transition table cannot
-be property-tested the way a plain dispatch dict can.
-
-The budget is the point. A self-correcting loop retries when it is unhappy with
-its own output, and a question it will never answer makes it unhappy forever.
-Three independent bounds catch three different runaways, and any one of them
-forces the terminal state.
+Hand-rolled: the semantics fit in about 120 lines, and a plain dispatch dict is easy to
+property-test. Any of the budget's bounds forces the terminal state.
 """
 
 from __future__ import annotations
@@ -21,16 +15,15 @@ type NodeName = str
 
 
 class GraphError(RuntimeError):
-    """The graph is malformed — an edge points at a node that does not exist."""
+    """The graph is malformed, such as an edge pointing at an undefined node."""
 
 
 @dataclass(frozen=True, slots=True)
 class Budget:
-    """Bounds guaranteeing the loop halts.
+    """Bounds that guarantee the loop halts.
 
-    Independent rather than a single counter, because each catches a different
-    runaway: a cycle between two nodes, a query that keeps failing grading, a
-    model that keeps producing ungrounded text, and anything unexpectedly slow.
+    The step count catches cycles, retrieval rounds cap re-searching, and the
+    deadline catches slow model calls.
     """
 
     max_steps: int = 24
@@ -57,11 +50,8 @@ class Budget:
     def fresh(self) -> Budget:
         """A budget with the same limits and the counters reset.
 
-        The deadline is measured from ``started_at``, which is set when the
-        Budget is constructed. An Engine holds one Budget for its lifetime, so
-        reusing it across questions means the clock never restarts — the second
-        question inherits the first one's elapsed time, and after 45 seconds of
-        uptime every question is refused as budget-exhausted before it begins.
+        ``started_at`` is set at construction, so a budget reused across questions
+        would carry over the previous question's elapsed time.
         """
         return replace(
             self,
@@ -93,11 +83,9 @@ class Budget:
 
 
 class HasBudget(Protocol):
-    """State the driver can meter. Nodes may carry anything else they like.
+    """State the driver can meter.
 
-    Declared as a read-only property rather than an attribute so that frozen
-    dataclasses satisfy it — a mutable attribute in a protocol requires the
-    implementer to be settable, which is exactly what the states are not.
+    ``budget`` is a read-only property so that frozen dataclasses satisfy the protocol.
     """
 
     @property
@@ -155,9 +143,8 @@ class Graph[S: HasBudget]:
     async def run(self, state: S) -> tuple[S, Trace]:
         """Execute until a terminal node, or until the budget runs out.
 
-        Termination is guaranteed by the step and deadline bounds, which are
-        checked before every node. An edge returning an unknown name is a
-        programming error and raises rather than silently stopping.
+        The budget is checked before every node. An edge returning an unknown
+        node name raises ``GraphError``.
         """
         path: list[str] = []
         timings: list[tuple[str, int]] = []
@@ -167,14 +154,8 @@ class Graph[S: HasBudget]:
         while True:
             if (reason := state.budget.reason_for_stopping()) is not None:
                 stopped = reason
-                # One final pass through the terminal node, so the caller gets
-                # a well-formed refusal rather than a partial state.
-                #
-                # Keyed on whether it has actually *run*, not on whether the
-                # machine happens to be pointing at it. An earlier version
-                # compared against `current` and so skipped the node whenever
-                # the budget tripped in the same step that routed to it —
-                # returning a state that had never reached a terminal node.
+                # Run the budget-exhausted node once, unless it was the last node
+                # to run, so the returned state is always terminal.
                 if not path or path[-1] != self._exhausted:
                     state = await self._run_node(self._exhausted, state, path, timings)
                 break

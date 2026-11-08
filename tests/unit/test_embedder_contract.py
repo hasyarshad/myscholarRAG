@@ -1,14 +1,7 @@
-"""What every embedder adapter must agree on.
+"""Behaviour every embedder adapter must share.
 
-The index is built by the torch adapter on a GPU and searched by the ONNX
-adapter on a CPU. Anything the two decide separately is a place they can drift,
-and drift here does not raise — it returns ranked, plausible, worse results.
-
-This is not hypothetical. The ONNX adapter shipped without the BGE query
-instruction that the torch adapter applies. The two models agreed at 1.00000
-cosine, because the models were identical; what differed was the text each was
-asked to embed. Retrieval lost 0.07 MRR and the cause looked exactly like
-quantisation damage.
+The index is built by the torch adapter and searched by the ONNX adapter. A difference
+between them degrades ranking without raising: a missing query instruction cost 0.07 MRR.
 """
 
 from __future__ import annotations
@@ -51,18 +44,14 @@ class TestQueryInstruction:
             )
 
     def test_no_adapter_prefixes_passages(self) -> None:
-        """Applying the instruction to passages is worse than omitting it."""
         for adapter in ADAPTERS:
             recorder = _Recorder(adapter)
             asyncio.run(recorder.embedder.embed_documents(["a passage of text"]))
             assert recorder.seen == ["a passage of text"], adapter.__name__
 
     def test_the_instruction_has_one_definition(self) -> None:
-        """A copy in each adapter is how they came apart the first time.
-
-        Read from disk rather than through ``inspect``, which resolves modules
-        via ``sys.modules`` and so depends on whatever another test left there.
-        """
+        # Read from disk: ``inspect`` resolves modules through ``sys.modules``,
+        # which depends on what other tests left there.
         package = Path(myscholar.adapters.embedding.__file__).parent
         defining = [
             path.name

@@ -1,12 +1,6 @@
-"""Fake implementations for tests and for the Phase 0 walking skeleton.
+"""Working fake implementations of the ports, for tests.
 
-These are fakes, not mocks. A mock asserts how it was called and couples tests
-to implementation details; a fake is a working implementation with a shortcut.
-Tests here assert on behaviour, so they survive refactoring.
-
-Everything in this package runs with no GPU, no network and no database, which
-is what allows the suite to run in under a second and to work on free CI
-runners.
+They need no GPU, network or database.
 """
 
 from myscholar.adapters.fakes.chat import FakeChatModel

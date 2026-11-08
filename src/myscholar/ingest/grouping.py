@@ -1,9 +1,7 @@
 """Grouping extracted blocks into sections.
 
-Separated from the pipeline because it is the step most likely to be wrong in
-ways that are invisible downstream: a mis-grouped block ends up filed under the
-wrong heading, gets the wrong contextual header, and is then filtered out of
-searches that should have found it. Worth testing on its own.
+Kept apart from the pipeline so it can be tested on its own: a mis-grouped block gets the
+wrong heading and contextual header, which nothing downstream detects.
 """
 
 from __future__ import annotations
@@ -33,9 +31,7 @@ class PendingSection:
     def has_answerable_content(self) -> bool:
         """Whether anything here could answer a question.
 
-        A section containing only equations has no prose to retrieve and no
-        prose to cite, so indexing it would add a chunk that can never usefully
-        match.
+        A section of equations alone has no prose to retrieve or cite.
         """
         return any(b.kind is not ChunkKind.EQUATION for b in self.blocks)
 
@@ -50,9 +46,8 @@ async def group_into_sections(
 ) -> list[PendingSection]:
     """Assign each block to the section whose heading precedes it.
 
-    Content appearing before any heading is kept in a leading section rather
-    than dropped — on most IEEE papers that content is the abstract, which is
-    among the most useful text in the document.
+    Content before any heading is kept in a leading section; on most IEEE papers it is
+    the abstract.
     """
     sections: list[PendingSection] = []
     current = PendingSection(kind=leading_kind, heading="Abstract")

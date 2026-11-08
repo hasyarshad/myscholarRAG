@@ -1,11 +1,11 @@
 [project]
 name = "myscholar"
 version = "0.1.0"
-description = "Adaptive, citation-grounded RAG over a personal corpus of research papers"
+description = "Citation-verified RAG over a personal corpus of research papers"
 readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "MIT" }
-authors = [{ name = "Haseeb Arshad" }]
+authors = [{ name = "Muhammad Haseeb Arshad", email = "haseeb.arshad.ee@gmail.com" }]
 
 dependencies = [
     "pydantic>=2.10",
@@ -15,15 +15,14 @@ dependencies = [
     "structlog>=25.1",
     "httpx>=0.28",
     "pyyaml>=6.0",
-    # Persistence is used by both ingestion and serving, so it belongs in the
-    # core dependencies rather than in either extra.
+    # Ingestion and serving both use the database.
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.30",
     "pgvector>=0.3",
 ]
 
 [project.optional-dependencies]
-# Local development: GPU inference and PDF ingestion. Not installed in production.
+# Local development: GPU inference and PDF ingestion.
 local = [
     "ollama>=0.4",
     "sentence-transformers>=3.3",
@@ -39,9 +38,7 @@ serve = [
     "tokenizers>=0.21",
 ]
 
-# Model export: run once, on a machine with the PyTorch weights, to produce the
-# ONNX artifacts that production loads. Never installed in production — the
-# point of the export is that the 2GB of PyTorch is not needed to serve.
+# Exporting the embedder to ONNX. Used at build time, not at run time.
 export = [
     "optimum[onnxruntime]>=1.24",
     "onnx>=1.17",
@@ -65,19 +62,15 @@ myscholar = "myscholar.cli:app"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# PyPI's default torch wheel is built against CUDA 13.0, but this machine's
-# driver reports 12.8, so that wheel silently falls back to CPU. The RTX 5090
-# is Blackwell (sm_120) and needs cu128 specifically — earlier builds don't
-# support the architecture, later ones outrun the driver.
+# CUDA 12.8 wheels: the first build that supports Blackwell GPUs (sm_120). The
+# default PyPI wheel targets CUDA 13 and falls back to CPU on a 12.8 driver.
 [[tool.uv.index]]
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
-# torchvision must come from the same index as torch. A mismatched pair
-# installs cleanly and then fails at import with
-# "operator torchvision::nms does not exist", because the compiled operators
-# are registered against a different torch build.
+# torchvision must come from the same index as torch, or it fails at import with
+# "operator torchvision::nms does not exist".
 [tool.uv.sources]
 torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
@@ -104,14 +97,14 @@ select = [
     "B",        # bugbear
     "SIM",      # simplify
     "RUF",      # ruff-specific
-    "ANN",      # annotations — every function is typed
+    "ANN",      # annotations: every function is typed
     "PTH",      # prefer pathlib
     "RET",      # return consistency
-    "SLF",      # private member access — flags reaching past an interface
-    "BLE",      # blind except — each one must be justified with a noqa
+    "SLF",      # private member access
+    "BLE",      # blind except: each needs a justified noqa
 ]
 ignore = [
-    "ANN401",   # allow typing.Any where genuinely needed
+    "ANN401",   # allow typing.Any where needed
     "B008",     # typer uses function calls in argument defaults by design
 ]
 
@@ -122,14 +115,7 @@ ignore = [
 python_version = "3.13"
 strict = true
 warn_unreachable = true
-# scripts is included, and was not. The evaluation harness and the export
-# tooling import the same domain enums the package does, so a rename that the
-# type checker would catch instantly inside src went unnoticed outside it:
-# RetrievalMode.FULL was deleted with the cross-encoder reranker and
-# scripts/eval_generation.py kept referring to it, so the three-configuration
-# evaluation raised AttributeError partway through every run — after the first
-# configuration had finished and printed, which is what made it look like a
-# completed run rather than a crash. mypy names that line in under a second.
+# scripts/ imports the package's types, so a rename in src must be checked there too.
 files = ["src", "tests", "scripts"]
 
 # Third-party packages without bundled type stubs.

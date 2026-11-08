@@ -1,10 +1,7 @@
-"""Ollama backend — local inference during development.
+"""Ollama backend, used for local development and evaluation.
 
-Talks to the Ollama HTTP API directly. Structured output uses Ollama's
-``format`` parameter, which constrains decoding to a JSON schema rather than
-asking the model nicely and parsing whatever comes back. That distinction
-matters: every classification and grading decision in the pipeline depends on
-getting well-formed output, and a parse failure mid-loop is a wasted round.
+Structured output uses Ollama's ``format`` parameter, which constrains decoding to a
+JSON schema.
 """
 
 from __future__ import annotations
@@ -25,12 +22,9 @@ class OllamaError(RuntimeError):
     """Ollama was unreachable or returned something unusable."""
 
 
-#: Qwen3 suppresses its own reasoning when this appears in the prompt.
-#: Measured on qwen3:4b: 51 completion tokens with it, 191 without, for the
-#: same single-word answer.
-#:
-#: Note this is *not* the same as Ollama's ``think: false`` parameter, which was
-#: measured to make things worse — see ``_payload`` below.
+#: Qwen3 suppresses its own reasoning when this appears in the prompt. Measured
+#: on qwen3:4b: 51 completion tokens with it, 191 without, for the same one-word
+#: answer. Ollama's ``think: false`` parameter behaves differently (see ``_payload``).
 NO_THINK_DIRECTIVE = "/no_think"
 
 
@@ -48,23 +42,18 @@ class OllamaChatModel(ChatModel):
     ) -> None:
         self._model = model
         self._base_url = base_url.rstrip("/")
-        # Ollama Cloud speaks the same /api/chat as a local server, so the only
-        # differences are the host and a bearer token. That is the whole reason
-        # this adapter serves both: dev and production run identical code paths
-        # against identical request shapes, which is a stronger claim of
-        # parity than "we swapped in a different vendor's SDK".
+        # Ollama Cloud uses the same /api/chat as a local server; only the host
+        # and a bearer token differ.
         self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self._cloud = bool(api_key)
         self._temperature = temperature
         self._timeout = timeout_seconds
-        # -1 keeps weights resident indefinitely. Without it Ollama evicts the
-        # model after five idle minutes, and the next question pays a
-        # multi-second reload — which looks like a slow pipeline, not a cold
-        # model. Must be a number or a duration string like "10m"; the string
-        # "-1" is rejected with 'missing unit in duration'.
+        # -1 keeps the weights loaded. By default Ollama evicts a model after five
+        # idle minutes and the next request waits seconds for a reload. Must be a
+        # number or a duration string like "10m"; the string "-1" is rejected.
         self._keep_alive = keep_alive
-        # Reasoning traces cost latency and, on a grounded-extraction task, let
-        # the model argue itself away from the retrieved context.
+        # Reasoning traces add latency and can pull a grounded answer away from
+        # the retrieved context.
         self._suppress_reasoning = suppress_reasoning
 
     @property
@@ -81,8 +70,8 @@ class OllamaChatModel(ChatModel):
     ) -> dict[str, Any]:
         options: dict[str, Any] = {
             "temperature": self._temperature if temperature is None else temperature,
-            # A fixed seed makes runs reproducible, which the evaluation harness
-            # depends on. Ollama is still not bit-deterministic across restarts.
+            # Fixed for reproducible evaluation runs. Ollama is still not
+            # bit-deterministic across restarts.
             "seed": 42,
         }
         if max_tokens is not None:
@@ -92,13 +81,9 @@ class OllamaChatModel(ChatModel):
         if self._suppress_reasoning and wire:
             wire[-1]["content"] += f" {NO_THINK_DIRECTIVE}"
 
-        # Ollama's `think: false` parameter is deliberately NOT sent here.
-        # Measured against qwen3 on Ollama 0.32.6: passing it stops Ollama
-        # separating the reasoning trace into its own `thinking` field, but the
-        # model still generates one — so the reasoning ends up inside
-        # `message.content` and contaminates the answer. Omitting it keeps
-        # `content` clean; the prompt directive above is what actually shortens
-        # the reasoning.
+        # `think: false` is not sent. With qwen3 on Ollama 0.32.6 it stops Ollama
+        # moving the reasoning trace into its own `thinking` field, but the model
+        # still writes one, so it lands in `message.content`.
         payload: dict[str, Any] = {
             "model": self._model,
             "messages": wire,
@@ -106,9 +91,7 @@ class OllamaChatModel(ChatModel):
             "options": options,
         }
         if not self._cloud:
-            # Residency is a property of a server holding weights in memory.
-            # Sending it to a shared cloud endpoint asks for something it does
-            # not own, so it is omitted rather than ignored.
+            # Residency only applies to a server holding the weights itself.
             payload["keep_alive"] = self._keep_alive
         return payload
 
@@ -165,9 +148,7 @@ class OllamaChatModel(ChatModel):
         temperature: float | None = None,
     ) -> T:
         payload = self._payload(messages, temperature=temperature, max_tokens=None, stream=False)
-        # Constrained decoding: the sampler can only emit tokens that keep the
-        # output valid against this schema, so malformed JSON is impossible
-        # rather than merely unlikely.
+        # Constrained decoding: the sampler only emits tokens valid against the schema.
         payload["format"] = schema.model_json_schema()
 
         async with httpx.AsyncClient(timeout=self._timeout, headers=self._headers) as client:

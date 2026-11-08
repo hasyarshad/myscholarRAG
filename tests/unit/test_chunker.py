@@ -39,7 +39,6 @@ class TestSplitSentences:
         ],
     )
     def test_scientific_abbreviations_do_not_split(self, text: str) -> None:
-        """These are dense in this corpus; splitting on them shreds sentences."""
         assert len(split_sentences(text)) == 1
 
     def test_empty_input_yields_nothing(self) -> None:
@@ -65,7 +64,6 @@ class TestStripMathematics:
         assert "where T is one" in result
 
     def test_keeps_surrounding_prose_intact(self) -> None:
-        """The prose around an equation is what actually answers questions."""
         text = r"where \tau_s is the stator time constant of the machine"
 
         assert "stator time constant" in strip_mathematics(text)
@@ -96,7 +94,6 @@ class TestChunkSection:
         assert all(c.token_count <= POLICY.max_tokens for c in chunks)
 
     def test_ordinals_are_contiguous_from_zero(self) -> None:
-        """Parent expansion fetches ordinal ranges; a gap truncates a span."""
         text = " ".join(f"Sentence {i} with content." for i in range(100))
 
         chunks = chunk_section(_prose(text))
@@ -141,7 +138,6 @@ class TestChunkSection:
         assert all(c.token_count <= POLICY.max_tokens for c in chunks)
 
     def test_page_number_is_carried_through(self) -> None:
-        """Citations resolve to a page, so it must survive chunking."""
         chunks = chunk_section(_prose("Some content on page seven.", page=7))
 
         assert chunks[0].page == 7
@@ -187,7 +183,6 @@ class TestChunkingProperties:
         )
     )
     def test_no_content_word_is_lost(self, sentences: list[str]) -> None:
-        """Overlap may duplicate text, but chunking must never drop it."""
         text = ". ".join(s.strip() for s in sentences if s.strip())
         if not text.strip():
             return
@@ -229,7 +224,6 @@ class TestContextHeader:
 
 class TestEstimateTokens:
     def test_never_returns_zero(self) -> None:
-        """A zero count would let an empty chunk pass a size check."""
         assert estimate_tokens("") == 1
 
     def test_scales_with_length(self) -> None:

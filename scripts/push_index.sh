@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
 # Copy the locally built index into a hosted Postgres (Supabase).
 #
-# Ingestion runs here, once, on the GPUs: Docling extraction, 2180 chunks, an
-# embedding pass, Crossref resolution and paper summaries. Production never
-# repeats any of that — it reads the result. This script is the seam between the
-# two, and it moves data only. The schema is created separately by
-# `myscholar db migrate`, because the role that serves traffic must not be able
-# to change the schema it reads.
+# Ingestion runs locally; production only reads its result. This moves data
+# only: the schema comes from `myscholar db migrate`, because the role that
+# serves traffic must not be able to change the schema it reads.
 #
 #   ./scripts/push_index.sh              # dump locally, then load into $SUPABASE_DB_URL
 #   ./scripts/push_index.sh --dump-only  # just write the dump, inspect it first
@@ -22,29 +19,19 @@ PGPORT="${MYSCHOLAR_PGPORT:-5433}"
 PGDATABASE="${MYSCHOLAR_PGDATABASE:-myscholar}"
 DUMP="${MYSCHOLAR_DUMP:-artifacts/index.sql}"
 
-[[ -x "$BIN/pg_dump" ]] || { echo "pg_dump not found in $BIN — run: make db-setup"; exit 1; }
+[[ -x "$BIN/pg_dump" ]] || { echo "pg_dump not found in $BIN. Run: make db-setup"; exit 1; }
 export PATH="$BIN:$PATH"
 
-# Tables in dependency order. Named explicitly rather than dumping everything:
-# conversation_turns is visitor chat history, which belongs to whichever
-# database it was created in and must never be copied between environments.
+# Tables in dependency order. conversation_turns is left out: visitor chat
+# history must never be copied between environments.
 TABLES=(documents sections chunks chunk_embeddings document_summaries)
 
 mkdir -p "$(dirname "$DUMP")"
 echo "dumping ${#TABLES[@]} tables from localhost:$PGPORT/$PGDATABASE"
 
-# No --disable-triggers, deliberately. It emits `ALTER TABLE ... DISABLE TRIGGER
-# ALL`, which touches the internal triggers implementing foreign keys and so
-# requires real superuser. A managed Postgres does not give you that: on
-# Supabase the load fails with
-#
-#   permission denied: "RI_ConstraintTrigger_..." is a system trigger
-#
-# It is also unnecessary here. Its purpose is to sidestep foreign-key checks
-# when rows arrive before the rows they reference, and pg_dump already emits
-# these five tables parent-first — documents, sections, chunks, then the two
-# that depend on them. Every reference is satisfied as it is inserted, so the
-# constraints can simply stay on and check the load as it happens.
+# No --disable-triggers: it needs superuser, which Supabase does not grant
+# ("RI_ConstraintTrigger_... is a system trigger"). It is also unneeded, since
+# pg_dump emits these tables parent-first and the foreign keys hold during the load.
 pg_dump \
     --host=127.0.0.1 --port="$PGPORT" --username="$USER" --dbname="$PGDATABASE" \
     --data-only --no-owner --no-privileges \
@@ -54,9 +41,8 @@ pg_dump \
 rows=$(grep -c '^COPY' "$DUMP" || true)
 echo "wrote $DUMP ($(du -h "$DUMP" | cut -f1), $rows COPY blocks)"
 
-# The claim above — parent-first ordering — is checked rather than assumed,
-# because if pg_dump ever changed its mind the failure would be a foreign-key
-# violation halfway through a load into a truncated production table.
+# Check the parent-first order: otherwise a foreign-key violation would stop the
+# load halfway through, after the production tables were truncated.
 order=$(grep -oE '^COPY public\.[a-z_]+' "$DUMP" | sed 's/COPY public\.//' | tr '\n' ' ')
 expected="documents sections chunks chunk_embeddings document_summaries "
 if [[ "$order" != "$expected" ]]; then
@@ -72,18 +58,17 @@ if [[ "${1:-}" == "--dump-only" ]]; then
     exit 0
 fi
 
-# Read the target from .env without sourcing it — the file holds secrets with
-# characters a shell would happily interpret.
+# Read from .env without sourcing it: the secrets may contain shell metacharacters.
 TARGET="${SUPABASE_DB_URL:-$(grep -E '^SUPABASE_DB_URL=' .env 2>/dev/null | cut -d= -f2- | tr -d '"'"'"'' || true)}"
 if [[ -z "$TARGET" ]]; then
     echo
-    echo "SUPABASE_DB_URL is not set in .env — see .env.example."
+    echo "SUPABASE_DB_URL is not set in .env (see .env.example)."
     echo "Dump is ready; load it yourself with:"
     echo "  psql \"\$SUPABASE_DB_URL\" -v ON_ERROR_STOP=1 -f $DUMP"
     exit 1
 fi
 
-# psql speaks the plain URL. The +asyncpg form is SQLAlchemy's and it rejects it.
+# psql rejects SQLAlchemy's +asyncpg scheme.
 TARGET="${TARGET/postgresql+asyncpg:/postgresql:}"
 
 echo
@@ -92,15 +77,13 @@ echo "This replaces the index rows on that database. Ctrl-C now if that is wrong
 read -r -p "type 'push' to continue: " reply
 [[ "$reply" == "push" ]] || { echo "aborted"; exit 1; }
 
-# Truncate first so a re-push is a replacement rather than a duplicate-key
-# failure halfway through. CASCADE follows the foreign keys down from documents.
+# Truncate first so a re-push replaces rows instead of failing on duplicate keys.
+# CASCADE follows the foreign keys down from documents.
 psql "$TARGET" -v ON_ERROR_STOP=1 -q -c "TRUNCATE documents CASCADE;"
 psql "$TARGET" -v ON_ERROR_STOP=1 -q -f "$DUMP"
 
-# Now that the rows are in, build the vector index over the finished data.
-# Dropping first because REINDEX on a graph built during the load inherits its
-# shape; a fresh CREATE sees all 2,180 vectors at once and is what makes
-# approximate search agree with an exact scan.
+# Build the HNSW index over the loaded rows. A graph built over the finished
+# data agrees with an exact scan; one built row by row during the load did not.
 echo
 echo "building the vector index over the loaded data"
 psql "$TARGET" -v ON_ERROR_STOP=1 -q -c "DROP INDEX IF EXISTS ix_chunk_embeddings_hnsw;"

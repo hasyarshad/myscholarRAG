@@ -1,21 +1,10 @@
-"""Calibrate the faithfulness judge before trusting anything it says.
+"""Calibrate the faithfulness judge on cases with a known answer.
 
     uv run python scripts/eval_judge.py
 
-The judge is a 4B model whose verdicts become the headline number of the whole
-evaluation. An uncalibrated judge does not produce a soft number — it produces
-a confident wrong one, and nothing downstream can tell.
-
-Two rates, reported separately because they fail in opposite directions and an
-average hides which:
-
-  recall on supported claims    how often it recognises a claim that is fine
-  recall on unsupported claims  how often it catches one that is not
-
-A judge biased toward "unsupported" makes every configuration look terrible and
-the *comparison* still roughly holds. A judge biased toward "supported" makes
-everything look clean and the comparison collapses. Neither is acceptable, and
-they are not visible in a single accuracy figure.
+The judge (the utility model) produces the unsupported-claim rate. Recall on
+supported and on unsupported claims is reported separately, because a bias either
+way is hidden by a single accuracy figure.
 """
 
 from __future__ import annotations
@@ -80,11 +69,11 @@ async def main() -> None:
         f"| Recognises a supported claim | **{recall_ok:.0%}** | {len(supported)} cases |",
         f"| Catches an unsupported claim | **{recall_bad:.0%}** | {len(unsupported)} cases |",
         "",
-        "Reported separately because they fail in opposite directions. A judge "
-        "biased toward *unsupported* makes every configuration look bad while "
-        "roughly preserving the comparison; one biased toward *supported* makes "
-        "everything look clean and destroys it. A single accuracy figure hides "
-        "which is happening.",
+        "The two rates are reported separately because the errors have different "
+        "effects. A judge biased toward *unsupported* makes every configuration look "
+        "worse but roughly preserves the comparison; one biased toward *supported* "
+        "makes every configuration look clean and hides the differences. A single "
+        "accuracy figure cannot show which bias is present.",
         "",
         "## By case shape",
         "",

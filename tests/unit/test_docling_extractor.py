@@ -1,8 +1,7 @@
-"""Docling block classification, exercised against a stubbed document.
+"""Docling block classification against a stubbed document.
 
-Docling itself is not invoked: these tests stub the object it returns, so they
-verify how *we* interpret its labels. That interpretation is where the real bug
-was — everything Docling produced was correct.
+Docling is not invoked: a stub stands in for the document it returns, so these tests
+cover how its labels are interpreted.
 """
 
 from __future__ import annotations
@@ -68,15 +67,7 @@ def pdf(tmp_path: Path) -> Path:
 
 
 class TestTitleHandling:
-    """Regression guards for a defect that required re-indexing the corpus."""
-
     def test_the_title_does_not_become_a_section_heading(self, pdf: Path) -> None:
-        """Docling labels the paper's own title as a title item.
-
-        Treating that as a heading produced a section headed by the entire
-        paper title, spanning the abstract and author block, which the
-        sectionizer then classified by content and filed as methods.
-        """
         extractor = _extractor(
             [
                 _Item("title", "A Chaos Based SVPWM Technique for B4 Inverters"),
@@ -101,7 +92,6 @@ class TestTitleHandling:
         assert extractor.extract(pdf).title == "A Chaos Based SVPWM Technique for B4 Inverters"
 
     def test_the_abstract_survives_as_content(self, pdf: Path) -> None:
-        """It sits before the first heading, and is among the best text there is."""
         extractor = _extractor(
             [
                 _Item("title", "Some Paper About Predictive Control Methods"),
@@ -115,7 +105,7 @@ class TestTitleHandling:
         assert any("we propose a scheme" in t for t in texts)
 
     def test_a_later_title_item_becomes_content(self, pdf: Path) -> None:
-        """Only the first is the paper's; later ones are figure or table titles."""
+        # Only the first title item is the paper's; later ones title figures or tables.
         extractor = _extractor(
             [
                 _Item("title", "A Study of Predictive Control for Induction Motors"),
@@ -166,7 +156,6 @@ class TestBlockClassification:
         assert blocks[0].text == "Real content."
 
     def test_page_numbers_are_carried_through(self, pdf: Path) -> None:
-        """Citations resolve to a page."""
         extractor = _extractor([_Item("text", "On page seven.", prov=[_Prov(page_no=7)])])
 
         assert extractor.extract(pdf).blocks[0].page == 7
@@ -189,8 +178,6 @@ class TestBlockClassification:
 
 class TestNormalise:
     def test_ligature_codepoints_are_decomposed(self) -> None:
-        """Backends disagree about emitting one codepoint or two; the index
-        cannot contain both forms and still match consistently."""
         assert normalise("stator ﬂux linkage") == "stator flux linkage"
         assert normalise("deﬁning the scheme") == "defining the scheme"
 
@@ -206,12 +193,7 @@ class TestNormalise:
 
 
 class TestTitleLabelledAsSectionHeader:
-    """Docling is inconsistent about how it labels the paper's own title.
-
-    On some documents it is a title item; on others a section_header. Label
-    alone is therefore not a sufficient signal, and relying on it left the
-    title becoming a section on part of the corpus.
-    """
+    """Docling labels a paper's title as either a title item or a section_header."""
 
     def test_a_long_leading_section_header_is_treated_as_the_title(self, pdf: Path) -> None:
         long_title = (
@@ -233,11 +215,6 @@ class TestTitleLabelledAsSectionHeader:
         assert result.headings == ("I. INTRODUCTION",)
 
     def test_a_long_heading_later_in_the_document_stays_a_heading(self, pdf: Path) -> None:
-        """Only the leading item can be the title; later long headings are real.
-
-        This corpus genuinely contains headings such as "V. FINITE CONTROL SET
-        MODEL PREDICTIVE TORQUE CONTROL OF INDUCTION MOTOR FED WITH SSTPI".
-        """
         long_heading = (
             "V. FINITE CONTROL SET MODEL PREDICTIVE TORQUE CONTROL OF INDUCTION "
             "MOTOR FED WITH SSTPI AND ITS EXPERIMENTAL VALIDATION ON A TEST BENCH"
@@ -266,12 +243,10 @@ class TestTitleLabelledAsSectionHeader:
 
 
 class TestSectionHeadingShape:
-    """Shape, not length, is what separates a title from a section heading.
+    """Heading shape separates a title from a section heading.
 
-    Measured across the corpus: titles run 79-108 characters, while genuine
-    headings such as "Q. Adaptive Forgetting Factor with Generalized
-    Regularization Online Sequential ..." run longer. A length threshold
-    misclassified four papers in five.
+    Corpus titles run 79-108 characters and some headings run longer, so a length
+    threshold misclassified four papers in five.
     """
 
     @pytest.mark.parametrize(
@@ -308,11 +283,7 @@ class TestSectionHeadingShape:
 
 class TestTitleBeforeAnySectionHeading:
     def test_a_title_after_a_banner_block_is_still_captured(self, pdf: Path) -> None:
-        """Several papers open with a journal banner or author block.
-
-        Keying on "no content yet" missed those; the condition is "no section
-        heading yet".
-        """
+        # Several papers open with a journal banner or author block.
         extractor = _extractor(
             [
                 _Item("text", "IEEE TRANSACTIONS ON INDUSTRIAL ELECTRONICS, VOL. 70"),
@@ -350,12 +321,7 @@ class TestTitleBeforeAnySectionHeading:
 
 
 class TestPublisherFurniture:
-    """Elsevier, Frontiers and IEEE templates print a banner above the title.
-
-    Taking the first heading-like item produced five documents titled
-    "ScienceDirect", "ARTICLE", "ORIGINAL RESEARCH" and "Research paper" — and
-    a sixth failed outright when its slug collided with an existing one.
-    """
+    """Elsevier, Frontiers and IEEE templates print a banner above the title."""
 
     @pytest.mark.parametrize(
         "banner",
@@ -373,12 +339,7 @@ class TestPublisherFurniture:
         assert not is_plausible_title(banner)
 
     def test_the_real_title_after_a_banner_is_captured(self, pdf: Path) -> None:
-        """The banner must not count as a section heading either.
-
-        Treating it as one set the "seen a section heading" flag and blocked
-        the real title on the following line, which is what produced the
-        ScienceDirect-titled documents.
-        """
+        # A banner counted as a section heading would block the title that follows it.
         extractor = _extractor(
             [
                 _Item("section_header", "ScienceDirect"),
@@ -406,7 +367,6 @@ class TestPublisherFurniture:
 
 class TestCarriageReturns:
     def test_carriage_returns_become_newlines(self) -> None:
-        """Two papers have CRLF line endings inside text items."""
         assert "\r" not in normalise("First line\r\nSecond line")
 
     def test_ordinary_text_is_untouched(self) -> None:
@@ -414,18 +374,12 @@ class TestCarriageReturns:
         assert normalise(text) == text
 
     def test_legitimate_word_doubling_survives(self) -> None:
-        """English doubles words; normalisation must not silently rewrite prose."""
         assert normalise("had had a different meaning") == "had had a different meaning"
         assert normalise("that that is fine") == "that that is fine"
 
 
 class TestRepeatedText:
-    """Two of twenty papers ship a stacked text layer.
-
-    Phase 1 left this alone as cosmetic. Phase 5 measured it: the worst paper
-    produced 796 chunks from 6 pages against ~12 per page elsewhere, and its
-    garbled fragments were surfacing in unrelated searches.
-    """
+    """Two of twenty papers ship a stacked text layer; one produced 796 chunks from 6 pages."""
 
     def test_a_line_repeated_in_the_same_block_is_dropped(self) -> None:
         text = (
@@ -437,8 +391,7 @@ class TestRepeatedText:
         assert collapse_repeated_lines(text).count("Abstract:") == 1
 
     def test_punctuation_only_differences_count_as_repeats(self) -> None:
-        """The stacked layer has its punctuation stripped, so the two copies
-        are different strings and identical text."""
+        # The stacked layer has its punctuation stripped.
         text = (
             "Surveillance, reconnaissance, infrastructure inspection.\n"
             "Surveillancereconnaissanceinfrastructure inspection"
@@ -455,23 +408,18 @@ class TestRepeatedText:
         ],
     )
     def test_english_doubling_survives(self, text: str) -> None:
-        """The reason Phase 1 refused a regex over the prose. Working at line
-        granularity keeps that concern answered: a repeat has to be a whole
-        twenty-character line, which English does not produce."""
+        # A repeat must be a whole line of at least twenty characters.
         assert collapse_repeated_lines(text) == text
 
     def test_no_line_is_ever_edited(self) -> None:
-        """Citations are verified against this text, so a surviving line must
-        be verbatim source. Only whole lines are removed."""
+        # Citations are verified against this text, so surviving lines must be verbatim.
         text = "A unique first line here.\nA unique first line here.\nA different second line."
 
         for line in collapse_repeated_lines(text).split("\n"):
             assert line in text
 
     def test_repeats_are_found_across_blocks(self) -> None:
-        """The copies are not adjacent. Consecutive blocks are growing prefixes
-        of the same text, so a per-block or windowed rule catches almost none —
-        measured, a six-block window found 94 of several thousand."""
+        # Consecutive blocks are growing prefixes of the same text, so copies are rarely adjacent.
         seen: set[str] = set()
         first = collapse_repeated_lines("A sufficiently long line of real prose here.", seen)
         second = collapse_repeated_lines("A sufficiently long line of real prose here.", seen)

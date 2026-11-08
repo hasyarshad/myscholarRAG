@@ -1,8 +1,6 @@
-"""Classify, plan, then execute — the routed entry point to retrieval.
+"""The routed entry point to retrieval: classify, plan, then search or answer from metadata.
 
-This is what the API and the CLI call. It owns the decision of whether to search
-at all, which is the decision that removes most of a public bot's hallucination
-surface.
+Bibliographic, out-of-scope and ambiguous questions are answered here without a search.
 """
 
 from __future__ import annotations
@@ -35,8 +33,7 @@ class RoutedResult:
     bibliographic: BibliographicAnswer | None = None
     queries: tuple[SearchQuery, ...] = ()
     degraded: bool = False
-    """Set when the answer is known to be lower quality than usual, so the
-    interface can say so rather than presenting it as equivalent."""
+    """Set when the answer is known to be lower quality than usual."""
 
     timings_ms: dict[str, int] = field(default_factory=dict)
 
@@ -73,9 +70,7 @@ class QueryRouter:
         if not self._titles_loaded:
             titles = [d.title for d in documents]
             self._classifier.set_titles(titles)
-            # The transformer needs them too: an ungrounded hypothetical
-            # passage invents a research area the corpus does not contain, and
-            # then retrieves against it.
+            # HyDE uses them to write in the corpus's vocabulary.
             self._transformer.set_titles(titles)
             self._titles_loaded = True
         return {d.title: d.id for d in documents}
@@ -97,12 +92,6 @@ class QueryRouter:
             started = time.monotonic()
             answer = await self._bibliographic.answer(question)
             timings["sql"] = _elapsed(started)
-            if answer is None:
-                # Classified bibliographic, but nothing in it asks for a count,
-                # a date, a venue or a list — so it is a question about content
-                # wearing a collection question's clothes. Retrieval answers it,
-                # or refuses on the evidence.
-                plan = replace(plan, use_sql=False)
             if answer is not None:
                 return RoutedResult(
                     classification=classification,
@@ -110,6 +99,8 @@ class QueryRouter:
                     bibliographic=answer,
                     timings_ms=timings,
                 )
+            # Nothing asked for a count, date, venue or list, so it is a content question.
+            plan = replace(plan, use_sql=False)
 
         started = time.monotonic()
         queries = await self._transformer.apply(question, plan.transforms)
@@ -133,15 +124,12 @@ class QueryRouter:
         plan: Plan,
         title_to_id: dict[str, UUID],
     ) -> list[ContextBlock]:
-        """Retrieve for every query and fuse the results.
+        """Search with every query concurrently and fuse the results by reciprocal rank.
 
-        A filtered branch is always accompanied by an unfiltered one. An
-        over-confident entity link would otherwise return nothing at all, and
-        an imperfect result beats an empty one.
+        A filtered search that returns nothing is retried without filters: an empty
+        result more likely means a wrong filter than a missing answer.
         """
-        # Scope is decided in one place, by one component, before any passage
-        # is fetched. See retrieval/selection.py — this used to be three
-        # partial policies in three modules that interacted by accident.
+        # Document scope comes from the selector alone (see retrieval/selection.py).
         selection = await self._selector.select(
             queries[0].text if queries else "",
             titles=(),
@@ -150,15 +138,9 @@ class QueryRouter:
         )
         document_ids = selection.document_ids
 
-        # The baseline search: document filter (if the entity linker resolved
-        # one) but no section restriction.
-        #
-        # Section kinds are a *boost*, not a filter. Passing them as a filter
-        # restricted methodological questions to methods and results sections,
-        # excluding abstracts, introductions and conclusions — where answers
-        # frequently are. Measured, that cost 9 points of MRR. So the boosted
-        # search runs as an extra branch alongside the unrestricted one, and
-        # fusion decides.
+        # Section kinds boost through an extra branch instead of filtering the base
+        # search. As a filter they excluded abstracts and conclusions from
+        # methodological questions and cost 9 points of MRR.
         base = SearchFilters(
             document_ids=document_ids,
             exclude_section_kinds=plan.exclude_sections,
@@ -180,18 +162,14 @@ class QueryRouter:
                 filters=filters if not filters.is_empty else None,
                 limit=plan.context_blocks,
             )
-            # An empty filtered result means the filter was wrong, not that the
-            # corpus lacks an answer.
             if not result.blocks and not filters.is_empty:
                 result = await self._retriever.retrieve(
                     text, mode=self._mode, limit=plan.context_blocks
                 )
             return result.blocks
 
-        # Every branch concurrently. A methodological question produces three
-        # queries and, with the section boost, six searches — each embedding,
-        # querying twice. Run in sequence those dominate latency;
-        # they are independent, so there is no reason to.
+        # Independent searches, run concurrently. A methodological question with the
+        # section boost makes six.
         plans: list[tuple[str, str, SearchFilters, float]] = []
         for index, query in enumerate(queries):
             plans.append((f"{query.origin.value}:{index}", query.text, base, query.weight))
@@ -213,14 +191,8 @@ class QueryRouter:
         for (name, _, _, weight), blocks in zip(plans, results, strict=True):
             keys: list[str] = []
             for block in blocks:
-                # Keyed on the text digest, not the page range. Two distinct
-                # spans in one section frequently share a page range, and keying
-                # on that made them collide — the second was silently dropped,
-                # losing real evidence from the fusion.
-                #
-                # A digest rather than hash(): the built-in is salted per
-                # process, so the same block would key differently between runs
-                # and make results irreproducible.
+                # Keyed on a text digest because two spans in one section often
+                # share a page range. blake2b, since hash() is salted per process.
                 digest = hashlib.blake2b(block.text.encode(), digest_size=8).hexdigest()
                 key = f"{block.section_id}:{digest}"
                 block_by_key.setdefault(key, block)
@@ -240,31 +212,17 @@ class QueryRouter:
         if plan.max_chunks_per_document is not None:
             ordered = _cap_per_document(ordered, plan.max_chunks_per_document)
 
-        # Relabel after fusion so citation markers run C1..Cn in the order the
-        # generator will see them.
-        #
-        # `replace` rather than rebuilding field by field. The explicit version
-        # dropped every field it did not list, so adding `document_kind` to
-        # ContextBlock left it populated by the retriever and blank by the time
-        # anything downstream saw it — silently, since a blank string is a
-        # valid value. Only the label needs to change here.
+        # Relabel after fusion so markers run C1..Cn in the order the generator sees them.
         return [
             replace(b, label=f"C{i}") for i, b in enumerate(ordered[: plan.context_blocks], start=1)
         ]
 
 
 def _anchor_to_top_document(blocks: list[ContextBlock]) -> list[ContextBlock]:
-    """Move the best-matching document's passages to the front.
+    """Move the best-matching document's passages to the front, keeping order within groups.
 
-    A stable partition, so relative order is untouched within each group and the
-    other documents survive behind the anchor rather than being removed. The
-    reason not to filter is that the anchor is a guess: asked about "the
-    FCS-MPTC paper" when three papers are about FCS-MPTC, the top block is the
-    best evidence available for which one is meant, and it is still only
-    evidence. Reordering makes a wrong guess recoverable — the alternatives are
-    a few blocks further down — where a filter would make it final.
-
-    See Plan.anchor_to_top_document for the measurement.
+    A reorder instead of a filter, because the anchor is a guess when several papers
+    share a topic; the alternatives stay in context behind it.
     """
     if not blocks:
         return blocks
@@ -275,11 +233,7 @@ def _anchor_to_top_document(blocks: list[ContextBlock]) -> list[ContextBlock]:
 
 
 def _cap_per_document(blocks: list[ContextBlock], cap: int) -> list[ContextBlock]:
-    """Limit how many blocks any one document contributes.
-
-    Without this a verbose paper monopolises a synthesis question and the answer
-    quietly becomes about that paper rather than about the corpus.
-    """
+    """Limit how many blocks one document contributes, so one paper cannot fill the context."""
     counts: dict[UUID, int] = {}
     kept: list[ContextBlock] = []
     for block in blocks:

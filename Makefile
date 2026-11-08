@@ -1,42 +1,44 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help setup dev fmt lint typecheck test test-all db-up db-down clean
+.PHONY: help setup dev fmt lint typecheck test test-all check \
+	db-setup db-up db-down db-shell ollama-setup ollama-up ollama-down up down \
+	ingest ingest-force sync sync-check serve \
+	eval eval-fast eval-generation eval-judge eval-shipped corpus-check papers clean \
+	docker-build compose-up compose-restore compose-down \
+	deploy supabase-setup supabase-check push-index
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
-		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
+		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 setup:  ## Install dependencies (core + dev)
 	uv sync --group dev
 
-dev:  ## Install everything, including local GPU and serving extras
+dev:  ## Install everything, including the local GPU and serving extras
 	uv sync --group dev --extra local --extra serve
 
 fmt:  ## Format code
-	uv run ruff format src tests
-	uv run ruff check --fix src tests
+	uv run ruff format src tests scripts
+	uv run ruff check --fix src tests scripts
 
 lint:  ## Check formatting and lint rules
-	uv run ruff format --check src tests
-	uv run ruff check src tests
+	uv run ruff format --check src tests scripts
+	uv run ruff check src tests scripts
 
 typecheck:  ## Run mypy in strict mode
 	uv run mypy
 
-test:  ## Run unit tests (no GPU, no network, no database)
+test:  ## Run unit tests (no GPU, network or database)
 	uv run pytest -m "not integration"
 
 test-all:  ## Run every test, including integration
 	uv run pytest
 
 check: lint typecheck test  ## Everything CI runs
-.PHONY: check
 
-## --- Local services -------------------------------------------------------
-## Postgres and Ollama both run as ordinary user processes. The workstation is
-## a shared lab machine with no root, so Docker is not available here; the
-## Compose file under docker/ is a packaging artifact for other people.
+## --- Local services --------------------------------------------------------
+## Postgres and Ollama run as ordinary user processes, so none of this needs root.
 
 db-setup:  ## Create the Postgres cluster and enable pgvector (run once)
 	./scripts/db.sh setup
@@ -64,9 +66,8 @@ up: db-up ollama-up  ## Start every local service
 	@echo "services up"
 
 down: db-down ollama-down  ## Stop every local service
-.PHONY: db-setup db-shell ollama-setup ollama-up ollama-down up down ingest ingest-force papers serve
 
-## --- Corpus ---------------------------------------------------------------
+## --- Corpus ----------------------------------------------------------------
 
 ingest:  ## Build the index from papers/ (needs make up first)
 	uv run myscholar ingest run
@@ -74,30 +75,30 @@ ingest:  ## Build the index from papers/ (needs make up first)
 ingest-force:  ## Rebuild the index, ignoring the content-hash cache
 	uv run myscholar ingest run --force
 
-sync:  ## Index anything new and reconcile metadata against the publisher record
+sync:  ## Index anything new and reconcile metadata against Crossref
 	uv run myscholar sync --apply
 
-sync-check:  ## Same, but report only — changes nothing
+sync-check:  ## Report what sync would change, without changing anything
 	uv run myscholar sync --no-ingest
 
 serve:  ## Run the API on :8000
 	uv run myscholar serve
 
-## --- Evaluation ----------------------------------------------------------
+## --- Evaluation ------------------------------------------------------------
 
 eval:  ## Run every evaluation and write results/report.md (~30 min)
 	uv run python scripts/eval.py
 
-eval-fast:  ## Everything except generation — deterministic, about two minutes
+eval-fast:  ## Everything except generation; deterministic, about two minutes
 	uv run python scripts/eval.py --skip generation
 
-eval-generation:  ## The three-pipeline comparison only
+eval-generation:  ## The generation ablation, every configuration
 	uv run python scripts/eval_generation.py
 
 eval-judge:  ## Check the faithfulness judge against known cases
 	uv run python scripts/eval_judge.py
 
-eval-refusal:  ## Just the adaptive system's refusal behaviour, no baselines
+eval-shipped:  ## The shipped pipeline only, no baselines
 	uv run python scripts/eval_generation.py --configs adaptive
 
 corpus-check:  ## Assert the invariants a healthy corpus satisfies
@@ -112,9 +113,9 @@ clean:  ## Remove caches and build artifacts
 	rm -rf .pytest_cache .ruff_cache .mypy_cache dist build
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
 
-## --- Containers -----------------------------------------------------------
-## Rootless Docker. The compose stack runs its own empty Postgres on 5434, so
-## it can never touch the development index on 5433.
+## --- Containers ------------------------------------------------------------
+## The compose stack runs its own Postgres on 5434, separate from the
+## development database on 5433.
 
 docker-build:  ## Build the production image (exports and verifies the embedder)
 	docker build -f docker/Dockerfile -t myscholar-api:local .
@@ -134,7 +135,7 @@ compose-restore:  ## Load the local index into the compose database
 compose-down:  ## Stop the stack and remove its database volume
 	docker compose -f docker/compose.yaml down -v
 
-## --- Deployment -----------------------------------------------------------
+## --- Deployment ------------------------------------------------------------
 
 deploy:  ## Build on Cloud Build and deploy to Cloud Run (reads .env)
 	./scripts/deploy_cloudrun.sh
@@ -142,15 +143,8 @@ deploy:  ## Build on Cloud Build and deploy to Cloud Run (reads .env)
 supabase-setup:  ## Create the schema and search indexes on Supabase
 	./scripts/supabase_setup.sh
 
-supabase-check:  ## Report what is currently on Supabase, changing nothing
+supabase-check:  ## Report what is on Supabase, changing nothing
 	./scripts/supabase_setup.sh --check
 
 push-index:  ## Load the local index into Supabase (reads SUPABASE_DB_URL)
 	./scripts/push_index.sh
-
-push-repo:  ## Push this repository to GitHub (reads GITHUB_TOKEN)
-	./scripts/push_repo.sh
-
-pdf:  ## Rebuild the PDFs from the markdown in docs/
-	./scripts/pdf/build.sh docs/ARCHITECTURE.md docs/ARCHITECTURE.pdf
-	./scripts/pdf/build.sh docs/UNDERSTANDING.md docs/UNDERSTANDING.pdf

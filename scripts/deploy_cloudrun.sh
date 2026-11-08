@@ -1,16 +1,9 @@
 #!/usr/bin/env bash
 # Build and deploy the API to Google Cloud Run.
 #
-# Cloud Run is the fit here for one reason: it scales to zero. A portfolio
-# assistant is idle almost always, and paying for an always-on container to
-# answer forty questions a month is the wrong shape. The free tier is 2M
-# requests, 360k GB-seconds and 180k vCPU-seconds monthly, which this cannot
-# plausibly exhaust.
-#
-# The cost of scaling to zero is a cold start: the first request after an idle
-# period waits for the container to start and the 416MB embedder to load. The
-# Next.js proxy in web/app/api/scholar handles that with a real message rather
-# than a failure, which is why it has a 90-second timeout.
+# Cloud Run scales to zero, so an idle assistant costs nothing. The price is a
+# cold start while the container boots and loads the 416MB embedder; the proxy in
+# web/app/api/scholar allows 90 seconds for it.
 #
 #   ./scripts/deploy_cloudrun.sh --dry-run
 #   ./scripts/deploy_cloudrun.sh
@@ -19,35 +12,27 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# Always succeeds. Under `set -e` a grep that matches nothing is a failed
-# command, and inside an assignment that aborts the script with no message —
-# which is exactly what "no .env yet" looks like on a first run.
+# Always succeeds: under `set -e` a grep with no match (no .env yet) would abort silently.
 value() { grep -E "^$1=" .env 2>/dev/null | cut -d= -f2- | tr -d '"'"'"'' || true; }
 
 PROJECT="${GCP_PROJECT_ID:-$(value GCP_PROJECT_ID)}"
 REGION="${GCP_REGION:-$(value GCP_REGION)}"
-REGION="${REGION:-europe-west2}"
+REGION="${REGION:-northamerica-northeast1}"
 SERVICE="${GCP_SERVICE:-$(value GCP_SERVICE)}"
 SERVICE="${SERVICE:-myscholar-api}"
 
-# A dedicated runtime identity, holding nothing but read access to the three
-# secrets below. Cloud Run otherwise defaults to the Compute Engine service
-# account, which does not exist until the Compute API is enabled — an API this
-# deployment has no other use for — and which is shared by everything in the
-# project. Least privilege here is both cheaper and easier.
+# Runtime identity with read access to the three secrets below and nothing else.
+# The default Compute Engine account needs the Compute API and is shared project-wide.
 RUNTIME_SA="${GCP_RUNTIME_SA:-$(value GCP_RUNTIME_SA)}"
 RUNTIME_SA="${RUNTIME_SA:-myscholar-run@$PROJECT.iam.gserviceaccount.com}"
 
-# A second identity, for the build rather than the running service. Projects
-# created from 2025 onward do not get the legacy
-# `<number>@cloudbuild.gserviceaccount.com` account, and `gcloud builds submit`
-# without an explicit `--service-account` then fails `PERMISSION_DENIED` — which
-# reads like a missing role on *you* even when you are project owner, and lists
-# no build at all because none was ever created.
+# Build identity. Projects created from 2025 onward have no legacy Cloud Build
+# account, and `gcloud builds submit` without `--service-account` then fails with
+# PERMISSION_DENIED, even for a project owner.
 BUILD_SA="${GCP_BUILD_SA:-$(value GCP_BUILD_SA)}"
 BUILD_SA="${BUILD_SA:-myscholar-build@$PROJECT.iam.gserviceaccount.com}"
 if [[ -z "$PROJECT" ]]; then
-    echo "Set GCP_PROJECT_ID in .env — see .env.example."
+    echo "Set GCP_PROJECT_ID in .env (see .env.example)."
     exit 1
 fi
 
@@ -63,9 +48,8 @@ image   : $IMAGE
 model   : exported and verified during the build, not committed
 INFO
 
-# Every question makes several database round trips, so putting the container
-# and the database on different continents is felt directly. Reported rather
-# than enforced: there are good reasons to accept it, but none to be surprised.
+# Every question makes several database round trips, so warn (without failing)
+# when the database and the service look like different continents.
 DB_HOST="$(value SUPABASE_DB_URL | sed -E 's#.*@##; s#[:/].*##')"
 if [[ -n "$DB_HOST" ]]; then
     echo "database: $DB_HOST"
@@ -95,8 +79,7 @@ if [[ "${1:-}" == "--dry-run" ]]; then
     exit 0
 fi
 
-# The SDK installs to ~/google-cloud-sdk and adds itself to the login shell's
-# profile, which a non-login shell never reads. Look there before giving up.
+# The SDK adds itself to the login shell's profile, which a non-login shell skips.
 if ! command -v gcloud >/dev/null; then
     for candidate in "$HOME/google-cloud-sdk/bin" "/usr/lib/google-cloud-sdk/bin" "/snap/bin"; do
         [[ -x "$candidate/gcloud" ]] && { export PATH="$candidate:$PATH"; break; }
@@ -106,13 +89,12 @@ command -v gcloud >/dev/null || { echo "gcloud not installed: https://cloud.goog
 
 gcloud config set project "$PROJECT" >/dev/null
 
-# One-time setup, all idempotent, so this script is safe to re-run.
+# One-time setup. Everything below is idempotent, so the script is safe to re-run.
 gcloud services enable run.googleapis.com artifactregistry.googleapis.com \
     cloudbuild.googleapis.com secretmanager.googleapis.com
 
-# The runtime identity and its grants. Idempotent, so re-running is safe, and
-# kept here rather than in prose because a deploy that cannot read its own
-# secrets fails after the eight-minute build rather than before it.
+# Grants are checked here because a deploy that cannot read its secrets fails
+# only after the eight-minute build.
 gcloud iam service-accounts describe "$RUNTIME_SA" >/dev/null 2>&1 || \
     gcloud iam service-accounts create "${RUNTIME_SA%%@*}" \
         --display-name="myScholar Cloud Run runtime"
@@ -128,7 +110,8 @@ if ! gcloud iam service-accounts describe "$BUILD_SA" >/dev/null 2>&1; then
 fi
 for secret in myscholar-db-url myscholar-llm-key myscholar-shared-secret; do
     if ! gcloud secrets describe "$secret" >/dev/null 2>&1; then
-        echo "missing secret: $secret — create it before deploying (see DEPLOYMENT.md 3.4)"
+        echo "missing secret: $secret. Create it before deploying:"
+        echo "  printf '%s' '<value>' | gcloud secrets create $secret --data-file=-"
         exit 1
     fi
     gcloud secrets add-iam-policy-binding "$secret" \
@@ -138,15 +121,10 @@ done
 gcloud artifacts repositories describe myscholar --location="$REGION" >/dev/null 2>&1 || \
     gcloud artifacts repositories create myscholar --repository-format=docker --location="$REGION"
 
-# Built by Cloud Build rather than locally: there is no Docker on this machine
-# (no root, and rootless needs setuid helpers that are not installed).
-# The build exports the embedder, so it needs more time and more machine than a
-# plain pip install would. Twenty minutes is generous; it usually takes eight.
-#
-# Written to a real file rather than piped in: `--config=-` reads stdin on some
-# gcloud versions and fails with "Unable to read file [-]" on others, and it does
-# so *after* creating the Artifact Registry repository, so the failure looks like
-# a permissions problem rather than an argument one.
+# Built by Cloud Build, so no local Docker is needed. The build exports the
+# embedder, hence the larger machine and the 20-minute timeout (it usually takes eight).
+# A real file because `--config=-` fails with "Unable to read file [-]" on some
+# gcloud versions.
 BUILD_CONFIG="$(mktemp -t myscholar-cloudbuild-XXXXXX.yaml)"
 trap 'rm -f "$BUILD_CONFIG"' EXIT
 cat > "$BUILD_CONFIG" <<YAML
@@ -159,21 +137,17 @@ options:
   machineType: E2_HIGHCPU_8
 YAML
 
-# `--default-buckets-behavior` is required alongside a user-specified build
-# service account: without a project-owned logs bucket the build is rejected
-# before it starts.
+# Required with a user-specified build service account, which needs a
+# project-owned logs bucket.
 gcloud builds submit \
     --config="$BUILD_CONFIG" \
     --service-account="projects/$PROJECT/serviceAccounts/$BUILD_SA" \
     --default-buckets-behavior=regional-user-owned-bucket \
     .
 
-# --min-instances=0 is the free tier. --cpu-boost shortens the cold start that
-# choice buys, by giving the container extra CPU while it loads the model.
-#
-# Concurrency 8 rather than the default 80: each request holds an ONNX session
-# and waits on a hosted LLM, and 80 of those on two vCPU is a queue pretending
-# to be parallelism. The app's own Gate limits it further.
+# --cpu-boost shortens the cold start that --min-instances=0 brings. Concurrency is
+# 8 (default 80) because each request holds an ONNX session and waits on a hosted
+# LLM; the app's Gate limits it further.
 gcloud run deploy "$SERVICE" \
     --image="$IMAGE" \
     --region="$REGION" \
@@ -194,15 +168,8 @@ URL=$(gcloud run services describe "$SERVICE" --region="$REGION" --format='value
 echo
 echo "deployed: $URL"
 echo "checking readiness (a cold start takes a moment)..."
-# `/readyz`, not `/healthz`. Two reasons, and the second is a trap:
-#
-#   * Readiness is the useful question. It confirms the database answers and the
-#     index is non-empty, which is what "the deploy worked" should mean. Liveness
-#     only says a process is running, which a broken deploy also manages.
-#   * Google's frontend intercepts `/healthz` and returns its own HTML 404
-#     without forwarding the request, so checking it fails against a service that
-#     is perfectly healthy. The give-away is a response with no
-#     `x-cloud-trace-context` header and `Error 404 (Not Found)!!1` in the body.
+# /readyz checks the database and a non-empty index. /healthz cannot be used:
+# Google's frontend intercepts it and returns its own 404.
 curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$URL/readyz" && echo
 echo
 echo "Now set these in Vercel, on the site project:"

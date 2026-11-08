@@ -1,22 +1,12 @@
 """Parsing and verifying citation markers.
 
-The strongest anti-hallucination mechanism in the pipeline, and the cheapest:
-every check here is string work, involves no model, and cannot be talked out of.
+All checks are deterministic string work, with no model involved:
 
-A model asked "are your citations valid?" is performing the same kind of
-judgement that produced the invalid ones. A set lookup is not.
-
-Three checks:
-
-1. Every emitted marker resolves to a block that was actually retrieved.
-   A marker outside the range is a *dangling citation* — an invented source,
-   and the most common failure mode.
-2. Every factual sentence carries at least one marker. A sentence asserting a
-   number or a named entity without one is the model speaking from its own
-   knowledge rather than from the context.
-3. Any verbatim quote appears in the block it cites. This is why Phase 1 stores
-   chunk text verbatim and keeps the generated contextual header separate — a
-   quote must be checkable against what the author wrote.
+1. Every marker resolves to a retrieved block. One that does not is a *dangling*
+   citation, an invented source.
+2. Every factual sentence carries at least one marker.
+3. Every verbatim quote appears in the block it cites. Chunk text is stored verbatim,
+   apart from its generated header, so quotes can be checked against it.
 """
 
 from __future__ import annotations
@@ -36,28 +26,15 @@ _LABEL = re.compile(r"C\d+", re.IGNORECASE)
 #: usually terminology rather than a claim of verbatim reproduction.
 _QUOTE = re.compile(r"[\"“]([^\"”]{25,400})[\"”]")
 
-#: Sentence split. Deliberately simple: an over-eager split produces more
-#: sentences to check, which errs toward stricter verification.
+#: A simple sentence split. Over-splitting only means more sentences are checked.
 _SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"“])")
 
 #: Shortest sentence that could carry a checkable claim. Below this it is
 #: almost certainly a fragment, a heading or a transition.
 _MIN_FACTUAL_CHARS = 15
 
-#: A topic sentence: it announces what the answer will cover and asserts no
-#: specific fact of its own.
-#:
-#: These were being flagged as uncited claims, and the cost was out of all
-#: proportion. "X demonstrates strengths in machine learning through ensemble
-#: methods, deep learning and feature engineering" states nothing that the
-#: cited sentences below it do not state precisely — but the failure spent all
-#: three regeneration attempts on a formatting problem, and the drafts got
-#: worse each time. A four-sentence answer citing five sources across four
-#: papers was reduced to one sentence citing one.
-#:
-#: Deliberately narrow: only a *leading* sentence, and only one carrying no
-#: figure and no quotation, so anything stating a number, a measurement or a
-#: quoted span is still a claim that must be cited.
+#: A topic sentence announces what the answer covers and asserts no fact of its own,
+#: so it needs no citation. Only a leading sentence with no figure or quotation counts.
 _TOPIC_SENTENCE = re.compile(
     r"\b(demonstrates?|shows?|has|have|spans?|covers?|includes?|"
     r"brings?|combines?|works?|focus(es)?|contributes?|conducted|studied|"
@@ -65,34 +42,16 @@ _TOPIC_SENTENCE = re.compile(
     re.IGNORECASE,
 )
 
-#: A figure being *stated*, as opposed to a digit appearing inside a name.
-#:
-#: The distinction is the whole point. The rule above once excluded any sentence
-#: containing a digit, which is right for "the framework reached 99.64%" and
-#: wrong for "he has conducted research related to COVID-19" — a name that
-#: happens to contain a number. The consequence was specific and bad: asked
-#: "has he done any work related to COVID-19?", the model opened with exactly
-#: the sentence a reader wants, the checker read "-19" as an uncited
-#: measurement, and the opening was deleted. What survived began mid-thought,
-#: "Findings reveal that toxic content is widespread...", answering a question
-#: nobody could tell had been asked.
-#:
-#: So a digit disqualifies only when it starts a token. In "COVID-19" and
-#: "Industry-4" the digit is bound to a word; in "99.64%", "1.8 million" and
-#: "in 2023" it stands alone, and those are claims.
+#: A stated figure or a quotation. A digit counts only at the start of a token, so
+#: "99.64%" and "in 2023" are figures, while the digits in "COVID-19" belong to a name.
 _STATES_A_FIGURE = re.compile(r"(?<![A-Za-z0-9-])\d|[\"“]")
 
-#: Sentences that carry no factual load. Requiring citations on these produces
-#: false failures on perfectly good answers.
+#: Framing, hedging and refusal sentences, which need no citation.
 _NON_FACTUAL = re.compile(
     r"^\s*(i\s+(don'?t|do\s+not|can'?t|cannot|have\s+no)\b"
-    # "excerpts" belongs here because it is the word the *prompt* uses — the
-    # generator is told to answer "using only the excerpts provided", so that is
-    # what it calls them when it has to say they contain nothing. Without it the
-    # checker read "The excerpts do not mention lithium battery degradation" as
-    # an uncited factual claim and deleted it, which left an empty answer where
-    # a correct refusal had been. Measured over the question set, that cost
-    # `unanswerable` 100% -> 67% and `false_premise` 91% -> 64%.
+    # "excerpts" is the prompt's word for the passages, so refusals use it ("The
+    # excerpts do not mention ..."). Without it those refusals were deleted as
+    # uncited claims, dropping `unanswerable` accuracy from 100% to 67%.
     r"|there\s+is\s+no\b"
     r"|the\s+(provided\s+)?(corpus|papers?|documents?|excerpts?|sources?|"
     r"passages?|materials?|text)\s+(do(es)?\s+not|don'?t)\b"
@@ -127,19 +86,6 @@ class VerificationResult:
     def uncited(self) -> tuple[CitationIssue, ...]:
         return tuple(i for i in self.issues if i.kind == "uncited")
 
-    def summary(self) -> str:
-        """A description of what failed, for feeding back into a regeneration."""
-        parts = []
-        if dangling := self.dangling:
-            labels = ", ".join(sorted({i.detail for i in dangling}))
-            parts.append(f"These citation labels do not exist: {labels}.")
-        if uncited := self.uncited:
-            quoted = "; ".join(f'"{i.sentence[:120]}"' for i in uncited[:3])
-            parts.append(f"These statements carry no citation: {quoted}")
-        if unquoted := [i for i in self.issues if i.kind == "unquoted"]:
-            parts.append(f'This quotation is not in the cited source: "{unquoted[0].detail}"')
-        return " ".join(parts)
-
 
 def parse_markers(text: str) -> list[str]:
     """Every citation label in the text, in order of appearance, deduplicated."""
@@ -159,27 +105,19 @@ def split_sentences(text: str) -> list[str]:
 def is_factual(sentence: str, *, leading: bool = False) -> bool:
     """Whether a sentence asserts something that needs a source.
 
-    Everything counts as factual unless it is recognisably framing, hedging or
-    a refusal. The direction matters: an earlier version listed the verbs that
-    signal a claim, and "It also halves switching losses" — an uncited
-    assertion — passed, because "halves" was not on the list. Any such list is
-    incomplete, and every omission is a hallucination that slips through.
-
-    Inverting it makes the failure mode a redundant citation on a harmless
-    sentence rather than a missing one on a claim.
+    Everything counts as factual unless it is recognisably framing, hedging or a
+    refusal, because a list of claim verbs is never complete. ``leading`` marks the
+    first sentence, which may be a topic sentence.
     """
     stripped = _MARKER.sub("", sentence).strip()
     if len(stripped) < _MIN_FACTUAL_CHARS or _NON_FACTUAL.match(stripped):
         return False
-    # Only the first sentence may be a topic sentence. Later ones introducing
-    # themselves the same way are making claims.
     return not (
         leading and _TOPIC_SENTENCE.search(stripped) and not _STATES_A_FIGURE.search(stripped)
     )
 
 
-#: A specific, checkable assertion: a number, a measurement, or a named
-#: technique. These are what a model fabricates, and what an excerpt can settle.
+#: A specific assertion an excerpt can settle: a figure, a quotation or a named technique.
 _CHECKABLE = re.compile(
     r"\d"  # any figure, percentage or year
     r"|[\"\u201c]"  # a quoted span
@@ -191,25 +129,10 @@ _CHECKABLE = re.compile(
 def makes_checkable_claim(sentence: str) -> bool:
     """Whether a sentence asserts something an excerpt can confirm or deny.
 
-    The groundedness check exists to catch *fabrication* — a number that is not
-    in the paper, a method it never used. It is poor at judging characterisation
-    ("he has expertise in X", "his work emphasises Y"), because no passage
-    states those in the abstract, and a model asked to rule on them rejects
-    reasonable synthesis at a high rate.
-
-    That mattered because the judgement was destructive. Two model-backed stages
-    in series, each rejecting a fraction of good sentences, compose into an
-    answer that can only contain single-source single-fact statements — which is
-    the wrong shape for any question about the range of someone's work. Measured
-    on one such question, grounding rejected half of a correct draft, including
-    the sentence describing the very paper it cited.
-
-    So the check now applies where it is reliable: sentences carrying a figure,
-    a quotation or a named technique. Everything else is still held to the
-    deterministic checks — it must carry a marker, and that marker must resolve
-    to a passage that was actually retrieved and graded relevant. A
-    characterisation of cited material is a much smaller risk than an invented
-    number, and the invented number is still caught.
+    Only these sentences go to the grounding judge. It is reliable on figures,
+    quotations and named techniques but rejects reasonable characterisation ("he
+    has expertise in X") at a high rate. Every sentence still faces the
+    deterministic checks.
     """
     return bool(_CHECKABLE.search(_MARKER.sub("", sentence)))
 
@@ -234,7 +157,7 @@ def verify(text: str, blocks: Sequence[ContextBlock]) -> VerificationResult:
     by_label = {block.label.upper(): block for block in blocks}
     issues: list[CitationIssue] = []
 
-    # 1. Dangling markers — a label that was never in the context.
+    # 1. Dangling markers: labels that were never in the context.
     used = parse_markers(text)
     for label in used:
         if label not in by_label:
@@ -282,20 +205,9 @@ def _sentence_with(text: str, label: str) -> str:
     return ""
 
 
-#: An opening phrase that points at a sentence which is no longer there.
-#:
-#: Removing a sentence from the middle of an answer leaves the ones after it
-#: referring backwards to nothing. The visible result was an answer that began
-#: "In another work, MOPSO combined with the Vikor decision-making method was
-#: applied..." — another work than *what*? The sentence naming the first one had
-#: been dropped, and the reader is left holding a comparison with one side
-#: missing.
-#:
-#: Only phrases that can be lifted off cleanly are listed: each is adverbial and
-#: ends at a comma, so the sentence behind it is still a sentence. "These
-#: methods" and "The study also" are not here — they are the subject, and
-#: cutting them leaves a fragment. The prompt is what prevents those; this is
-#: the repair for what still gets through.
+#: An adverbial opener that refers back to a previous sentence, such as "In another
+#: work,". Each ends at a comma, so removing it leaves a sentence. Subject phrases such
+#: as "These methods" cannot be cut cleanly; the system prompt discourages them instead.
 _ORPHANED_OPENER = re.compile(
     r"^(in\s+(another|this|that|the\s+other)\s+(work|study|paper)|"
     r"in\s+(addition|contrast|comparison)|additionally|furthermore|moreover|"
@@ -305,17 +217,7 @@ _ORPHANED_OPENER = re.compile(
 
 
 def drop_unsupported(text: str, issues: Sequence[CitationIssue]) -> str:
-    """Remove the sentences that failed verification.
-
-    The last resort before refusing: if most of an answer is sound and one
-    sentence is not, returning the sound part is better than discarding it —
-    provided the unsupported claim is genuinely gone rather than softened.
-
-    What survives is then tidied, because the removal is invisible to the reader
-    and its seams are not. An answer is judged as prose, and one that opens
-    mid-comparison or ends on a doubled full stop reads as broken regardless of
-    how sound the claims inside it are.
-    """
+    """Remove the sentences that failed verification and tidy what remains."""
     bad = {_normalise(issue.sentence) for issue in issues if issue.sentence}
     kept = [s for s in split_sentences(text) if _normalise(s) not in bad]
     return rejoin(kept)
@@ -324,12 +226,8 @@ def drop_unsupported(text: str, issues: Sequence[CitationIssue]) -> str:
 def rejoin(kept: list[str]) -> str:
     """Reassemble surviving sentences so they read as prose.
 
-    Shared by both paths that remove sentences — citation salvage here, and the
-    grounding drop in the reasoning loop — because the seams are identical and
-    fixing them in one place left the other producing "In another work, MOPSO
-    was applied..." as an opening sentence, with the work it was another of
-    already deleted. A reader cannot tell a sentence was removed, only that the
-    answer does not make sense.
+    Used by both sentence-removal paths: citation salvage and the grounding drop in
+    the reasoning loop.
     """
     if not kept:
         return ""

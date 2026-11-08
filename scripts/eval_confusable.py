@@ -1,32 +1,19 @@
-"""Attribution precision: did the answer cite the right paper, and not its twin.
+"""Attribution precision: did the answer cite the right paper, and not a similar one.
 
     uv run python scripts/eval_confusable.py
     uv run python scripts/eval_confusable.py --configs cited,graded-strict
 
-Every other evaluation here asks whether the system found an answer and whether
-it invented anything. This one asks the question the corpus makes hard and the
-relevance grader exists to settle: **six papers apply predictive control to
-motor drives, two tune weighting factors with a multi-objective optimiser, two
-use VIKOR, two classify machine faults.** Retrieval returns the family. Citing
-the wrong member produces sentences that are perfectly well supported — by the
-wrong source — so an unsupported-claim rate cannot see the failure at all.
+Several papers in the corpus share a subject (six apply predictive control to
+motor drives, for example). Citing the wrong one yields well-supported sentences,
+so the unsupported-claim rate cannot see it.
 
-Three numbers, and the separation between them is the point:
+    retrieved   the expected paper was among the blocks the generator held
+    cited       the expected paper appears in the answer's citations
+    clean       the expected paper is cited and no decoy is
 
-    retrieved   the expected paper was among the blocks the generator held.
-                Below this, nothing downstream can help, and a low score here
-                is a retrieval problem wearing a grading problem's clothes.
-    cited       the expected paper appears in the answer's citations.
-    clean       the expected paper is cited *and* no decoy is.
-
-`clean` is the headline. `cited - clean` is contamination: the answer drew on
-both members of a pair and left the reader to work out which claim came from
-which paper.
-
-The decision rule was fixed before this ran and is recorded in
-tests/eval/confusable_set.yaml: fifteen questions detect a large effect and
-nothing else, so the grader is kept only on a **20 point or larger** move in
-`clean`. Anything smaller is indistinguishable from chance at this size.
+`clean` is the headline; `cited - clean` is contamination. Fifteen questions
+detect only a large effect, so the rule in tests/eval/confusable_set.yaml keeps
+the relevance grader only on a move of 20 points or more in `clean`.
 """
 
 from __future__ import annotations
@@ -146,8 +133,8 @@ def report(results: list[ConfigResult], n: int) -> str:
         "",
         f"{n} questions where several papers cover the subject and one is right.",
         "",
-        "`retrieved` — the expected paper reached the generator. `cited` — it appears",
-        "in the answer. `clean` — it is cited and no decoy is. `clean` is the headline;",
+        "`retrieved`: the expected paper reached the generator. `cited`: it appears",
+        "in the answer. `clean`: it is cited and no decoy is. `clean` is the headline;",
         "the gap between `cited` and `clean` is contamination.",
         "",
         "| Configuration | retrieved | cited | **clean** | mean latency |",
@@ -160,9 +147,8 @@ def report(results: list[ConfigResult], n: int) -> str:
         )
     lines += [
         "",
-        "Fifteen questions detect a large effect and nothing else. The rule fixed",
-        "before running: keep the grader only on a **20 point or larger** move in",
-        "`clean`.",
+        "Fifteen questions can detect only a large effect. The rule fixed before",
+        "running: keep the grader only on a move of 20 points or more in `clean`.",
         "",
         "## Questions no configuration got clean",
         "",

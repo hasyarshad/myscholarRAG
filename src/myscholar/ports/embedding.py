@@ -1,8 +1,7 @@
 """The embedding interface.
 
-Carries its own identity. ``model_id`` and ``dim`` are attributes of the object
-doing the embedding rather than free-floating configuration, so the value stored
-with each vector cannot drift from the model that produced it.
+``model_id`` and ``dim`` belong to the embedder itself, so the identity stored with
+each vector cannot drift from the model that produced it.
 """
 
 from __future__ import annotations
@@ -16,9 +15,8 @@ type Vector = list[float]
 class Embedder(ABC):
     """Turns text into vectors.
 
-    One class serves both indexing and querying. Some models require different
-    prefixes for documents and queries, which is why the two methods exist —
-    but they share weights and identity by construction.
+    Documents and queries have separate methods because some models prefix them
+    differently; both use the same model and identity.
     """
 
     @property

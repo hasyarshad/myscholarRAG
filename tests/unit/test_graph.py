@@ -1,9 +1,4 @@
-"""The state machine, and the property that matters: it always halts.
-
-A worked example proves one path terminates. A property test covers the paths
-nobody thought of — which, in a self-correcting loop, is where the infinite
-retry lives.
-"""
+"""The reasoning state machine, including a property test that it always halts."""
 
 from __future__ import annotations
 
@@ -55,7 +50,6 @@ class TestBudget:
         assert "step budget" in (budget.reason_for_stopping() or "")
 
     def test_the_retrieval_bound_is_independent_of_steps(self) -> None:
-        """Each bound catches a different runaway."""
         budget = Budget(max_retrieval_rounds=2).retrieved().retrieved()
 
         assert not budget.can_retrieve_again
@@ -68,7 +62,6 @@ class TestBudget:
         assert "deadline" in (budget.reason_for_stopping() or "")
 
     def test_a_strategy_is_recorded_so_it_is_not_repeated(self) -> None:
-        """Corrective strategies are tried once each, or the loop cycles."""
         budget = Budget().tried("rewrite")
 
         assert budget.has_tried("rewrite")
@@ -109,7 +102,6 @@ class TestGraph:
         assert trace.path == ("only",)
 
     async def test_an_infinite_cycle_is_cut_by_the_step_budget(self) -> None:
-        """The reason the budget exists at all."""
         graph = Graph[State](
             nodes={"loop": counting("loop"), "end": terminal},
             edges={"loop": lambda _: "loop"},
@@ -149,7 +141,6 @@ class TestGraph:
         assert [name for name, _ in trace.timings_ms] == ["a", "end"]
 
     async def test_routing_to_an_unknown_node_raises(self) -> None:
-        """A silent stop would look like a normal answer with missing steps."""
         graph = Graph[State](
             nodes={"a": counting("a"), "end": terminal},
             edges={"a": lambda _: "nowhere"},
@@ -175,19 +166,13 @@ class TestGraph:
 
 
 class TestTerminationProperty:
-    """The property the whole design rests on."""
-
     @settings(max_examples=200, deadline=None)
     @given(
         st.lists(st.booleans(), min_size=0, max_size=40),
         st.integers(min_value=1, max_value=30),
     )
     async def test_the_machine_always_halts(self, verdicts: list[bool], max_steps: int) -> None:
-        """Random verdicts, a retry loop, and a bounded budget.
-
-        Whatever sequence of grading outcomes arrives — including one that
-        always says "try again" — the machine must stop.
-        """
+        """Any sequence of verdicts halts, including one that always asks for a retry."""
 
         async def grade(state: State) -> State:
             return replace(state, budget=state.budget.step(), visits=state.visits + 1)

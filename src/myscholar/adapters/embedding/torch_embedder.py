@@ -1,13 +1,7 @@
-"""GPU embedding with sentence-transformers.
+"""GPU embedding with sentence-transformers, used locally for ingestion.
 
-Used at ingest, where there is a GPU and thousands of chunks to process. The
-ONNX adapter (Phase 7) implements the same port for CPU-only production, with
-the *same weights* — which is why the model is deliberately small enough to run
-in both places.
-
-``model_id`` and ``dim`` are read from the loaded model rather than from
-configuration, so the identity stored with every vector is necessarily the
-identity of the thing that produced it.
+The ONNX adapter serves the same weights on CPU in production, so the model is
+small enough to run in both places.
 """
 
 from __future__ import annotations
@@ -53,8 +47,7 @@ class TorchEmbedder(Embedder):
         return int(self.model.get_sentence_embedding_dimension())
 
     def _encode(self, texts: Sequence[str]) -> list[Vector]:
-        # Normalised so cosine similarity reduces to a dot product, which is
-        # what pgvector's inner-product operator computes.
+        # L2-normalised, matching the ONNX adapter's output.
         vectors = self.model.encode(
             list(texts),
             batch_size=self._batch_size,
@@ -67,8 +60,7 @@ class TorchEmbedder(Embedder):
     async def embed_documents(self, texts: Sequence[str]) -> list[Vector]:
         if not texts:
             return []
-        # Encoding is CPU-blocking even when the maths runs on the GPU, so keep
-        # it off the event loop; ingestion runs other work concurrently.
+        # Encoding blocks even on a GPU, so it runs in a thread off the event loop.
         return await asyncio.to_thread(self._encode, texts)
 
     async def embed_query(self, text: str) -> Vector:

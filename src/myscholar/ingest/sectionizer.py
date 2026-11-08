@@ -1,18 +1,9 @@
 """Mapping document headings to canonical section kinds.
 
-Sections do three jobs downstream: they bound chunks (a chunk never spans two),
-they enable filtered retrieval ("search only the methods"), and they appear in
-citations. So every heading has to end up as one of a fixed set of kinds.
-
-Two paths, in order:
-
-1. A pattern table, which handles conventional headings and IEEE numbering.
-2. A small-model fallback for the rest.
-
-The fallback is not decoration. Measured on this corpus, a keyword matcher
-classified only 5 of 23 headings in one paper, because headings here are
-domain-specific rather than conventional — ``III. DISCRETE MODEL OF THREE PHASE
-INDUCTION MOTOR`` is a methods section and says none of the usual words.
+Sections bound chunks, enable filtered retrieval and appear in citations. A pattern table
+handles conventional headings and IEEE numbering, and the utility model classifies the
+rest: headings here are often domain-specific, and keywords alone classified 5 of 23 in
+one paper.
 """
 
 from __future__ import annotations
@@ -47,11 +38,8 @@ _PATTERNS: tuple[tuple[re.Pattern[str], SectionKind], ...] = (
         ),
         SectionKind.METHODS,
     ),
-    # RESULTS precedes EXPERIMENTS deliberately. "VII. EXPERIMENTAL RESULTS" is
-    # ubiquitous in this corpus and is a results section; matching EXPERIMENTS
-    # first would file every one of them wrongly. Nothing in the RESULTS
-    # pattern matches "experimental setup" or "simulation setup", so the
-    # reverse case still lands correctly.
+    # RESULTS precedes EXPERIMENTS so that the common "EXPERIMENTAL RESULTS" is a
+    # results section. The RESULTS pattern does not match "experimental setup".
     (
         re.compile(
             r"(results|findings|performance (analysis|evaluation)|"
@@ -96,7 +84,7 @@ class SectionAssignment:
     kind: SectionKind
     heading: str
     matched_by: str
-    """'pattern', 'model', or 'fallback' — recorded so the split is measurable."""
+    """'pattern', 'model' or 'fallback', recorded so the split is measurable."""
 
 
 def strip_enumeration(heading: str) -> str:
@@ -110,8 +98,7 @@ def classify_by_pattern(heading: str, kind: DocumentKind) -> SectionKind | None:
     if not text:
         return None
 
-    # Site pages use the same heading vocabulary as a CV — Education,
-    # Experience, Skills — so they share the pattern table.
+    # Site pages use the same heading vocabulary as a CV (Education, Experience, Skills).
     patterns = _CV_PATTERNS if kind in (DocumentKind.CV, DocumentKind.PAGE) else _PATTERNS
     for pattern, section_kind in patterns:
         if pattern.search(text):
@@ -170,8 +157,6 @@ class Sectionizer:
                 self.stats["model"] += 1
                 return SectionAssignment(kind=result.kind, heading=heading, matched_by="model")
 
-        # Unclassifiable headings become OTHER rather than being dropped: the
-        # text beneath them is still content, and losing it silently would be
-        # worse than filing it imprecisely.
+        # Unclassifiable headings become OTHER, so the text beneath them is still indexed.
         self.stats["fallback"] += 1
         return SectionAssignment(kind=SectionKind.OTHER, heading=heading, matched_by="fallback")

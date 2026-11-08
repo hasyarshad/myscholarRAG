@@ -1,8 +1,7 @@
 """Interfaces the application depends on.
 
-Application code imports from here and never from ``adapters``. Only
-``container.py`` knows which concrete implementation is in use — that is what
-makes swapping local Ollama for a hosted API a configuration change.
+Application code imports from here, never from ``adapters``; only ``container.py``
+chooses the concrete implementations.
 """
 
 from myscholar.ports.embedding import Embedder

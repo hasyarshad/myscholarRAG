@@ -1,26 +1,9 @@
-"""Hosted inference over the OpenAI chat-completions shape.
+"""Hosted inference over the OpenAI chat-completions wire format.
 
-The production counterpart to the local Ollama adapter: same interface, same
-prompts, same pipeline, different machine. Named for the wire format rather than
-a vendor, because several providers speak it and the choice between them comes
-down to a ``base_url`` and a model name.
-
-The default points at Google AI Studio, which is what this project deploys
-against — its free tier is the only one measured to run the whole pipeline. Two
-requirements narrow the field more than they appear to:
-
-* **Schema-constrained output.** Classification, premise checks and the
-  groundedness gate are all ``structured`` calls, and a provider that returns
-  prose instead of JSON does not fail loudly — every caller treats a validation
-  error as an outage and degrades quietly, so those stages simply stop working.
-  Ollama Cloud ignores the schema parameter entirely, which rules it out.
-* **Room for one large request.** A generation prompt carrying eight context
-  blocks runs to roughly 10,000 tokens. A free tier that caps a *minute* at
-  8,000 can never produce a single answer, however little traffic it sees.
-
-Providers also disagree about unknown parameters: Google rejects the whole
-request with ``Unknown name "seed"`` where others ignore the field. So ``seed``
-and ``reasoning_effort`` are both optional and unset by default.
+Production runs Gemini through Google AI Studio's OpenAI-compatible endpoint, the
+default ``base_url``. A provider must honour schema-constrained output (Ollama Cloud
+ignores the schema, and ``structured`` callers fall back silently on prose) and must
+accept one generation request of about 10,000 tokens within its per-minute cap.
 """
 
 from __future__ import annotations
@@ -42,23 +25,20 @@ T = TypeVar("T", bound=BaseModel)
 
 DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
-#: Statuses worth trying again: transient capacity, not a verdict about the
-#: request. 429 is excluded on purpose and raises immediately.
+#: Transient capacity errors, worth retrying. A 429 raises immediately.
 _TRANSIENT_STATUS = frozenset({500, 502, 503, 504})
 _ATTEMPTS = 3
 _BACKOFF_SECONDS = 1.0
 
 
 class HostedModelError(RuntimeError):
-    """The hosted endpoint was unreachable, rate-limited, or returned garbage."""
+    """The hosted endpoint was unreachable, rate-limited, or returned an unusable response."""
 
 
 class HostedModelRateLimitError(HostedModelError):
-    """The free tier's quota is exhausted.
+    """The provider's quota is exhausted.
 
-    Distinct from other failures because the caller should degrade rather than
-    retry: on a public portfolio, a graceful "temporarily unavailable" beats a
-    retry storm against a quota that will not reset for an hour.
+    Not retried: a quota does not reset within seconds, so callers degrade instead.
     """
 
 
@@ -107,39 +87,27 @@ class OpenAICompatibleChatModel(ChatModel):
             "temperature": self._temperature if temperature is None else temperature,
             "stream": stream,
         }
-        # A fixed seed makes runs comparable, which the evaluations depend on.
-        # Optional because it is an OpenAI extension and not every compatible
-        # endpoint tolerates it — Google's rejects the whole request with
-        # `Unknown name "seed": Cannot find field` rather than ignoring it.
+        # A fixed seed keeps evaluation runs comparable. Optional because some
+        # compatible endpoints reject it: Google's fails the whole request with
+        # `Unknown name "seed": Cannot find field`.
         if self._seed is not None:
             payload["seed"] = self._seed
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
-        # Only sent when configured. The gpt-oss models keep their reasoning in
-        # a separate `reasoning` field rather than in `content`, so this changes
-        # cost and latency rather than what the answer looks like — but a model
-        # that does not accept the parameter rejects the whole request, so an
-        # unset default is the safe one.
+        # Only sent when configured: a model that does not accept the parameter
+        # rejects the whole request.
         if self._reasoning_effort is not None:
             payload["reasoning_effort"] = self._reasoning_effort
         return payload
 
     async def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """One request, retried only for the failures that clear by themselves.
+        """One request, retried only on transient 5xx errors.
 
-        A shared free tier answers `503 The model is currently experiencing high
-        demand` under bursts, and one question makes several calls in a few
-        seconds. Left alone that is worse than an outage, because nothing above
-        this layer reports it: every caller of `structured` treats an exception
-        as unavailability and degrades quietly, so a transient 503 turns into
-        classification falling back to one class for the question, or the
-        groundedness gate passing every statement through. Measured on Google's
-        free tier: six spaced calls succeeded 6/6, the same six back to back
-        succeeded 1/6.
-
-        Rate limiting is deliberately *not* retried — see
-        `HostedModelRateLimitError`. A quota does not clear in a second, so
-        retrying only spends the little that is left.
+        A shared free tier returns 503 under bursts, and one question makes
+        several calls within seconds. Callers of ``structured`` degrade silently
+        on an exception, so an unretried 503 disables a pipeline step. Measured on
+        Google's free tier: six spaced calls succeeded 6/6, six back to back 1/6.
+        Rate limits (429) are not retried.
         """
         last_error = ""
         for attempt in range(_ATTEMPTS):

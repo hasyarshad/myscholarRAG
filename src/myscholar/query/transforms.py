@@ -1,9 +1,7 @@
-"""Rewriting a question into the queries actually sent to retrieval.
+"""Rewriting a question into the queries sent to retrieval.
 
-Each transform is a small unit that turns one question into one or more search
-queries. The planner decides which fire; none decides for itself. Applying all
-of them to every question multiplies latency and, for some classes, actively
-damages results — HyDE on a counting question searches for a fabricated number.
+The planner decides which transforms run. Applied everywhere they add latency, and some
+hurt: HyDE on a counting question searches for a fabricated number.
 """
 
 from __future__ import annotations
@@ -35,13 +33,8 @@ class SearchQuery:
     """Scales this query's contribution when results are fused."""
 
 
-#: Caps on what a transform may return. Constrained decoding fixes the shape of
-#: a response but not these bounds — neither Ollama's grammar nor the hosted provider's
-#: ``json_schema`` enforces ``maxLength`` or ``maxItems``. Exceeding one used to
-#: raise, and `_structured` drops a failed transform by design, so HyDE simply
-#: stopped happening on any question where the model wrote a long passage. That
-#: is invisible: retrieval still returns results, just worse ones. Trimming to
-#: the bound keeps the limit without turning it into a silent outage.
+#: Bounds on transform output. Constrained decoding does not enforce ``maxLength`` or
+#: ``maxItems``, so ``ModelOutput`` trims to them instead of failing the transform.
 _MAX_VARIANTS = 4
 _MAX_PASSAGE = 800
 
@@ -76,14 +69,8 @@ _FILLER = re.compile(
 
 
 def normalise(question: str) -> str:
-    """Strip conversational filler. Always applied, costs nothing.
-
-    "Can you tell me how the weighting factors are tuned?" and "how are the
-    weighting factors tuned?" should embed to nearly the same vector, but the
-    filler words are real tokens that dilute a short query.
-    """
-    # Applied repeatedly: "Can you tell me how ..." stacks two filler phrases,
-    # and stripping once leaves "tell me how ...".
+    """Strip conversational filler, which dilutes a short query's embedding."""
+    # Repeated: "Can you tell me how ..." stacks two filler phrases.
     text = question.strip()
     for _ in range(4):
         stripped = _FILLER.sub("", text).strip()
@@ -116,20 +103,8 @@ Example: "what loss function does he use for imbalanced data?" steps back to
 
 Question: "{question}\""""
 
-#: HyDE, grounded in what the corpus actually contains.
-#:
-#: Ungrounded, it invents a different research area. Asked to rate Haseeb's
-#: contribution to machine learning it wrote a passage about "a lightweight
-#: convolutional neural network for real-time object detection in low-bandwidth
-#: environments" — fluent, plausible, and describing a paper that does not
-#: exist in any corpus, let alone this one. The retrieved passages were
-#: correspondingly wrong.
-#:
-#: The titles fix that for the same reason they fix entity linking in the
-#: classifier: twenty of them is a few hundred tokens, and it turns "guess what
-#: a paper on this might say" into "guess which of these papers says it". The
-#: hypothetical is still invented — that is the technique — but it is invented
-#: in the corpus's own vocabulary, which is the vocabulary being searched.
+#: HyDE grounded in the corpus titles. Without them the model wrote about research areas
+#: the corpus does not contain; with them it writes in the vocabulary being searched.
 _HYDE_PROMPT = """Write one paragraph of a research paper. Do not answer, judge
 or comment on the question — write the paragraph.
 
@@ -170,9 +145,8 @@ class QueryTransformer:
     ) -> list[SearchQuery]:
         """Produce the queries to search with.
 
-        The normalised original is always included, so a transform failing or
-        producing something useless can only add noise, never remove the
-        question that was actually asked.
+        The normalised question is always included, so a failed transform only
+        loses its own queries.
         """
         base = normalise(question)
         queries = [SearchQuery(text=base, origin=TransformKind.NORMALISE)]
@@ -198,8 +172,7 @@ class QueryTransformer:
         if TransformKind.HYDE in kinds and (passage := await self._hypothetical(base)):
             queries.append(SearchQuery(text=passage, origin=TransformKind.HYDE, weight=0.8))
 
-        # Distinct text only: duplicates would double a query's weight in the
-        # fusion without adding information.
+        # Duplicates would double a query's weight in the fusion.
         seen: set[str] = set()
         unique: list[SearchQuery] = []
         for query in queries:

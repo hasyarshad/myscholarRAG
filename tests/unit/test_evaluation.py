@@ -1,10 +1,7 @@
-"""The measuring instruments.
+"""Evaluation metrics: the arithmetic, and edge cases that would overstate a result.
 
-A metric that flatters is worse than no metric, because it is believed. These
-tests exist for the arithmetic and the edge cases where a plausible
-implementation quietly reports success — an unreachable judge counted as
-faithful, a refusal counted as a clean answer, a denominator of zero rendered
-as 100%.
+Examples: an unreachable judge counted as faithful, a refusal counted as a clean
+answer, zero over zero rendered as 100%.
 """
 
 from __future__ import annotations
@@ -45,9 +42,6 @@ class TestDeclines:
         ],
     )
     def test_a_textual_refusal_counts(self, text: str) -> None:
-        """The naive pipeline has no refusal mechanism but its text declines
-        anyway. Scoring that as a hallucination would overstate the difference
-        the report exists to measure."""
         assert declines(text)
 
     @pytest.mark.parametrize(
@@ -62,7 +56,6 @@ class TestDeclines:
         assert not declines(text)
 
     def test_an_empty_answer_is_not_a_refusal(self) -> None:
-        """It is a failure, and conflating the two would hide it."""
         assert not declines("")
 
 
@@ -80,9 +73,6 @@ class TestFaithfulnessArithmetic:
         assert result.rate == 0.25
 
     def test_an_unjudged_claim_is_excluded_rather_than_assumed_good(self) -> None:
-        """The loop's grounding check treats an unavailable model as supported,
-        which is right for serving and wrong for measuring — it would turn
-        every failed call into evidence of faithfulness."""
         result = FaithfulnessResult(
             verdicts=(
                 ClaimVerdict("a", supported=False),
@@ -95,15 +85,11 @@ class TestFaithfulnessArithmetic:
         assert result.rate == 1.0
 
     def test_nothing_judged_reports_absent_not_perfect(self) -> None:
-        """Zero over zero rendered as 0% would read as a flawless answer."""
         assert FaithfulnessResult(verdicts=()).rate is None
 
 
 class TestFaithfulnessJudge:
     async def test_citation_markers_are_stripped_before_judging(self) -> None:
-        """ "[C3]" appears in no excerpt. Leaving markers in asks whether the
-        context supports a string it cannot contain, so the configurations
-        that cite would score worse for having citations at all."""
         model = FakeChatModel()
         judge = FaithfulnessJudge(model)
 
@@ -134,13 +120,7 @@ class TestFaithfulnessJudge:
         assert result.rate is None
 
     async def test_non_factual_sentences_are_not_judged(self) -> None:
-        """The judge reuses the verifier's definition of a claim rather than
-        inventing a second one.
-
-        That definition is deliberately inverted — everything counts as factual
-        unless recognisably framing — so the two can never disagree about what
-        needed a citation and what needed support.
-        """
+        # The judge uses the verifier's definition of a factual claim.
         model = FakeChatModel()
 
         await FaithfulnessJudge(model).score("Yes.", (_block("Something."),))
@@ -150,9 +130,7 @@ class TestFaithfulnessJudge:
 
 class TestNaivePipeline:
     async def test_the_naive_prompt_shape_is_preserved(self) -> None:
-        """Comparing against a straw man proves nothing. The baseline sends
-        the context and the question concatenated, with no system prompt and
-        no instructions."""
+        """Context and question concatenated, with no system prompt or instructions."""
 
         class _Retriever:
             async def retrieve(self, *args: Any, **kwargs: Any) -> Any:
@@ -174,7 +152,7 @@ class TestNaivePipeline:
 
 
 class TestContradiction:
-    """Refusing is not the only right answer to a false premise."""
+    """Correcting a false premise counts as a right answer, as refusing does."""
 
     @pytest.mark.parametrize(
         "text",
@@ -199,8 +177,6 @@ class TestContradiction:
         assert not contradicts(text)
 
     def test_contradiction_is_not_refusal(self) -> None:
-        """Kept separate so a good answer that happens to say "instead" is
-        never counted toward over-refusal."""
         text = "Instead, it used NSGA-II to optimise the weighting factors."
 
         assert contradicts(text)

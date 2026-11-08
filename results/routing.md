@@ -2,8 +2,8 @@
 
 46 questions. Accuracy **80.4%**, critical classes **95.5%**.
 
-Critical classes are bibliographic and out-of-scope: a misroute there causes
-confident fabrication or wasted generation, rather than merely a worse search.
+Critical classes are bibliographic and out-of-scope. A misroute there causes
+fabrication or wasted generation; in other classes it only worsens the search.
 
 | Expected class | n | correct | most common error |
 |---|---|---|---|

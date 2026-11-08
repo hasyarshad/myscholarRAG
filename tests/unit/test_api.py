@@ -1,8 +1,7 @@
-"""The HTTP contract the widget is written against.
+"""The HTTP contract the widget is written against, driven with fakes.
 
-Driven with fakes, so these run with no GPU, no database and no network. The
-event ordering assertions matter most: the widget's rendering depends on
-`answer` arriving last, and on stage events being parseable individually.
+The widget renders when ``answer`` arrives, which must be last, and parses each stage event
+on its own.
 """
 
 from __future__ import annotations
@@ -45,8 +44,7 @@ class _Doc:
     venue: str | None
     verified: bool
     kind: str = "paper"
-    """The corpus endpoint reports papers only — it counted the CV and the
-    site pages too, and the widget then told visitors there were 25 papers."""
+    """The corpus endpoint counts only papers."""
 
     sections: int = 1
     chunks: int = 10
@@ -79,8 +77,6 @@ class _Store:
     async def assert_embedder_matches(self, model_id: str) -> None:
         return
 
-    # -- conversations -----------------------------------------------------
-
     async def recent_turns(self, conversation_id: str, *, limit: int = 4) -> list[Turn]:
         return list(self.turns.get(conversation_id, []))
 
@@ -93,11 +89,7 @@ class _Store:
 
 
 class _Engine:
-    """Emits the response's trace as live events, then the response.
-
-    Mirrors the real engine's contract: stages arrive as they happen and the
-    finished response arrives last.
-    """
+    """Emits the response's trace as live events, then the response, as the real engine does."""
 
     def __init__(self, response: Answer | Refusal) -> None:
         self._response = response
@@ -174,11 +166,7 @@ class TestSseFraming:
         assert text.endswith("\n\n")
 
     def test_newlines_are_split_across_data_lines(self) -> None:
-        """A raw newline terminates the frame early, truncating the event.
-
-        Pydantic escapes newlines, so this only bites on raw string payloads —
-        which is exactly when it would be missed.
-        """
+        # A raw newline would end the frame early.
         text = frame("note", "line one\nline two")
 
         assert text.count("data: ") == 2
@@ -187,7 +175,6 @@ class TestSseFraming:
 
 class TestAsk:
     def test_the_answer_arrives_last(self) -> None:
-        """The widget renders on `answer`; anything after it would be missed."""
         response = _client().post("/v1/ask", json={"question": "How are factors tuned?"})
 
         events = parse_sse(response.text)
@@ -195,8 +182,6 @@ class TestAsk:
         assert [name for name, _ in events].count("answer") == 1
 
     def test_pipeline_stages_are_streamed(self) -> None:
-        """Progress, not tokens — verification runs after generation, so raw
-        output would show text that is then rejected."""
         response = _client().post("/v1/ask", json={"question": "anything"})
 
         stages = [payload["stage"] for name, payload in parse_sse(response.text) if name == "stage"]
@@ -228,7 +213,6 @@ class TestAsk:
         assert "motor drives" in answer["nearest_topics"]
 
     def test_an_over_long_question_is_rejected_before_streaming(self) -> None:
-        """Knowable in advance, so it gets a real status rather than an event."""
         response = _client().post("/v1/ask", json={"question": "x" * (MAX_QUESTION_CHARS + 1)})
 
         assert response.status_code == 422
@@ -270,8 +254,6 @@ class TestHealth:
         assert body["checks"] == {"database": True, "index": True}
 
     def test_an_empty_index_is_not_ready(self) -> None:
-        """A process that is up with an empty index is the likeliest real
-        failure, and a TCP connect would not notice it."""
         response = _client(store=_Store(chunks=0)).get("/readyz")
 
         assert response.status_code == 503
@@ -327,18 +309,13 @@ class TestLimits:
             assert gate.queue_depth == 0
 
     async def test_the_first_caller_is_admitted_even_with_no_queue(self) -> None:
-        """max_queued bounds waiting, not running.
-
-        An earlier version checked the queue unconditionally, so max_queued=0
-        rejected every request including the first.
-        """
+        """max_queued bounds waiting, not running."""
         gate = Gate(Limits(max_concurrent=1, max_queued=0))
 
         async with gate:
             pass
 
     async def test_a_full_queue_is_rejected_rather_than_stalled(self) -> None:
-        """Telling a visitor to retry beats a spinner behind five other questions."""
         gate = Gate(Limits(max_concurrent=1, max_queued=0))
 
         async with gate:  # occupies the only slot
@@ -347,12 +324,7 @@ class TestLimits:
 
 
 class TestCors:
-    """A misconfigured origin fails in the browser and nowhere else.
-
-    The API stays healthy, curl works, every test passes — and the widget
-    reports "could not reach the assistant". That happened: the allow list
-    hardcoded port 3000 and the dev server was started on 3100.
-    """
+    """A misconfigured CORS origin fails only in the browser."""
 
     @pytest.mark.parametrize(
         "origin",
@@ -377,7 +349,6 @@ class TestCors:
         assert response.headers["access-control-allow-origin"] == origin
 
     def test_an_unknown_origin_is_refused(self) -> None:
-        """Exact origins, never a wildcard."""
         response = _client().options(
             "/v1/ask",
             headers={
@@ -416,8 +387,6 @@ class TestConversations:
     """Follow-ups resolve against turns the server owns."""
 
     def test_a_session_is_issued_before_anything_else(self) -> None:
-        """Sent first so a client that disconnects mid-answer can still
-        continue the conversation on its next request."""
         client = _client()
 
         events = parse_sse(client.post("/v1/ask", json={"question": "hello?"}).text)
@@ -444,8 +413,6 @@ class TestConversations:
         assert [t.question for t in store.turns[first]] == ["one", "two"]
 
     def test_a_client_invented_identifier_is_replaced(self) -> None:
-        """A guessable id would hand one visitor another's questions as the
-        context for resolving a follow-up."""
         store = _Store()
         client = _client(store=store)
 
@@ -456,7 +423,6 @@ class TestConversations:
         assert "session-1" not in store.turns
 
     def test_the_original_question_is_stored_not_the_rewrite(self) -> None:
-        """The transcript should read as the visitor typed it."""
         store = _Store()
         client = _client(store=store)
 
@@ -481,12 +447,7 @@ class TestConversations:
 
 
 class TestSharedSecret:
-    """CORS keeps a *page* on another origin out. This keeps everything else out.
-
-    The distinction is the whole point of the control: a browser honours CORS,
-    and `curl` has never heard of it. Without a secret the public URL is an open
-    LLM endpoint that anybody can bill work to.
-    """
+    """The shared secret keeps out non-browser clients, which CORS does not restrict."""
 
     @staticmethod
     def _guarded() -> TestClient:
@@ -517,27 +478,18 @@ class TestSharedSecret:
         assert response.status_code == 200
 
     def test_asking_is_guarded_too(self) -> None:
-        """The expensive endpoint, and the one worth abusing."""
         response = self._guarded().post("/v1/ask", json={"question": "what is MPC?"})
         assert response.status_code == 401
 
     def test_health_probes_stay_open(self) -> None:
-        """A host's monitor has no secret, and a probe that can 401 lies."""
         assert self._guarded().get("/healthz").status_code == 200
 
     def test_no_secret_configured_means_no_check(self) -> None:
-        """Development runs without one; a check people disable is worse."""
         assert _client().get("/v1/corpus").status_code == 200
 
 
 class TestReadinessDetail:
-    """A stale startup note must not survive the condition it described.
-
-    Found by containerising: the API booted against an empty database, then the
-    index was loaded underneath it. Readiness correctly flipped to "ready" while
-    still reporting "no documents indexed" — the most misleading possible output
-    in exactly the situation someone is debugging.
-    """
+    """A startup note is dropped once the check it describes passes."""
 
     def test_startup_notes_are_dropped_once_the_check_passes(self) -> None:
         store = _Store()
@@ -556,7 +508,6 @@ class TestReadinessDetail:
         assert "index" not in body["detail"] or body["detail"]["index"] != "no documents indexed"
 
     def test_notes_survive_while_the_check_still_fails(self) -> None:
-        """The explanation is exactly what you want when it is still true."""
         store = _Store(chunks=0)
         services = Services(
             settings=make_settings(),
@@ -572,14 +523,7 @@ class TestReadinessDetail:
 
 
 class TestTheRateLimiterDoesNotGrowForever:
-    """The caller table is keyed by a header the client controls.
-
-    Each caller's window was pruned on the way past, but only for the caller
-    making the request; the table itself was never swept, and `forget` was
-    written and never called. Since the key comes from `X-Forwarded-For`, a
-    caller varying it per request allocated a permanent entry per request —
-    against a container sized in hundreds of megabytes.
-    """
+    """The caller table is keyed by a client-controlled header, so stale callers are swept."""
 
     def test_callers_that_stop_calling_are_forgotten(self) -> None:
         limiter = RateLimiter()
@@ -604,7 +548,6 @@ class TestTheRateLimiterDoesNotGrowForever:
         assert "someone" in limiter._hits  # noqa: SLF001
 
     def test_sweeping_does_not_reset_an_offender(self) -> None:
-        """The limit must still bite across a sweep."""
         limiter = RateLimiter()
         for _ in range(Limits().per_minute):
             limiter.check("noisy")

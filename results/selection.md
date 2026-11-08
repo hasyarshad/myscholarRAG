@@ -7,7 +7,7 @@
 | Recall of needed documents | **90%** |
 | Questions with nothing missing | **90%** |
 
-Recall alone hides the shape of the failure: nine questions at 80% and one at zero average to 78%, and the one at zero is an answer that confidently omits a paper. Precision is not scored — selecting a document that turns out to be irrelevant costs a little context, while missing the one that answers the question costs the answer.
+Recall is an average and can hide a question that misses a needed paper entirely, so the share of questions with nothing missing is reported beside it. Precision is not scored: an irrelevant extra document costs a little context, while a missing one costs the answer.
 
 ## By question shape
 

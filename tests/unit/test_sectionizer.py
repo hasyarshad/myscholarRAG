@@ -31,8 +31,6 @@ class TestStripEnumeration:
 
 
 class TestPatternClassification:
-    """Headings below are copied verbatim from the extraction spike."""
-
     @pytest.mark.parametrize(
         ("heading", "expected"),
         [
@@ -46,8 +44,7 @@ class TestPatternClassification:
             ("REFERENCES", SectionKind.REFERENCES),
             ("Abstract", SectionKind.ABSTRACT),
             ("V. EXPERIMENTAL SETUP", SectionKind.EXPERIMENTS),
-            # Correctly caught by the "algorithm" keyword: pseudocode blocks
-            # describe method, so METHODS is the right home for them.
+            # Matched by the "algorithm" keyword; pseudocode describes the method.
             ("Algorithm 1 Pseudo Code for NSGA-II", SectionKind.METHODS),
         ],
     )
@@ -64,17 +61,10 @@ class TestPatternClassification:
         ],
     )
     def test_domain_specific_headings_do_not_match(self, heading: str) -> None:
-        """The finding that makes the model fallback necessary.
-
-        These are all genuine headings from the corpus. Every one is a methods
-        section, and none contains a word a generic matcher looks for. Without
-        a fallback they would all be filed as OTHER, and section filtering
-        would be useless on exactly the papers it matters most for.
-        """
+        # Methods headings from the corpus with no generic keyword; these need the model fallback.
         assert classify_by_pattern(heading, DocumentKind.PAPER) is None
 
     def test_conclusion_wins_over_discussion_in_a_combined_heading(self) -> None:
-        """Ordering in the pattern table is load-bearing, so pin it."""
         assert (
             classify_by_pattern("Discussion and Conclusion", DocumentKind.PAPER)
             is SectionKind.CONCLUSION
@@ -120,7 +110,6 @@ class TestSectionizer:
         assert result.matched_by == "model"
 
     async def test_model_failure_falls_back_rather_than_aborting(self) -> None:
-        """One unclassifiable heading must not fail a whole ingestion run."""
         sectionizer = Sectionizer(FakeChatModel())  # no queued response, so it raises
 
         result = await sectionizer.classify("IV. THREE LEG SIX SWITCH INVERTER")
@@ -135,7 +124,6 @@ class TestSectionizer:
         assert (await sectionizer.classify("IV. SIX SWITCH INVERTER")).kind is SectionKind.OTHER
 
     async def test_stats_record_how_each_heading_was_resolved(self) -> None:
-        """So a run can report how much work the fallback is doing."""
         model = FakeChatModel(
             structured_responses=[HeadingClassification(kind=SectionKind.METHODS, confidence=0.8)]
         )

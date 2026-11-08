@@ -19,13 +19,9 @@ _DEFAULT_REPLY = (
 class FakeChatModel(ChatModel):
     """Returns canned text, optionally keyed by a substring of the prompt.
 
-    ``responses`` maps a substring to the reply returned whenever that substring
-    appears anywhere in the conversation. This is enough to drive the classifier,
-    the grader and the answer generator through every branch of the adaptive loop
-    deterministically.
-
-    Calls are recorded on ``calls`` so tests can inspect prompts when they need
-    to — but assertions should generally target behaviour, not call counts.
+    ``responses`` maps a substring to the reply returned whenever it appears
+    anywhere in the conversation (case-insensitive). ``structured`` returns the
+    first queued response of the requested type. Calls are recorded on ``calls``.
     """
 
     def __init__(
@@ -68,8 +64,8 @@ class FakeChatModel(ChatModel):
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> AsyncIterator[str]:
-        # Yield word by word so streaming consumers get realistic chunking,
-        # including the split-marker case the UI has to buffer around.
+        # Word by word, so consumers see realistic chunking, including markers
+        # split across chunks.
         for word in self._reply_for(messages).split(" "):
             yield word + " "
 

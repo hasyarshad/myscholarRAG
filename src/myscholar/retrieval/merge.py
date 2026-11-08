@@ -1,18 +1,8 @@
 """Expanding retrieved chunks back into contiguous spans.
 
-Chunks are small so their vectors stay specific. The generator needs coherent
-prose, so neighbouring chunks are merged back after retrieval. Retrieval
-precision and generation context are different problems with different answers.
-
-This is a reimplementation of the idea in the code this project replaces, whose
-version had three defects:
-
-- it mutated the list it was iterating over, silently skipping elements;
-- it was O(n^3) pairwise comparison rather than a sorted sweep;
-- it expanded by global row id with no document filter, so a window near a
-  boundary could stitch two papers into one span and cite it as one source.
-
-Keying spans on ``section_id`` makes the third unrepresentable.
+Chunks are small so their vectors stay specific; the generator needs coherent prose, so
+neighbouring chunks are merged after retrieval. Spans are keyed on ``section_id``, so a
+span never joins two sections or two papers.
 """
 
 from __future__ import annotations
@@ -55,7 +45,6 @@ class SeedHit:
     section_id: UUID
     ordinal: int
     score: float
-    token_count: int = 0
 
 
 def merge_windows(
@@ -100,9 +89,8 @@ def merge_windows(
             end = start
         intervals.append((hit.section_id, hit.document_id, start, end, hit.chunk_id, hit.score))
 
-    # Sort by (section, start) and sweep once. Sorting by section first is what
-    # keeps a merge from ever spanning two sections: intervals from different
-    # sections are never adjacent in the sorted order.
+    # Sort by (section, start) and sweep once. Intervals from different sections are
+    # never adjacent in this order, so a merge cannot span two sections.
     intervals.sort(key=lambda i: (str(i[0]), i[2], i[3]))
 
     merged: list[Span] = []
@@ -111,9 +99,7 @@ def merge_windows(
         overlaps = (
             previous is not None
             and previous.section_id == section_id
-            # start <= end + 1 merges touching windows too: chunks 0-2 and 3-5
-            # are contiguous text, and leaving a one-chunk gap between them
-            # would hand the generator two blocks that are really one passage.
+            # Touching windows merge too: chunks 0-2 and 3-5 are contiguous text.
             and start <= previous.end + 1
         )
         if overlaps and previous is not None:
@@ -185,8 +171,7 @@ def _cap(
         document_id=span.document_id,
         start=start,
         end=end,
-        # Only seeds that survived the truncation remain provenance for this
-        # span; keeping the others would claim coverage the span no longer has.
+        # Only seeds that survived the truncation remain provenance for this span.
         seed_ids=frozenset(h.chunk_id for h in seeds_in_span if start <= h.ordinal <= end)
         or span.seed_ids,
         max_score=span.max_score,

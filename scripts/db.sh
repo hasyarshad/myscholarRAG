@@ -1,14 +1,8 @@
 #!/usr/bin/env bash
-# Userspace PostgreSQL with pgvector — no root, no Docker.
+# Userspace PostgreSQL with pgvector, for machines without root or Docker.
 #
-# The workstation is a shared lab machine with no sudo and no docker group
-# membership, and rootless Docker is unavailable because newuidmap/newgidmap
-# are absent (setuid binaries only root can install). conda-forge ships both
-# postgresql and pgvector, so the database runs as an ordinary user process
-# against a data directory in $HOME.
-#
-# This is the same engine as the production target (Supabase), so nothing about
-# the SQL or the schema differs between here and there.
+# conda-forge ships postgresql and pgvector, so the database runs as an ordinary
+# user process with its data directory in $HOME. Same engine as Supabase.
 #
 #   ./scripts/db.sh setup    create the cluster and database (once)
 #   ./scripts/db.sh start
@@ -43,9 +37,8 @@ cmd_setup() {
     else
         info "initialising cluster at $PGDATA"
         mkdir -p "$PGDATA"
-        # Trust auth on localhost only. The cluster listens on 127.0.0.1 and is
-        # owned by this user, so a password would protect nothing that file
-        # permissions do not already protect.
+        # Trust auth is safe here: the cluster listens on 127.0.0.1 only and is
+        # owned by this user.
         initdb -D "$PGDATA" -U "$USER" --auth-local=trust --auth-host=trust -E UTF8 >/dev/null
     fi
 
@@ -60,8 +53,7 @@ cmd_setup() {
 
     info "enabling extensions"
     psql -h 127.0.0.1 -p "$PGPORT" -U "$USER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -q <<'SQL'
--- Into `extensions`, not `public`. See PostgresStore._EXTENSIONS for why, and
--- for why pg_trgm is no longer created: nothing ever used it.
+-- In `extensions`, not `public`: see PostgresStore._EXTENSIONS.
 CREATE SCHEMA IF NOT EXISTS extensions;
 CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions;
 SQL

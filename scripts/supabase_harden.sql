@@ -1,31 +1,21 @@
 -- Close the public API surface on a hosted Supabase database.
 --
--- Supabase serves every table in the `public` schema over PostgREST, and grants
--- the `anon` and `authenticated` roles full DML on them. The anon key is public
--- by design — it ships inside client applications — so without row-level
--- security those grants mean anyone holding it can read the corpus and, because
--- the grants include DELETE and TRUNCATE, destroy it.
---
--- That matters here for two specific reasons: the chunks table contains the
--- text of publisher copyright papers, and conversation_turns contains what
--- visitors typed.
---
--- This project never uses the REST API. It connects directly as the table
--- owner, and **the owner bypasses row-level security**, so enabling RLS with no
--- policies costs the application nothing and leaves the REST surface returning
--- nothing.
+-- Supabase serves every `public` table over PostgREST and grants `anon` and
+-- `authenticated` full DML on them, and the anon key ships in client apps. Here
+-- that would expose copyrighted paper text (chunks) and visitor messages
+-- (conversation_turns). The app never uses the REST API and connects as the
+-- table owner, which bypasses RLS, so RLS with no policies costs it nothing.
 --
 --   psql "$SUPABASE_DB_URL" -f scripts/supabase_harden.sql
 --
--- Idempotent: safe to run repeatedly.
+-- Idempotent.
 
--- 1. Take the write grants away. Defence in depth: even if RLS were disabled
---    later, or a policy were added carelessly, no anonymous write is possible.
+-- 1. Revoke the grants, so no anonymous write is possible even if RLS is later
+--    disabled or a careless policy is added.
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;
 
--- 2. Enable row-level security everywhere, with no policies. Default-deny: any
---    role that is not the owner sees nothing.
+-- 2. RLS with no policies: every role except the owner sees nothing.
 ALTER TABLE documents           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sections            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chunks              ENABLE ROW LEVEL SECURITY;
@@ -33,28 +23,20 @@ ALTER TABLE chunk_embeddings    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE document_summaries  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE conversation_turns  ENABLE ROW LEVEL SECURITY;
 
--- 3. Drop the duplicate index. `created_at` carried both an explicit
---    Index(...) and index=True on the column, so two identical btree indexes
---    existed — paid for on every insert, useful only once.
+-- 3. Drop a duplicate btree index on created_at (the model declared it twice),
+--    which cost every insert and added nothing.
 DROP INDEX IF EXISTS ix_conversation_turns_created_at;
 
--- 4. Get the extensions out of `public`, which Supabase's linter warns about
---    under "Extension in Public". `public` is the schema PostgREST exposes and
---    every role can reach, so an extension's functions sitting there are
---    callable by roles that should not have them and shadowable by a
---    same-named function created later in the same schema.
+-- 4. Move extensions out of `public` (Supabase lint "Extension in Public"),
+--    where every role can call their functions and a same-named function can
+--    shadow them.
 --
---    pg_trgm is dropped rather than moved. Nothing has ever used it: lexical
---    search is tsvector/ts_rank_cd over a GIN index, there is no similarity()
---    call or gin_trgm_ops index anywhere in the schema, and pg_depend reports
---    zero dependent objects. Without CASCADE, deliberately — if that stops
---    being true this should fail loudly rather than drop an index nobody
---    remembered.
+--    pg_trgm is unused (lexical search is tsvector over GIN), so it is dropped.
+--    No CASCADE, so this fails instead of dropping a dependent object.
 DROP EXTENSION IF EXISTS pg_trgm;
 
---    pgvector is moved, since the corpus is unusable without it. The type and
---    the `<=>` operator become schema-qualified, which is why the application
---    connects with `search_path = public,extensions` — see create_engine.
+--    pgvector is moved; the application connects with
+--    `search_path = public,extensions` (see create_engine) to resolve it.
 CREATE SCHEMA IF NOT EXISTS extensions;
 DO $$
 BEGIN

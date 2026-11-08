@@ -7,7 +7,7 @@
 | Recognises a supported claim | **100%** | 8 cases |
 | Catches an unsupported claim | **100%** | 8 cases |
 
-Reported separately because they fail in opposite directions. A judge biased toward *unsupported* makes every configuration look bad while roughly preserving the comparison; one biased toward *supported* makes everything look clean and destroys it. A single accuracy figure hides which is happening.
+The two rates are reported separately because the errors have different effects. A judge biased toward *unsupported* makes every configuration look worse but roughly preserves the comparison; one biased toward *supported* makes every configuration look clean and hides the differences. A single accuracy figure cannot show which bias is present.
 
 ## By case shape
 

@@ -1,49 +1,38 @@
-# What NOT to send to the Docker daemon when building.
-#
-# Docker copies the whole directory into the build context before reading the
-# Dockerfile. Unfiltered, that is 9GB here — 7.7GB of it a virtualenv the image
-# has no use for, since the image installs its own dependencies from
-# pyproject.toml.
-#
-# Note this file is Docker-specific: `docker build` does NOT fall back to
-# .gitignore. `gcloud builds submit` does, which is why the cloud build worked
-# while a local one would have crawled.
+# docker build does not read .gitignore, so everything the image doesn't need is
+# listed here. The image installs its own dependencies from pyproject.toml.
 
-# Virtual environments — the image builds its own
+# Virtual environments and caches
 .venv/
 venv/
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
-# Node — the API image contains no JavaScript
+# Node: the API image contains no JavaScript
 node_modules/
 web/
-scripts/pdf/
 .next/
 
-# Source documents and the built index. The container reads its corpus from
-# Postgres over the network; the PDFs are never needed at runtime.
+# Source documents and the built index: the container reads its corpus from Postgres
 papers/
 data/
 artifacts/
 models/
 .docling_cache/
 
-# History, caches, docs, results
+# Repository files the image doesn't use
 .git/
 .gitignore
 .github/
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-.coverage
-htmlcov/
-docs/
 results/
 tests/
 
-# Secrets must never enter a build context: every file in it is readable by
-# any build step, and can end up in an image layer.
+# Secrets must never enter the build context: any build step can read them, and
+# they can end up in an image layer.
 .env
 .env.*
 !.env.example
@@ -53,4 +42,3 @@ tests/
 .idea/
 .vscode/
 *.swp
-Screenshot*.png

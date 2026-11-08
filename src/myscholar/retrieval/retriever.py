@@ -1,15 +1,7 @@
-"""Hybrid retrieval: search, fuse, expand.
+"""Hybrid retrieval: dense and lexical search fused by reciprocal rank, then expanded.
 
-    dense (2180 chunks)  ─┐
-                          ├─ RRF ─→ 50 ─→ 8 ─→ parent spans
-    lexical (2180 chunks) ┘
-
-Two branches narrow the field, fusion settles the order, and expansion restores
-the prose the chunking deliberately broke up.
-
-``RetrievalMode`` exists so the three configurations can be compared on the
-same code path rather than through three implementations — an ablation where
-the variants differ in more than the thing under test measures nothing.
+The top ``top_k`` chunks from each branch are fused, the best ``context_blocks`` kept,
+and neighbouring chunks merged back into spans of prose.
 """
 
 from __future__ import annotations
@@ -29,16 +21,11 @@ from myscholar.retrieval.merge import SeedHit, Span, merge_windows
 
 
 class RetrievalMode(StrEnum):
-    """Which parts of the pipeline are active.
+    """Which retrieval branches run: DENSE alone, or HYBRID with the lexical branch.
 
-    DENSE is the dense branch alone; HYBRID adds the lexical branch. Keeping
-    both means the contribution of lexical search stays measurable rather than
-    assumed.
-
-    A third mode added a cross-encoder reranker. Measured on this corpus it made
-    retrieval worse — routed MRR 0.865 to 0.771, hit@1 0.84 to 0.65, with the
-    damage concentrated where papers are near-identical — so it was removed
-    rather than left switched off. The measurement is in results/report.md.
+    Both share one code path, so ablations differ only in the lexical branch. A
+    cross-encoder reranker lowered routed MRR from 0.865 to 0.771 and hit@1 from 0.84
+    to 0.65 (results/report.md), so ranking is RRF only.
     """
 
     DENSE = "dense"
@@ -50,22 +37,17 @@ class RetrievalResult:
     blocks: tuple[ContextBlock, ...]
 
     ranked: tuple[SearchHit, ...]
-    """The final ordering handed to expansion. What the evaluation measures."""
+    """The final ordering handed to expansion, which the evaluation measures."""
 
     candidates: tuple[SearchHit, ...]
-    """Everything fusion produced, before the limit. Kept for debugging."""
+    """Everything fusion produced, before the limit."""
 
     mode: RetrievalMode
     timings_ms: dict[str, int] = field(default_factory=dict)
 
     @property
     def document_ids(self) -> list[UUID]:
-        """Documents in final rank order, deduplicated.
-
-        Document level, because "did it find the right paper" is the question a
-        visitor is really asking, and one paper contributing several chunks
-        should not count as several results.
-        """
+        """Documents in final rank order, deduplicated."""
         seen: list[UUID] = []
         for hit in self.ranked:
             if hit.document_id not in seen:
@@ -96,19 +78,6 @@ class HybridRetriever:
         self._lexical_weight = lexical_weight
         self._rrf_k = rrf_k
         self._max_span_chunks = max_span_chunks
-
-    @property
-    def model_id(self) -> str:
-        """Which embedder built the vectors this searches.
-
-        Exposed so document-level selection can ask for summaries embedded by
-        the same model — comparing across models returns ranked nonsense, which
-        is the defect this project's schema exists to prevent.
-        """
-        return self._embedder.model_id
-
-    async def embed_query(self, text: str) -> list[float]:
-        return await self._embedder.embed_query(text)
 
     async def retrieve(
         self,
@@ -172,8 +141,7 @@ class HybridRetriever:
             k=self._rrf_k,
             limit=self._top_k,
         )
-        # Carry the fusion score onto the hit, so downstream ordering and the
-        # span scores reflect the fused ranking rather than one branch's score.
+        # Each hit carries its fused score, which orders the spans downstream.
         return [
             SearchHit(
                 chunk_id=by_id[chunk_id].chunk_id,

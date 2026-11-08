@@ -1,14 +1,9 @@
-"""Measure retrieval quality across the three configurations.
+"""Measure retrieval quality: dense, hybrid and the routed pipeline.
 
     uv run python scripts/eval_retrieval.py
 
-Runs the same test set through dense and hybrid, and reports
-hit@k and MRR. No language model is involved, so this is fast, deterministic,
-and cheap enough to run after any retrieval change.
-
-The per-kind breakdown is the interesting part: an average that improves tells
-you something worked, but not what. Identifier questions should show the
-lexical branch earning its place.
+Reports hit@k and MRR overall and per question kind. Dense and hybrid involve no
+language model, so they are fast and deterministic.
 """
 
 from __future__ import annotations
@@ -47,20 +42,10 @@ class Outcome:
     """1-based rank of the expected document, or None if absent."""
 
     bypassed: bool = False
-    """The router answered without retrieval — by SQL, or as out of scope.
-
-    Scored separately. Counting these as retrieval misses would penalise the
-    router for correctly declining to search, which is the behaviour Phase 3
-    exists to add.
-    """
+    """The router answered without retrieval (by SQL, or as out of scope); scored separately."""
 
     context_precision: float = 0.0
-    """Fraction of the returned chunks that come from the expected document.
-
-    Document-level rank cannot see intra-document reordering, which is most of
-    This measures what the generator actually receives, so the effect of
-    show up.
-    """
+    """Fraction of the returned blocks that come from the expected document."""
 
 
 @dataclass
@@ -75,8 +60,6 @@ class Metrics:
 
     @classmethod
     def of(cls, outcomes: list[Outcome]) -> Metrics:
-        # Questions the router answered without searching are excluded from
-        # retrieval metrics and counted separately.
         bypassed = sum(1 for o in outcomes if o.bypassed)
         outcomes = [o for o in outcomes if not o.bypassed]
         if not outcomes:
@@ -118,10 +101,8 @@ async def evaluate(mode: RetrievalMode, cases: list[dict[str, Any]]) -> list[Out
     outcomes: list[Outcome] = []
     for case in cases:
         result = await retriever.retrieve(case["question"], mode=mode)
-        # Measured on the expanded blocks, not the raw chunks, because blocks
-        # are what a generator receives — and because the routed configuration
-        # can only produce blocks. Comparing chunk ranking against span ranking
-        # made routing look nine points worse than it was.
+        # Ranked over expanded blocks, the unit the generator and the routed
+        # configuration both see.
         ranked: list[str] = []
         for block in result.blocks:
             slug = slugs.get(block.document_id, "")
@@ -187,14 +168,14 @@ def render(results: dict[str, list[Outcome]]) -> str:
     if missed:
         lines += [f"- {question}" for question in missed]
     else:
-        lines.append("None — every question found its document in at least one configuration.")
+        lines.append("None: every question found its document in at least one configuration.")
 
     lines += ["", "## Questions routing changed", ""]
-    if "full" in results and "routed" in results:
+    if "hybrid" in results and "routed" in results:
         moved = [
-            (results["full"][i], results["routed"][i])
-            for i in range(len(results["full"]))
-            if results["full"][i].rank != results["routed"][i].rank
+            (results["hybrid"][i], results["routed"][i])
+            for i in range(len(results["hybrid"]))
+            if results["hybrid"][i].rank != results["routed"][i].rank
         ]
         lines += (
             [
@@ -209,13 +190,9 @@ def render(results: dict[str, list[Outcome]]) -> str:
 
 
 async def evaluate_routed(cases: list[dict[str, Any]]) -> list[Outcome]:
-    """The full shipped path: classify, plan, select documents, retrieve, fuse.
+    """The shipped path: classify, plan, select documents, retrieve, fuse.
 
-    Compared against `hybrid` this isolates what routing adds on content
-    questions. The bibliographic and out-of-scope classes are excluded here
-    because they bypass retrieval entirely — their improvement is measured in
-    the routing evaluation, not this one.
-
+    Questions the router answers without retrieval are marked as bypassed.
     """
     settings = load_settings()
     container = build_container(settings)
@@ -223,10 +200,7 @@ async def evaluate_routed(cases: list[dict[str, Any]]) -> list[Outcome]:
     documents = await store.list_documents()
     slugs = {row.id: row.slug for row in documents}
 
-    # Assembled through myscholar.assembly so the `routed` row measures the
-    # pipeline that ships. Built by hand it had already drifted: the
-    # transformer was constructed without corpus titles, so its hypothetical
-    # passages were ungrounded and it was retrieving for a different system.
+    # Assembled through myscholar.assembly so this row measures the shipped pipeline.
     router = build_router(settings, container, store, titles=[d.title for d in documents])
 
     outcomes: list[Outcome] = []

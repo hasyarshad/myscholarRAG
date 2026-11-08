@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 # Run the generation evaluation N times with nothing changed.
 #
-# Every A/B this project has done compared two single runs. With three
-# stochastic generation attempts and three model-backed judges per question,
-# nobody knows how much a metric moves when *nothing* changes — so a two-claim
-# difference has been read as a regression. This measures the noise floor, and
-# without it no later comparison means anything.
+# Generation and the model-backed judges are stochastic, so this measures how far
+# each metric moves between identical runs: the noise floor for any A/B comparison.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -40,8 +37,7 @@ for i in range(1, runs + 1):
     })
 
 def spread(key, fmt="{:.1%}"):
-    # int fields arrive as int, rates as float; formatting both with one code
-    # crashed the summary after it had already printed the useful part.
+    # Counts are ints and rates floats, so "{:d}" needs the cast.
     vals = [r[key] for r in rows]
     if fmt.endswith("d}"):
         vals = [int(v) for v in vals]
@@ -58,6 +54,6 @@ print(spread("claims", "{:d}"))
 print(spread("false_premise", "{:d}"))
 print(spread("unanswerable", "{:d}"))
 print()
-print("A later change is only believable if it moves a metric by more than the")
-print("range above. Anything smaller is the pipeline talking to itself.")
+print("A later change is only meaningful if it moves a metric by more than the")
+print("range above. Anything smaller is within run-to-run noise.")
 PY

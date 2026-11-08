@@ -1,10 +1,6 @@
-"""Questions that assume something untrue.
+"""Premise checks for questions that assume something untrue.
 
-The hardest family in the evaluation and the one the system scored worst on.
-A false premise is not a retrieval failure and retrieving harder cannot fix it:
-the right passages are already in hand, and they are what disprove the
-question. Everything downstream then helps the model explain a thing that never
-happened.
+Retrieval cannot fix a false premise: the retrieved passages are what disprove it.
 """
 
 from __future__ import annotations
@@ -66,8 +62,6 @@ class TestWhenItRuns:
         ],
     )
     async def test_plain_questions_cost_nothing(self, question: str) -> None:
-        """A question that asserts nothing has no premise to test, and the call
-        would be spent for certain on every ordinary question."""
         model = FakeChatModel()
 
         assert await _answerer(model).check_premise(question, CONTEXT) is None
@@ -98,11 +92,6 @@ class TestWhatItReturns:
         assert "reduces EMI" in result.correction
 
     async def test_silence_is_not_contradiction(self) -> None:
-        """The excerpts being quiet about a claim is not evidence against it.
-
-        Treating it as such would turn every question whose answer is missing
-        into an accusation that the asker invented it.
-        """
         model = FakeChatModel(
             structured_responses=[PremiseCheck(premise="something", contradicted=False)]
         )
@@ -110,7 +99,6 @@ class TestWhatItReturns:
         assert await _answerer(model).check_premise("Why did he show X?", CONTEXT) is None
 
     async def test_a_contradiction_without_a_premise_is_discarded(self) -> None:
-        """Nothing to tell the generator, so nothing is claimed."""
         model = FakeChatModel(
             structured_responses=[PremiseCheck(premise="", contradicted=True, correction="no")]
         )
@@ -118,7 +106,7 @@ class TestWhatItReturns:
         assert await _answerer(model).check_premise("Why did he show X?", CONTEXT) is None
 
     async def test_an_unavailable_check_is_not_a_failed_check(self) -> None:
-        """A checker that cannot be reached must not manufacture accusations."""
+        # A FakeChatModel with no queued structured response fails like an unreachable checker.
         result = await _answerer(FakeChatModel()).check_premise("Why did he show X?", CONTEXT)
 
         assert result is None

@@ -35,12 +35,11 @@ def _cosine(a: Vector, b: Vector) -> float:
 
 
 class InMemoryVectorStore(VectorStore):
-    """Exact search over a list, for tests and small fixtures.
+    """Exact search over a list, for tests.
 
-    Behaviourally equivalent to the Postgres adapter for everything the pipeline
-    relies on: the same filters apply, lexical scoring ranks by term overlap, and
-    span fetching is scoped to a section. It is exact rather than approximate,
-    which is a feature in tests — no HNSW recall noise to explain away.
+    Matches the Postgres adapter in what the pipeline relies on: the same filters,
+    lexical ranking by term overlap, and section-scoped span fetches. Search is
+    exact, so tests see no approximate-index recall noise.
     """
 
     def __init__(self, model_id: str = "fake/hash-embedder") -> None:
@@ -92,9 +91,8 @@ class InMemoryVectorStore(VectorStore):
         if not terms:
             return []
 
-        # Inverse document frequency, so a rare identifier such as "fcs-mpcc"
-        # counts for far more than a common word. This mirrors what ts_rank_cd
-        # does in Postgres closely enough for tests to be meaningful.
+        # Weighted by inverse document frequency, so a rare identifier such as
+        # "fcs-mpcc" outweighs a common word.
         doc_freq: dict[str, int] = defaultdict(int)
         tokenised = [set(_WORD.findall(rec.text.lower())) for rec in self._records]
         for tokens in tokenised:

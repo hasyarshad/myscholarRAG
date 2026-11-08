@@ -15,13 +15,7 @@ class TestReciprocalRankFusion:
 
         assert [item for item, _ in result] == ["a", "b", "c"]
 
-    def test_agreement_between_branches_beats_confidence_within_one(self) -> None:
-        """The property that makes fusion worth doing.
-
-        A chunk both branches rank moderately well should outrank one that only
-        a single branch loves. Two independent methods agreeing is stronger
-        evidence than one method being certain.
-        """
+    def test_agreement_between_branches_outranks_confidence_within_one(self) -> None:
         result = reciprocal_rank_fusion(
             {
                 "dense": ["loved_by_dense", "x", "agreed", "y"],
@@ -51,7 +45,6 @@ class TestReciprocalRankFusion:
         assert weighted["a"] > weighted["b"]
 
     def test_a_zero_weighted_branch_is_ignored(self) -> None:
-        """How the ablation turns the lexical branch off without a code path."""
         result = reciprocal_rank_fusion(
             {"dense": ["a"], "lexical": ["b"]}, weights={"lexical": 0.0}
         )
@@ -68,8 +61,6 @@ class TestReciprocalRankFusion:
         assert reciprocal_rank_fusion({"dense": [], "lexical": []}) == []
 
     def test_ties_break_deterministically(self) -> None:
-        """A non-deterministic ranking would make the eval unable to tell a
-        real change from noise."""
         lists = {"dense": ["a", "b"], "lexical": ["b", "a"]}
 
         first = [item for item, _ in reciprocal_rank_fusion(lists)]
@@ -78,7 +69,6 @@ class TestReciprocalRankFusion:
         assert first == second
 
     def test_larger_k_flattens_the_ranking(self) -> None:
-        """k damps the head, so no single branch's favourite dominates."""
         tight = dict(reciprocal_rank_fusion({"dense": ["a", "b"]}, k=1))
         flat = dict(reciprocal_rank_fusion({"dense": ["a", "b"]}, k=1000))
 
@@ -118,8 +108,6 @@ class TestFusionProperties:
     @settings(max_examples=60, deadline=None)
     @given(st.lists(st.integers(0, 30), min_size=1, max_size=20, unique=True))
     def test_branch_order_does_not_change_the_result(self, items: list[int]) -> None:
-        """Fusion must be commutative across branches, or the result depends on
-        dictionary insertion order rather than on the rankings."""
         other = list(reversed(items))
 
         forward = reciprocal_rank_fusion({"dense": items, "lexical": other})
@@ -130,12 +118,7 @@ class TestFusionProperties:
 
 class TestWeightedBranches:
     def test_defaults_weight_both_branches_equally(self) -> None:
-        """Measured, not assumed.
-
-        An initial 0.4 for lexical scored MRR 0.887 on the retrieval test set
-        against 0.901 for 1.0. A corpus this dense in identifiers rewards exact
-        matching more than general guidance suggests.
-        """
+        # A lexical weight of 0.4 scored MRR 0.887 on the retrieval set, against 0.901 for 1.0.
         scores = dict(weighted_branches(["a"], ["b"]))
 
         assert scores["a"] == scores["b"]
@@ -146,12 +129,6 @@ class TestWeightedBranches:
         assert scores["a"] > scores["b"]
 
     def test_an_identifier_found_only_by_lexical_still_surfaces(self) -> None:
-        """The case the lexical branch exists for.
-
-        Dense search smears rare identifiers such as NSGA-II across their
-        subword pieces, so the chunk that actually contains one may appear in
-        no dense result at all.
-        """
         result = weighted_branches(
             ["unrelated_1", "unrelated_2"], ["chunk_with_nsga_ii", "unrelated_1"]
         )

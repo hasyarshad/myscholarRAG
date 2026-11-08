@@ -1,12 +1,8 @@
 "use client";
 
 /**
- * Renders an answer with its citation markers turned into chips.
- *
- * The markers are the point: every factual sentence carries one, each resolves
- * to a real retrieved passage, and clicking it shows which paper, section and
- * pages the claim came from. Stripping them to make the prose "cleaner" would
- * discard the verification.
+ * Renders an answer with its citation markers turned into chips that show the
+ * paper, section and pages each claim came from.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -24,11 +20,8 @@ function CitationChip({
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLSpanElement>(null);
 
-  // An open popover sits over the sentence underneath it, so it has to be
-  // dismissable by the two gestures a reader will actually try — pressing
-  // Escape and clicking away — rather than only by finding the same small chip
-  // again. Listeners are attached only while one is open, so a long answer
-  // full of citations does not carry a listener per marker.
+  // Close on Escape or a click outside. Listeners exist only while open, so a
+  // long answer does not carry one per marker.
   useEffect(() => {
     if (!open) return;
 
@@ -48,9 +41,7 @@ function CitationChip({
   }, [open]);
 
   if (!citation) {
-    // Should be unreachable: the API only emits citations that resolved. Shown
-    // rather than hidden, because silently dropping one would conceal a hole
-    // in the verifier.
+    // Unreachable if the verifier works; shown so a gap in it stays visible.
     return <sup className="chip chip-unknown">[{label}?]</sup>;
   }
 
@@ -67,21 +58,14 @@ function CitationChip({
       </button>
       {open && (
         <span className="chip-popover" role="note">
-          {/* Linked only when the document resolved to somewhere real: a DOI
-              for a paper, the page itself for the CV and site content. A
-              citation with neither stays plain text, because a link that goes
-              nowhere is worse than no link — the reader only discovers it
-              after following it. */}
+          {/* Linked to a DOI or the page itself; plain text when neither exists. */}
           {citation.source_url ? (
             <a
               className="chip-link"
               href={citation.source_url}
               target="_blank"
               rel="noreferrer noopener"
-              // Closed on the way out. The link opens in a new tab, so this
-              // page never navigates and nothing else would ever reset the
-              // state — the reader comes back to the popover still covering
-              // the sentence they were reading.
+              // The link opens a new tab, so close the popover on the way out.
               onClick={() => setOpen(false)}
             >
               {citation.document_title}
@@ -141,14 +125,7 @@ export function AnswerBody({ answer }: { answer: AnswerEvent }) {
         </p>
       )}
 
-      {/* What `degraded` means, stated as it is rather than as it once was.
-          This said "the reranking model was unavailable" long after the
-          reranker had been measured harmful and removed from the system, so it
-          reported the failure of a component that no longer existed. The flag
-          now has two causes — generation itself failing, and a grounding check
-          that would have deleted an otherwise verified answer — and what they
-          share is that a check did not complete, not that anything was
-          unavailable. */}
+      {/* Set when generation failed or grounding was inconclusive on a verified answer. */}
       {answer.degraded && (
         <p className="degraded">
           Answered with lower confidence: not every check completed. The

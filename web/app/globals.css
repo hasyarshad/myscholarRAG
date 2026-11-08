@@ -1,6 +1,5 @@
-/* Deliberately plain: the widget is copied into a portfolio with its own
-   design system, so this styles structure and leaves colour to inherit where
-   it reasonably can. */
+/* Demo page only. The widget's own styles are in scholar-chat.css and read
+   these colour variables when present. */
 
 :root {
   --fg: #16181d;

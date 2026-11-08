@@ -1,8 +1,4 @@
-"""Score the automated metric against the hand labels.
-
-The generation evaluation decides "correct" with regular expressions over the
-answer text. That is a proxy, and a proxy is only worth what its agreement with
-a considered judgement is worth. This measures that agreement.
+"""Score the generation evaluation's text-pattern verdicts against hand labels.
 
 Labels are in tests/eval/labels.yaml, judged against tests/eval/rubric.md, which
 was written before the answers were read.
@@ -25,17 +21,11 @@ MUST_REFUSE = {"unanswerable", "false_premise", "injection"}
 
 
 def verdict(kind: str, text: str, *, structural_refusal: bool) -> str:
-    """Re-run the *current* text detector over the stored answer.
+    """Re-run the current text detector over a stored answer.
 
-    Not the verdict recorded when the answers were produced. Comparing labels
-    against a frozen verdict measures nothing about a change to the patterns —
-    the first version of this script did exactly that, and would have reported
-    "no improvement" for a pattern that in fact fixed a case.
-
-    ``structural_refusal`` carries the one signal that cannot be recovered from
-    the text: the pipeline returning a Refusal object. The canned out-of-scope
-    reply matches no textual pattern, so recomputing from text alone scored
-    three correct injection refusals as failures.
+    The recorded verdict is ignored so that pattern changes are measured.
+    ``structural_refusal`` marks a Refusal object, which the text cannot show: the
+    canned out-of-scope reply matches no pattern.
     """
     from myscholar.evaluation.baseline import contradicts, declines
 
@@ -92,8 +82,8 @@ def main() -> int:
     print(f"  metric too lenient: {fp}")
     if fp == 0:
         print("\n  NOTE: every disagreement runs one way. A labelling pass by the")
-        print("  author of the system that only ever finds the metric too strict")
-        print("  is exactly the pattern to distrust — read the reasons below.")
+        print("  author of the system that only finds the metric too strict")
+        print("  deserves scrutiny: read the reasons below.")
 
     print("\ndisagreements:")
     for r in disagreements:

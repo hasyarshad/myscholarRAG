@@ -38,7 +38,7 @@ class TestFindDoi:
 
 class TestFindYear:
     def test_most_frequent_year_wins(self) -> None:
-        """Publication years repeat in header and footer; citation years vary."""
+        # Publication years repeat in header and footer; citation years vary.
         text = "IEEE Access 2021 ... published 2021 ... citing work from 2015 and 2018"
 
         assert find_year(text) == 2021
@@ -57,7 +57,6 @@ class TestSlugify:
         )
 
     def test_falls_back_when_the_title_is_empty(self) -> None:
-        """The fallback is slugified too — slugs go in URLs and unique keys."""
         assert slugify("", "Some File Name") == "some-file-name"
 
 
@@ -83,7 +82,6 @@ class TestMetadataExtractor:
         assert proposal.metadata.venue == "IEEE Access"
 
     async def test_nothing_is_verified_on_extraction(self) -> None:
-        """Verification is a human act; extraction only ever proposes."""
         model = FakeChatModel(structured_responses=[ExtractedMetadata(title="A paper", year=2021)])
 
         proposal = await MetadataExtractor(model).propose(
@@ -92,8 +90,7 @@ class TestMetadataExtractor:
 
         assert proposal.metadata.verified is False
 
-    async def test_regex_doi_beats_the_model(self) -> None:
-        """A pattern match against literal page text cannot hallucinate."""
+    async def test_regex_doi_overrides_the_model(self) -> None:
         model = FakeChatModel(
             structured_responses=[
                 ExtractedMetadata(title="A paper", doi="10.9999/INVENTED.0000000")
@@ -116,7 +113,6 @@ class TestMetadataExtractor:
         assert any("disagreement" in note for note in proposal.confidence_notes)
 
     async def test_model_failure_falls_back_to_the_filename(self) -> None:
-        """One unreadable first page must not abort a twenty-paper run."""
         proposal = await MetadataExtractor(FakeChatModel()).propose(
             first_page="unparseable", source_path=Path("Some Paper Title.pdf")
         )
@@ -155,7 +151,6 @@ class TestReviewFile:
         assert loaded["paper.pdf"].verified is False
 
     async def test_flagged_entries_are_listed_first(self, tmp_path: Path) -> None:
-        """The entries most likely to be wrong get read while attention is fresh."""
         clean = await MetadataExtractor(
             FakeChatModel(
                 structured_responses=[
@@ -170,7 +165,7 @@ class TestReviewFile:
 
         write_review_file([clean, flagged], target)
 
-        body = target.read_text()
+        body = target.read_text(encoding="utf-8")
         assert body.index("a.pdf") < body.index("z.pdf")
 
     def test_reading_a_verified_file_marks_entries_verified(self, tmp_path: Path) -> None:
@@ -182,7 +177,8 @@ class TestReviewFile:
             "  year: 2021\n"
             "  venue: IEEE Access\n"
             "  doi: null\n"
-            "  verified: true\n"
+            "  verified: true\n",
+            encoding="utf-8",
         )
 
         loaded = read_review_file(target)
@@ -192,7 +188,9 @@ class TestReviewFile:
 
     def test_malformed_entries_are_skipped_not_fatal(self, tmp_path: Path) -> None:
         target = tmp_path / "metadata.yaml"
-        target.write_text("- not_a_mapping\n- file: ok.pdf\n  title: Fine\n  verified: true\n")
+        target.write_text(
+            "- not_a_mapping\n- file: ok.pdf\n  title: Fine\n  verified: true\n", encoding="utf-8"
+        )
 
         loaded = read_review_file(target)
 

@@ -24,6 +24,3 @@ expanded context blocks the generator would receive.
 - How is unbalanced rotation in rotating machinery detected automatically?
 - Which inverter paper deals with the DC-link capacitor voltages staying balanced?
 - Which paper compares two established drive control strategies head to head?
-
-## Questions routing changed
-

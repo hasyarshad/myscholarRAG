@@ -29,12 +29,7 @@ TITLES = [
 
 
 class TestPatternClassification:
-    """The two classes that must never be got wrong get patterns, not judgement.
-
-    A misrouted bibliographic question produces a confidently fabricated
-    number; a misrouted greeting burns GPU on nothing. Both are cheap to match
-    exactly, and a pattern cannot drift the way a prompt can.
-    """
+    """Questions the classifier settles by pattern, before any model call."""
 
     @pytest.mark.parametrize(
         "question",
@@ -64,11 +59,6 @@ class TestPatternClassification:
         assert result.query_class is QueryClass.BIBLIOGRAPHIC
 
     def test_a_question_identifying_a_paper_by_venue_is_not_bibliographic(self) -> None:
-        """ "Which paper appeared in an IET journal" asks to find a paper.
-
-        An earlier pattern caught it as bibliographic, which sent it to a venue
-        listing instead of retrieval.
-        """
         result = QueryClassifier().classify_by_pattern(
             "Which multilevel converter paper appeared in an IET journal?"
         )
@@ -85,7 +75,6 @@ class TestPatternClassification:
         assert result.query_class is QueryClass.AMBIGUOUS
 
     def test_a_specific_question_is_not_ambiguous(self) -> None:
-        """ "Which work uses Lyapunov exponents" is answerable, however phrased."""
         assert (
             QueryClassifier().classify_by_pattern(
                 "Which work uses Lyapunov exponents and bifurcation diagrams?"
@@ -105,13 +94,6 @@ class TestPatternClassification:
         ],
     )
     def test_the_noun_may_be_left_implicit(self, question: str) -> None:
-        """ "How many did he publish in 2025" carries the noun in the verb.
-
-        Requiring the word "papers" missed every phrasing like this, and the
-        model then called them out_of_scope — a counting question stripped of
-        its noun reads like chitchat. Five of twelve realistic phrasings fell
-        through this way, including the one Haseeb actually asked.
-        """
         result = QueryClassifier().classify_by_pattern(question)
 
         assert result is not None
@@ -126,7 +108,6 @@ class TestPatternClassification:
         ],
     )
     def test_the_verb_form_does_not_swallow_content_questions(self, question: str) -> None:
-        """A wrong bibliographic route answers a count nobody asked for."""
         assert QueryClassifier().classify_by_pattern(question) is None
 
     @pytest.mark.parametrize(
@@ -140,8 +121,6 @@ class TestPatternClassification:
         ],
     )
     def test_recency_does_not_require_the_word_most(self, question: str) -> None:
-        """Only "most recent" matched, so "what is his recent paper?" went to
-        retrieval and named a 2021 chaos paper — confident, cited and wrong."""
         result = QueryClassifier().classify_by_pattern(question)
 
         assert result is not None
@@ -157,13 +136,7 @@ class TestPatternClassification:
         ],
     )
     def test_recency_words_do_not_swallow_content_questions(self, question: str) -> None:
-        """Two separate traps.
-
-        "work" is a verb as often as a noun, and the earlier pattern allowed
-        ".*" between the adjective and the noun, so "how does the latest
-        controller work" read as a request for the newest paper. And a topical
-        tail means the question is about the topic, not the collection.
-        """
+        # "work" is often a verb, and a topical tail makes the question about the topic.
         assert QueryClassifier().classify_by_pattern(question) is None
 
     @pytest.mark.parametrize(
@@ -171,8 +144,7 @@ class TestPatternClassification:
         [("how many in 2025", 2025), ("and how many in 2024?", 2024), ("how about 2023", 2023)],
     )
     def test_a_bare_count_and_year_is_a_follow_up(self, question: str, year: int) -> None:
-        """Asked of a bot scoped to one person's publications, this phrasing has
-        exactly one reading, so it is resolved without a model or a history."""
+        # For a corpus of one person's publications, this phrasing has one reading.
         result = QueryClassifier().classify_by_pattern(question)
 
         assert result is not None
@@ -199,17 +171,13 @@ class TestPatternClassification:
         ],
     )
     def test_cv_subjects_are_biographical(self, question: str) -> None:
-        """Awards, funding, teaching and credentials are on the CV and in no
-        paper. The model called them out_of_scope and refused outright, with
-        the answers sitting in the indexed CV."""
         result = QueryClassifier().classify_by_pattern(question)
 
         assert result is not None
         assert result.query_class is QueryClass.BIOGRAPHICAL
 
     def test_a_publication_count_is_not_captured_by_the_cv_pattern(self) -> None:
-        """ "University" appears in both, so order matters: the bibliographic
-        patterns are checked first."""
+        # "university" matches both patterns; the bibliographic ones are checked first.
         result = QueryClassifier().classify_by_pattern(
             "how many papers did he publish at the university"
         )
@@ -227,8 +195,7 @@ class TestPatternClassification:
         ],
     )
     def test_injection_attempts_are_out_of_scope_by_pattern(self, question: str) -> None:
-        """The only route to out_of_scope besides a greeting, now that the
-        model cannot choose that class."""
+        # The model cannot choose out_of_scope, so patterns are the only route to it.
         result = QueryClassifier().classify_by_pattern(question)
 
         assert result is not None
@@ -258,18 +225,12 @@ class TestModelClassification:
         assert result.decided_by == "model"
 
     async def test_a_model_failure_falls_back_to_a_content_search(self) -> None:
-        """An unclassifiable question deserves a general search, not a refusal."""
         result = await QueryClassifier(FakeChatModel(), titles=TITLES).classify("something odd")
 
         assert result.query_class is QueryClass.CROSS_PAPER_SYNTHESIS
         assert result.decided_by == "fallback"
 
     async def test_hallucinated_titles_are_dropped(self) -> None:
-        """A title that is not in the corpus becomes no filter at all.
-
-        Keeping it would filter the search to a document that does not exist,
-        which returns nothing.
-        """
         model = FakeChatModel(
             structured_responses=[
                 QueryClassification(
@@ -311,7 +272,6 @@ class TestPlanner:
         )
 
     def test_bibliographic_never_retrieves(self) -> None:
-        """No passage states the answer, so retrieving guarantees invention."""
         plan = QueryPlanner().plan(Classification(query_class=QueryClass.BIBLIOGRAPHIC))
 
         assert plan.use_sql is True
@@ -330,8 +290,6 @@ class TestPlanner:
         assert plan.canned_response
 
     def test_hyde_never_fires_on_a_factual_lookup(self) -> None:
-        """HyDE searches with an invented answer, so on a specific factual
-        question it invents a different specific fact."""
         plan = QueryPlanner().plan(Classification(query_class=QueryClass.SINGLE_PAPER_FACTUAL))
 
         assert TransformKind.HYDE not in plan.transforms
@@ -343,7 +301,6 @@ class TestPlanner:
         assert TransformKind.STEP_BACK in plan.transforms
 
     def test_synthesis_decomposes_and_caps_per_document(self) -> None:
-        """Without the cap a verbose paper monopolises a synthesis answer."""
         plan = QueryPlanner().plan(Classification(query_class=QueryClass.CROSS_PAPER_SYNTHESIS))
 
         assert TransformKind.DECOMPOSE in plan.transforms
@@ -360,14 +317,7 @@ class TestPlanner:
             assert SectionKind.REFERENCES in plan.exclude_sections
 
     def test_a_single_paper_question_anchors_rather_than_filtering(self) -> None:
-        """A resolved title used to become a document filter. It never happened.
-
-        The filter was wired from the classifier's extracted titles and did not
-        fire once in practice — "the FCS-MPTC paper" and "the MMC paper" both
-        extract nothing, correctly, since neither string appears in any title.
-        Anchoring covers that shorthand by concentrating on the best-matching
-        document instead of trying to name it.
-        """
+        # Shorthand such as "the MMC paper" matches no title, so the plan anchors on the best match.
         plan = QueryPlanner().plan(
             Classification(
                 query_class=QueryClass.SINGLE_PAPER_FACTUAL,
@@ -410,7 +360,6 @@ class TestNormalise:
         ],
     )
     def test_filler_is_stripped(self, question: str) -> None:
-        """Filler words are real tokens that dilute a short query's vector."""
         assert normalise(question).lower().startswith(("how", "the weighting"))
 
     def test_a_question_without_filler_is_unchanged(self) -> None:
@@ -423,14 +372,7 @@ class TestNormalise:
 
 
 class TestOutOfScopeIsNotAModelDecision:
-    """The model cannot choose out_of_scope; the schema does not offer it.
-
-    That class was its most attractive wrong answer, and every mistake was a
-    hard refusal — "how many awards has Haseeb won?" and "does he know
-    PyTorch?" were both declined with the answers sitting in the indexed CV.
-    Predicting whether an answer exists is a retrieval question, so it is left
-    to retrieval.
-    """
+    """The model cannot choose out_of_scope; whether an answer exists is left to retrieval."""
 
     def test_the_schema_does_not_offer_it(self) -> None:
         allowed = QueryClassification.model_json_schema()["properties"]["query_class"]["enum"]
@@ -439,13 +381,7 @@ class TestOutOfScopeIsNotAModelDecision:
         assert QueryClass.BIOGRAPHICAL.value in allowed
 
     async def test_an_unanswerable_question_takes_the_content_path(self) -> None:
-        """It is refused later, by the grader, on the evidence — with nearest
-        topics — rather than guessed at up front.
-
-        The question is off-corpus but not chitchat, so no pattern catches it
-        and the model must classify it. Whatever it picks, out_of_scope is not
-        available.
-        """
+        # Off-corpus but not chitchat, so no pattern matches and the model classifies it.
         model = FakeChatModel(
             structured_responses=[QueryClassification(query_class=QueryClass.CROSS_PAPER_SYNTHESIS)]
         )
@@ -470,8 +406,6 @@ class TestOutOfScopeIsNotAModelDecision:
         ],
     )
     def test_everyday_chitchat_is_still_matched_by_pattern(self, question: str) -> None:
-        """Without this the model reaches for `ambiguous`, and a weather
-        question is answered with "which paper do you mean?"."""
         result = QueryClassifier().classify_by_pattern(question)
 
         assert result is not None
@@ -479,26 +413,18 @@ class TestOutOfScopeIsNotAModelDecision:
 
 
 class TestTerminalClassesAreNotModelDecisions:
-    """A class that ends the turn without retrieving cannot be recovered from.
+    """A class that ends the turn without retrieval cannot be recovered from.
 
-    Bibliographic answers from SQL and ambiguous answers with a canned
-    clarification; both skip retrieval entirely. A wrong route into either is
-    final, while a wrong route into a content class still searches and can
-    still refuse on the evidence. The costs are not symmetric, so the model is
-    not asked to make the call.
+    The model is offered neither ambiguous nor out_of_scope; patterns choose them.
     """
 
     def test_ambiguous_is_not_offered_to_the_model(self) -> None:
-        """Asked "what accuracy did the acoustic fault detection framework
-        achieve?" — a specific framework and a specific quantity — the model
-        answered `ambiguous` and the visitor got "which paper do you mean?"."""
         allowed = QueryClassification.model_json_schema()["properties"]["query_class"]["enum"]
 
         assert QueryClass.AMBIGUOUS.value not in allowed
         assert QueryClass.OUT_OF_SCOPE.value not in allowed
 
-    def test_a_genuinely_bare_reference_is_still_caught(self) -> None:
-        """By pattern, which is where that judgement belongs."""
+    def test_a_bare_reference_is_still_caught_by_pattern(self) -> None:
         result = QueryClassifier().classify_by_pattern("Tell me about the paper")
 
         assert result is not None
@@ -516,8 +442,6 @@ class TestBibliographicIntentGuard:
         ],
     )
     def test_a_topical_question_yields_no_intent(self, question: str) -> None:
-        """Defaulting to LIST printed all twenty papers as the answer to a
-        question about a topic the corpus does not cover."""
         assert detect_intent(question) is None
 
     @pytest.mark.parametrize(
@@ -537,17 +461,10 @@ class TestBibliographicIntentGuard:
 
 
 class TestBoundsTrimRatherThanReject:
-    """Constrained decoding fixes a response's shape, not its string lengths.
+    """Over-long structured output is trimmed to its bounds instead of failing validation.
 
-    No backend enforces ``maxLength`` or ``maxItems`` — not Ollama's grammar,
-    not a hosted provider's ``json_schema``, not Google's OpenAI-compatible endpoint. Every
-    caller of `structured` treats a validation error as an outage and degrades
-    quietly, so a model writing one over-long field used to take the classifier
-    down the fallback path for every question, or silently stop a transform
-    running, or make the groundedness check pass everything through.
-
-    All three were observed against hosted models. `ports.llm.ModelOutput`
-    coerces to the bound instead; these cases pin the ones on the routing path.
+    No backend enforces ``maxLength`` or ``maxItems``, and callers of ``structured`` treat
+    a validation error as an outage. ``ports.llm.ModelOutput`` coerces to the bound.
     """
 
     def test_an_over_long_reasoning_trace_is_trimmed_not_refused(self) -> None:
@@ -566,7 +483,6 @@ class TestBoundsTrimRatherThanReject:
         assert len(SubQuestions(questions=[f"q{i}" for i in range(9)]).questions) == 4
 
     def test_values_inside_the_bounds_are_untouched(self) -> None:
-        # The trim must not be doing anything on the normal path.
         assert (
             QueryClassification(
                 query_class=QueryClass.BIOGRAPHICAL, reasoning="asks about the CV"

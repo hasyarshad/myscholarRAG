@@ -1,9 +1,7 @@
 """Turning a classification into a retrieval strategy.
 
-The whole point of classifying is that different questions want different
-treatment. This module is that mapping, kept as data rather than scattered
-through the retrieval code, so what fires when is readable in one place and
-changeable without touching the retriever.
+Kept as data in one place, so what runs for each class can be read and changed without
+touching the retriever.
 """
 
 from __future__ import annotations
@@ -33,7 +31,7 @@ class Plan:
     """True for bibliographic questions, answered from the metadata table."""
 
     canned_response: str | None = None
-    """Set for out-of-scope questions, which are answered without generation."""
+    """Set for out-of-scope and ambiguous questions, which are answered without generation."""
 
     needs_clarification: bool = False
 
@@ -42,48 +40,21 @@ class Plan:
     select_documents: int = 0
     """How many documents to choose by summary before searching passages.
 
-    Zero means no selection: search the whole corpus. That is the right
-    default and the right answer for a narrow factual question, where the
-    answer is one passage and it does not matter which paper holds it.
-
-    Selection is for questions about the *corpus* — "what has he done in X" —
-    where the paper that repeats the question's words most often is usually
-    not the paper that answers it.
+    Zero searches the whole corpus, which suits a narrow factual question. Selection
+    suits questions about the corpus ("what has he done in X"), where the paper that
+    repeats the question's words is often not the one that answers it.
     """
 
     anchor_to_top_document: bool = False
-    """Bring the best-matching document's passages to the front.
+    """Bring the best-matching document's passages to the front, for single-paper questions.
 
-    For a question about one paper, and it is the inverse of the per-document
-    cap below: that one spreads context across papers for a question about the
-    corpus, this one concentrates it for a question about a paper.
-
-    The measurement that motivated it, on "How are weighting factors tuned in
-    FCS-MPTC paper?":
-
-        C1  0.0318  Weighting Factors Optimization of MPTC   <- the right paper
-        C2  0.0295  Neutral Point Voltage Balancing (MOPSO)
-        C3  0.0283  Neutral Point Voltage Balancing (MOPSO)
-        C4  0.0271  Neutral Point Voltage Balancing (MOPSO)
-        C5  0.0260  Weighting Factors Optimization of MPTC   <- the right paper
-
-    The top-ranked passage names the right paper; the *aggregate* score does
-    not, because the other paper contributed three passages to its two. Summing
-    rewards a paper for appearing often, which is a popularity signal rather
-    than a relevance one, so the anchor is the single best block's document.
-
-    A reorder rather than a filter, deliberately. Three of these papers are
-    substantially about FCS-MPTC, so the anchor is a guess about which one is
-    meant; making it a filter would turn a wrong guess into an answer with no
-    way back, while reordering leaves the alternatives in context behind it.
+    The anchor is the top block's document, not the highest summed score: on "How are
+    weighting factors tuned in FCS-MPTC paper?" the top block came from the right
+    paper, but another paper supplied three of the top five blocks.
     """
 
     max_chunks_per_document: int | None = None
-    """Caps how much of the context one paper may occupy.
-
-    Without it a verbose paper monopolises a synthesis question, and the answer
-    silently becomes about that paper rather than about the corpus.
-    """
+    """Caps how many blocks one paper may contribute to the context."""
 
     boost_sections: frozenset[SectionKind] = frozenset()
     exclude_sections: frozenset[SectionKind] = field(default_factory=lambda: _ALWAYS_EXCLUDE)
@@ -97,7 +68,7 @@ class Plan:
 def out_of_scope_reply(name: str = "this researcher") -> str:
     return (
         f"I only answer questions about {name}'s research and background. "
-        f"Ask me about the papers — the methods used, what they found, or when "
+        f"Ask me about the papers: the methods used, what they found, or when "
         f"and where they were published."
     )
 
@@ -106,7 +77,6 @@ def ambiguous_reply() -> str:
     return "Which paper do you mean? A title, a topic or a year would let me answer precisely."
 
 
-OUT_OF_SCOPE_REPLY = out_of_scope_reply()
 AMBIGUOUS_REPLY = ambiguous_reply()
 
 
@@ -127,9 +97,8 @@ class QueryPlanner:
     def plan(self, classification: Classification) -> Plan:
         match classification.query_class:
             case QueryClass.OUT_OF_SCOPE:
-                # No retrieval, no generation. Retrieval would return the five
-                # chunks nearest to "what's the weather", which are arbitrary,
-                # and a helpful model would then use them.
+                # No retrieval or generation: the chunks nearest an off-topic
+                # question are arbitrary, and the model would use them.
                 return Plan(
                     query_class=QueryClass.OUT_OF_SCOPE,
                     retrieve=False,
@@ -145,8 +114,8 @@ class QueryPlanner:
                 )
 
             case QueryClass.BIBLIOGRAPHIC:
-                # SQL over verified metadata. No passage states the answer, so
-                # retrieving one guarantees a fabricated number.
+                # SQL over verified metadata. No passage states a count, so a
+                # generated answer would invent one.
                 return Plan(
                     query_class=QueryClass.BIBLIOGRAPHIC,
                     retrieve=False,
@@ -154,16 +123,8 @@ class QueryPlanner:
                 )
 
             case QueryClass.SINGLE_PAPER_FACTUAL:
-                # Narrow. The target is a specific fact, so expansion techniques
-                # add noise: HyDE would invent a different specific fact.
-                # There was a document-title filter here, wired from the
-                # classifier's extracted titles. It never fired once — not for
-                # "the FCS-MPTC paper", not for "the MMC paper", which is the
-                # design's own worked example — because neither string appears
-                # in any title and the classifier correctly declines to guess.
-                # Removed as never-implemented rather than as measured useless;
-                # nothing ever tested it, because nothing ever reached it.
-                # Anchoring covers the shorthand it was meant to.
+                # Narrow: expansion adds noise, and HyDE would invent a different
+                # specific fact. Anchoring handles shorthand such as "the MMC paper".
                 return Plan(
                     query_class=QueryClass.SINGLE_PAPER_FACTUAL,
                     transforms=(TransformKind.NORMALISE,),
@@ -173,37 +134,14 @@ class QueryPlanner:
                 )
 
             case QueryClass.CROSS_PAPER_SYNTHESIS:
-                # Widest budget, and the only class that caps per-document
-                # coverage, because the answer must span papers.
+                # The answer must span papers, so at most two blocks per document
+                # (at least five papers in ten slots). With a cap of four, a survey
+                # that repeats "machine learning" took 13 of 22 passages.
                 #
-                # The cap was 4 and that was too generous. Asked to rate
-                # Haseeb's contribution to machine learning, retrieval returned
-                # thirteen of twenty-two passages from a single *survey* of
-                # learning algorithms — a paper that discusses the term
-                # constantly — while the papers that actually apply machine
-                # learning, described in their own vocabulary as stacking
-                # ensembles and feature fusion, were retrieved and then crowded
-                # out before the cut. The answer named one line from the
-                # leadership page and concluded there was nothing else.
-                #
-                # A synthesis question is about the corpus, so no document may
-                # occupy more than a fifth of the context. Two per document
-                # across ten slots guarantees at least five papers are heard.
-                #
-                # HyDE is the other half, and the more important one. A
-                # question asks about "machine learning"; the papers that do it
-                # call it stacking ensembles, LFBLSTM base learners and feature
-                # fusion, and never compete on the question's own words. The
-                # only paper that does is the survey *about* learning
-                # algorithms, which is why it won.
-                #
-                # A hypothetical answer is written in the corpus's vocabulary
-                # rather than the asker's, which is exactly the gap. Measured
-                # on this question: the literal query returns six of ten
-                # passages from the survey, the hypothetical one returns the
-                # stacking framework, rotor imbalance and intrusion detection
-                # papers. Multi-query does not help — its variants are all
-                # rephrasings of the question, so they share its vocabulary.
+                # HyDE writes in the corpus's vocabulary ("stacking ensembles",
+                # "LFBLSTM") instead of the question's. On a machine-learning
+                # question the literal query returned six of ten passages from the
+                # survey; the hypothetical passage returned the applied papers.
                 return Plan(
                     query_class=QueryClass.CROSS_PAPER_SYNTHESIS,
                     transforms=(
@@ -214,10 +152,9 @@ class QueryPlanner:
                     ),
                     top_k=self._top_k,
                     context_blocks=10,
-                    # Eleven of twenty-five: nine papers plus the two slots
-                    # the selector reserves for the CV and the site pages. Set
-                    # at nine, the reservation came out of the papers' share
-                    # and selection recall fell from 88% to 79%.
+                    # Nine papers plus the two slots the selector reserves for the
+                    # CV and site pages. At nine in total, selection recall fell
+                    # from 88% to 79%.
                     select_documents=11,
                     max_chunks_per_document=2,
                 )
@@ -234,18 +171,10 @@ class QueryPlanner:
                     ),
                     top_k=self._top_k,
                     context_blocks=self._context_blocks,
-                    # A methodological question is about the corpus too — "how
-                    # does he tune weighting factors" spans whichever papers
-                    # tune them — but more narrowly than a synthesis question,
-                    # so it selects fewer documents.
-                    # Six papers plus the two reserved slots.
+                    # Narrower than synthesis: six papers plus the two reserved slots.
                     select_documents=8,
-                    # Capped, which it was not. Without a cap one paper takes
-                    # every slot: asked about strengths in machine learning,
-                    # retrieval returned eight passages from a single paper and
-                    # the answer cited one source for work spanning several.
-                    # Three per document over eight slots still allows depth
-                    # while guaranteeing at least three papers are heard.
+                    # Uncapped, one paper took all eight slots on a machine-learning
+                    # question. Three per document guarantees at least three papers.
                     max_chunks_per_document=3,
                     boost_sections=frozenset(
                         {SectionKind.METHODS, SectionKind.EXPERIMENTS, SectionKind.RESULTS}

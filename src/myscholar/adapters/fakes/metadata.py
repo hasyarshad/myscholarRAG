@@ -8,10 +8,8 @@ from myscholar.ports.metadata import MetadataResolutionError, MetadataResolver, 
 class FakeMetadataResolver(MetadataResolver):
     """Answers from a dict, so sync can be tested without a network.
 
-    ``fail_on`` makes a DOI raise rather than return nothing, since the two
-    outcomes must be handled differently: an unknown DOI falls back to
-    extraction, while an unreachable registry must not silently rewrite a
-    corpus with whatever it did manage to fetch.
+    A DOI in ``fail_on`` raises instead of returning None. An unknown DOI falls
+    back to extraction; an unreachable registry must not partially rewrite the corpus.
     """
 
     def __init__(

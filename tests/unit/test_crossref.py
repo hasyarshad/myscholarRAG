@@ -1,8 +1,7 @@
-"""The Crossref adapter, against a stubbed transport.
+"""The Crossref adapter against a stubbed transport.
 
-No network. httpx's MockTransport lets the real client code — retries, status
-handling, header construction — run against scripted responses, which is what
-makes these tests worth having over a hand-rolled fake.
+httpx's MockTransport runs the real client code (retries, status handling, headers)
+against scripted responses, with no network.
 """
 
 from __future__ import annotations
@@ -47,8 +46,7 @@ class TestParsing:
         assert record.source == "crossref"
 
     async def test_authors_become_initialled_surnames(self) -> None:
-        """Matching how the corpus already stores them, so a correction that
-        only reformats a name is not reported as a change."""
+        # The corpus stores names this way, so a reformatted name is not reported as a change.
         resolver = _resolver(lambda _: httpx.Response(200, json={"message": WORK}))
 
         record = await resolver.resolve("10.1109/tase.2023.3293049")
@@ -56,10 +54,9 @@ class TestParsing:
         assert record is not None
         assert record.authors == ("M. H. Arshad", "M. A. Abido")
 
-    async def test_the_issue_date_beats_the_deposit_date(self) -> None:
-        """``created`` is when Crossref first saw the record, which for an
-        online-first article is a year early — precisely the drift being
-        corrected, so reading the wrong field would entrench it."""
+    async def test_the_issue_date_is_preferred_over_the_deposit_date(self) -> None:
+        # ``created`` is when Crossref first saw the record, a year early for an
+        # online-first article.
         resolver = _resolver(lambda _: httpx.Response(200, json={"message": WORK}))
 
         record = await resolver.resolve("10.1109/tase.2023.3293049")
@@ -85,11 +82,7 @@ class TestParsing:
         ],
     )
     async def test_deposited_markup_is_undone(self, deposited: str, expected: str) -> None:
-        """Titles are deposited as XML fragments.
-
-        Caught on the first real run: the very first correction offered would
-        have replaced a correct title with "THD &amp;amp; EMI".
-        """
+        # Titles are deposited as XML fragments.
         work = {**WORK, "title": [deposited]}
         resolver = _resolver(lambda _: httpx.Response(200, json={"message": work}))
 
@@ -99,8 +92,6 @@ class TestParsing:
         assert record.title == expected
 
     async def test_a_record_without_a_title_is_unusable(self) -> None:
-        """Overwriting a good title with an empty one is worse than not
-        correcting at all."""
         resolver = _resolver(lambda _: httpx.Response(200, json={"message": {"DOI": "10.1/x"}}))
 
         assert await resolver.resolve("10.1/x") is None
@@ -108,8 +99,6 @@ class TestParsing:
 
 class TestRequests:
     async def test_the_polite_pool_header_is_sent(self) -> None:
-        """Crossref serves anonymous traffic from a slower pool, so omitting
-        this looks like the service being flaky rather than like a mistake."""
         seen: list[str] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -138,8 +127,7 @@ class TestRequests:
 
 class TestFailures:
     async def test_a_missing_doi_returns_nothing_without_retrying(self) -> None:
-        """404 is a normal outcome for a freshly minted DOI. Retrying it wastes
-        seconds per paper on every sync, and raising would abort the run."""
+        # 404 is a normal outcome for a newly minted DOI.
         calls = 0
 
         def handler(_: httpx.Request) -> httpx.Response:

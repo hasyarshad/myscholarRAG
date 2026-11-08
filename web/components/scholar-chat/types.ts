@@ -1,10 +1,6 @@
 /**
- * The wire contract, mirroring src/myscholar/api/schemas.py.
- *
- * Hand-written here rather than generated, because the project has one
- * consumer and a generation step would be more machinery than it saves. If a
- * second consumer appears, generate these from the OpenAPI schema instead —
- * two hand-maintained copies of a contract drift.
+ * The wire contract, mirroring src/myscholar/api/schemas.py. Hand-written; keep
+ * the two in step.
  */
 
 export type StageName =

@@ -1,34 +1,12 @@
-"""Export the embedder to ONNX, quantise it, and prove it still works.
+"""Export the embedder to ONNX, quantise it, and verify both against PyTorch.
 
     uv run --extra export python scripts/export_onnx.py
 
-Production cannot run PyTorch. The free tiers this deploys to give two CPU
-cores and no GPU, and `torch` alone is about two gigabytes before any model
-weights. ONNX Runtime is 15MB and the quantised embedder is roughly 110MB, so
-the difference is between an image that starts and one that does not.
-
-What ONNX does and does not buy is worth being precise about, because the usual
-framing is wrong. It removes *framework overhead* — the Python dispatch, the
-autograd bookkeeping, the general-purpose kernels — and replaces them with a
-fixed graph and kernels chosen for the shapes actually used. It does not remove
-parameters. That is why it is the right tool for a 110M embedder and useless
-for a 14B generator: nobody serves a 14B model on two CPU cores, which is why
-generation moves to a hosted API rather than into this file.
-
-**The parity check is the point of this script.** A broken export does not
-raise. It produces vectors, the vectors have the right shape, cosine similarity
-returns plausible numbers, and retrieval quietly gets worse in a way no test
-would catch — the same failure mode as the two-embedder bug this project was
-built to replace. So every export is verified against the PyTorch model it came
-from, on real corpus text, and the script fails if agreement drops below the
-threshold.
-
-Int8 is exported too, and is *not* what ships. The two wins are independent and
-have different risk profiles: dropping the framework is arithmetic-preserving —
-float32 agrees with PyTorch to 1.00000 and retrieves identically to five decimal
-places — while quantising changes the numbers, reaching 0.9888. Since float32 is
-provably lossless and the 306MB it costs are free on the target host, there is
-nothing to trade and int8 is kept only for comparison.
+Production runs on CPU without PyTorch (about 2GB); ONNX Runtime is about 15MB.
+A broken export still yields vectors of the right shape, so every export is
+compared with the PyTorch model on corpus text and the script fails below
+MIN_COSINE. Float32 is what ships: it agrees to 1.00000, while int8 reaches
+0.9888 and is kept only for comparison.
 """
 
 from __future__ import annotations
@@ -42,18 +20,12 @@ from typing import Any
 
 import numpy as np
 
-#: Agreement below which the export is rejected.
-#:
-#: Not a round number chosen for comfort: retrieval ranks by cosine similarity,
-#: and two vectors agreeing at 0.99 rank almost identically while 0.95 reorders
-#: neighbours. The check is on the *embeddings*, so it fails before a bad model
-#: reaches an index.
+#: Agreement below which the export is rejected. Vectors agreeing at 0.99 rank
+#: almost identically; at 0.95 neighbours reorder.
 MIN_COSINE = 0.99
 
-#: Sentences the parity check runs on. Drawn from the corpus rather than
-#: invented, because a quantised model degrades unevenly and the vocabulary
-#: that matters here is dense with identifiers — FCS-MPCC, NSGA-II, LSPMSM —
-#: which tokenise into many subwords and are exactly where precision loss shows.
+#: Parity sentences drawn from the corpus. Identifiers such as FCS-MPCC and NSGA-II
+#: split into many subwords, which is where quantisation loss shows.
 PROBES = [
     "Weighting factors are selected using NSGA-II combined with TOPSIS decision making.",
     "The proposed framework achieves 98.53% accuracy on the held-out recordings.",
@@ -75,16 +47,8 @@ def cosine(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 def pool(hidden: np.ndarray, mask: np.ndarray, mode: str) -> np.ndarray:
     """Reduce token vectors to one sentence vector, then L2 normalise.
 
-    This has to match what the PyTorch path does or parity measures the pooling
-    rather than the export — and that is not hypothetical. The first version
-    assumed mean pooling, which is the common default, and bge uses `cls`.
-    Every probe came back at 0.973 against a *float32* export that should have
-    agreed to five decimal places, and the check refused to ship it. Guessing
-    would have produced an index subtly misaligned with its queries: the exact
-    defect this project was built to replace, reintroduced at the last step.
-
-    So the mode is read from the model's own configuration rather than assumed,
-    and passed through to the adapter that serves it.
+    Must match the PyTorch model's pooling (bge uses `cls`); mean pooling against a
+    float32 export scored 0.973. The mode comes from ``pooling_mode``.
     """
     if mode == "cls":
         pooled = hidden[:, 0]
@@ -97,7 +61,7 @@ def pool(hidden: np.ndarray, mask: np.ndarray, mode: str) -> np.ndarray:
 
 
 def pooling_mode(model_id: str) -> str:
-    """What the sentence-transformers model actually does, not what is usual."""
+    """Read the pooling mode from the sentence-transformers model's configuration."""
     from sentence_transformers import SentenceTransformer
 
     for module in SentenceTransformer(model_id, device="cpu"):
@@ -109,35 +73,25 @@ def pooling_mode(model_id: str) -> str:
 
 def export(model_id: str, out: Path) -> Path:
     from optimum.onnxruntime import ORTModelForFeatureExtraction
-    from transformers import AutoTokenizer
+
+    # transformers comes with the optional `export` extra, so it may be absent.
+    from transformers import AutoTokenizer  # type: ignore[import-not-found, unused-ignore]
 
     out.mkdir(parents=True, exist_ok=True)
     print(f"exporting {model_id} -> {out}", flush=True)
 
     model = ORTModelForFeatureExtraction.from_pretrained(model_id, export=True)
     model.save_pretrained(out)
-    # transformers ships types but leaves this factory unannotated, so a strict
-    # run reports the call rather than the code. Narrow ignore, not a blanket
-    # override on the package: the rest of transformers is typed and worth
-    # checking — an earlier attempt to silence this by ignoring `transformers.*`
-    # wholesale turned two correct annotations elsewhere into errors.
-    AutoTokenizer.from_pretrained(model_id).save_pretrained(out)  # type: ignore[no-untyped-call]
+    # Unannotated when transformers is installed, Any when it is not.
+    AutoTokenizer.from_pretrained(model_id).save_pretrained(out)  # type: ignore[no-untyped-call, unused-ignore]
     return out
 
 
 def quantise(source: Path, out: Path) -> Path:
-    """Dynamic int8. Weights are quantised, activations measured at run time.
+    """Dynamic int8: weights quantised, activations measured at run time.
 
-    Dynamic rather than static because static needs a calibration set and buys
-    little for a model this size, and because a calibration set drawn from one
-    corpus is a way to overfit an artifact that should generalise.
-
-    Per-channel, which is not the default and is worth the flag: one scale per
-    output channel rather than one for the whole tensor. Measured on the probes,
-    agreement with PyTorch went 0.9732 -> 0.9888 for 4.6MB more. ``reduce_range``
-    was tried alongside and is much worse here (0.9128) — it exists for older
-    AVX2 hardware that saturates on int8 accumulation, and costs a bit of
-    precision to buy headroom this machine does not need.
+    Static quantisation would need a calibration set. Per-channel scales raised
+    agreement from 0.9732 to 0.9888 for 4.6MB more; ``reduce_range`` scored 0.9128.
     """
     from onnxruntime.quantization import QuantType, quantize_dynamic
 
@@ -205,15 +159,11 @@ def verify(model_id: str, directory: Path, label: str, mode: str) -> float:
 def benchmark(
     float_dir: Path, int8_dir: Path, model_id: str, mode: str, runs: int = 3
 ) -> dict[str, float]:
-    """Wall time for one batch, which is what a request actually pays.
-
-    All three paths on CPU, because that is the comparison that decides the
-    deployment. The GPU number is irrelevant to a host that has no GPU.
-    """
+    """Mean wall time in ms for one batch, all three paths on CPU."""
 
     def timed(call: Any) -> float:
-        call()  # Warm up. Session construction dominates the first call and is
-        started = time.perf_counter()  # paid once at boot, not per request.
+        call()  # Warm-up: session construction dominates the first call.
+        started = time.perf_counter()
         for _ in range(runs):
             call()
         return (time.perf_counter() - started) * 1000 / runs
@@ -245,8 +195,7 @@ def main() -> int:
     export(args.model, float_dir)
     quantise(float_dir, int8_dir)
 
-    # Recorded beside the weights, so the adapter that serves them does not
-    # have to guess either.
+    # Recorded beside the weights for the serving adapter.
     for directory in (float_dir, int8_dir):
         (directory / "pooling.json").write_text(json.dumps({"mode": mode}), "utf-8")
 
@@ -267,18 +216,13 @@ def main() -> int:
     (args.out / "parity.json").write_text(json.dumps(report, indent=2), "utf-8")
     print("\n" + json.dumps(report, indent=2))
 
-    # Only the float32 gate is fatal, because float32 is what ships. An export
-    # that produces plausible vectors from a broken graph is the failure this
-    # whole script exists to prevent, and shipping it would repeat the defect
-    # the project was built to replace.
+    # Only the float32 gate is fatal, because float32 is what ships.
     if float_score < MIN_COSINE:
         print(f"\nFAILED: float32 agreement below {MIN_COSINE}. Do not ship this artifact.")
         return 1
 
-    print(f"\nfloat32 agrees with PyTorch to {float_score:.5f} — safe to serve the GPU index")
+    print(f"\nfloat32 agrees with PyTorch to {float_score:.5f}: safe to serve the GPU index")
     if int8_score < MIN_COSINE:
-        # Not fatal, and not shipped. Kept because the size difference matters
-        # on some hosts and because the comparison is part of the evaluation.
         print(f"int8 agrees only to {int8_score:.5f}, so it is not interchangeable with the")
         print("index. Serve float32 unless size forces otherwise; if it does, re-index.")
     return 0

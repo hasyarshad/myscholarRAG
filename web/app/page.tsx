@@ -7,8 +7,8 @@ export default function Home() {
       <p className="lede">
         A retrieval-augmented assistant over Haseeb&rsquo;s research papers, CV
         and project write-ups. Every factual sentence carries a citation that
-        has been verified against the passage it came from — and when the corpus
-        does not cover something, it says so rather than inventing an answer.
+        has been verified against the passage it came from. When the corpus does
+        not cover something, it says so.
       </p>
       <ScholarChat />
     </main>

@@ -1,12 +1,7 @@
 """Typed application settings.
 
-One source of truth for every tunable. Settings are read from the environment
-with the ``MYSCHOLAR_`` prefix; nested groups use a double underscore, so
-``MYSCHOLAR_LLM__PROVIDER`` sets ``settings.llm.provider``.
-
-Keeping provider choices here — rather than at call sites — is what allows the
-same code to run against a local GPU in development and a hosted API in
-production.
+Read from the environment with the ``MYSCHOLAR_`` prefix. Nested groups use a double
+underscore, so ``MYSCHOLAR_LLM__PROVIDER`` sets ``settings.llm.provider``.
 """
 
 from __future__ import annotations
@@ -22,12 +17,7 @@ class LLMProvider(StrEnum):
     OLLAMA = "ollama"
 
     OPENAI_COMPATIBLE = "openai_compatible"
-    """Any endpoint speaking the OpenAI chat-completions shape.
-
-    Named for the wire format rather than a vendor. A previous vendor-specific
-    member was removed once measurement showed its free tier could not run the
-    pipeline: this project only ships paths a reader can reproduce for nothing.
-    """
+    """Any endpoint speaking the OpenAI chat-completions format."""
 
     FAKE = "fake"
 
@@ -44,55 +34,40 @@ class LLMSettings(BaseModel):
     provider: LLMProvider = LLMProvider.FAKE
 
     generator_model: str = "qwen3:14b"
-    """Model for final answer synthesis. Larger, slower, called once or twice.
+    """Model for answer synthesis.
 
-    A reasoning model. Ollama separates its reasoning trace into a distinct
-    field, so the answer text stays clean, but the trace still consumes the
-    token budget and adds latency.
+    A reasoning model: Ollama returns the trace in a separate field, but it still consumes
+    the token budget and adds latency.
     """
 
     utility_model: str = "qwen3:4b-instruct"
-    """Model for classification and grading. Called many times per question.
+    """Model for routing, rewriting and extraction, called many times per question.
 
-    Deliberately the *instruct* variant, not plain ``qwen3:4b``. The latter is
-    reasoning-only: it spends its whole token budget thinking before emitting
-    anything, so a short grading call returns empty content. Measured on a live
-    server — ``qwen3:4b`` used 16 tokens producing nothing, the instruct variant
-    answered in 2.
+    The instruct variant, because plain ``qwen3:4b`` is reasoning-only and spends a short
+    call's whole token budget thinking, returning empty content.
     """
 
     suppress_reasoning: bool = True
     """Append Qwen3's ``/no_think`` directive to shorten reasoning traces.
 
-    Harmless for instruct models and measurably cheaper for reasoning ones.
-    Note this is *not* Ollama's ``think`` parameter, which was measured to make
-    matters worse — see the Ollama adapter.
+    Harmless for instruct models. This is not Ollama's ``think`` parameter, which moves the
+    reasoning trace into the answer text (see the Ollama adapter).
     """
 
     reasoning_effort: str | None = None
-    """How much reasoning a hosted reasoning model should spend, if it supports it.
+    """Reasoning effort for a hosted reasoning model that supports it.
 
-    The OpenAI-compatible counterpart to ``suppress_reasoning`` above, which is
-    a Qwen3 prompt directive the hosted models ignore. Sent only when set, so a
-    model that rejects the parameter is unaffected by the default.
-
-    Measured on ``openai/gpt-oss-120b`` with the same prompt: unset spends 727
-    characters of reasoning and 254 completion tokens in 0.8s; ``"low"`` spends
-    49 characters and 122 tokens in 0.5s, for no visible difference in the
-    answer. Reasoning is billed and rate-limited like any other output token, so
-    on a free tier this is a saving as well as a latency win.
+    The OpenAI-compatible counterpart to ``suppress_reasoning``. Sent only when set, so a
+    model that rejects the parameter is unaffected by the default. ``"low"`` cut reasoning
+    tokens and latency with no visible change in the answer.
     """
 
     seed: int | None = 42
     """Fixed sampling seed, so repeated evaluation runs are comparable.
 
-    Disable it for an endpoint that rejects unknown parameters instead of
-    ignoring them. Google's OpenAI-compatible endpoint is one: it returns 400
-    `Unknown name "seed"` rather than dropping the field.
-
-    Environment variables are strings, and an unset optional integer has no
-    natural spelling in one, so ``""``, ``none``, ``null`` and ``off`` all mean
-    "do not send it" — see the validator below.
+    Disable it for an endpoint that rejects unknown parameters: Google's OpenAI-compatible
+    endpoint returns 400 ``Unknown name "seed"``. ``""``, ``none``, ``null`` and ``off`` all
+    mean "do not send it".
     """
 
     base_url: str = "http://localhost:11434"
@@ -101,18 +76,13 @@ class LLMSettings(BaseModel):
     @field_validator("seed", "reasoning_effort", mode="before")
     @classmethod
     def _empty_means_unset(cls, value: object) -> object:
-        """Let an env var switch an optional setting off.
-
-        Without this, ``MYSCHOLAR_LLM__SEED=`` raises rather than meaning None,
-        so the only way to disable it is to edit code — which a deployment
-        cannot do.
-        """
+        """Let an environment variable switch an optional setting off."""
         if isinstance(value, str) and value.strip().lower() in {"", "none", "null", "off"}:
             return None
         return value
 
     temperature: float = 0.0
-    """Zero by default. Grounded extraction wants determinism, not creativity."""
+    """Zero, for deterministic grounded answers."""
 
     timeout_seconds: float = 120.0
 
@@ -130,8 +100,7 @@ class LLMSettings(BaseModel):
 class EmbeddingSettings(BaseModel):
     """The embedder must be identical at index time and at query time.
 
-    ``model_id`` is stored alongside every vector
-    and checked at startup.
+    ``model_id`` is stored alongside every vector and checked at startup.
     """
 
     provider: EmbeddingProvider = EmbeddingProvider.HASH
@@ -139,39 +108,26 @@ class EmbeddingSettings(BaseModel):
     dim: int = 768
     batch_size: int = 32
     device: str = "cuda"
-    """Only consulted by the torch adapter; ONNX is CPU-only by design."""
+    """Only used by the torch adapter; ONNX runs on CPU."""
 
     onnx_path: Path = Path("artifacts/embedder-onnx")
-    """Where `scripts/export_onnx.py` wrote the graph this serves.
+    """Where ``scripts/export_onnx.py`` wrote the graph this serves.
 
-    The float32 export, not the quantised one, and the reason is that there is
-    nothing to trade. float32 agrees with PyTorch at 1.00000 cosine and returns
-    identical retrieval metrics to three decimals across all five evaluated
-    configurations, so serving it is indistinguishable from serving the model
-    the index was built with. int8 agrees at 0.9888, which is close enough to
-    look right and far enough to reorder near neighbours. It costs 306MB and
-    126ms per batch less — neither of which matters beside a hosted generation
-    call taking seconds. Point this at `embedder-onnx-int8` only if a host
-    forces the size, and re-index the corpus with it if you do.
+    The float32 export agrees with PyTorch at 1.00000 cosine and gives identical retrieval
+    metrics, so it can serve an index built with PyTorch. The int8 export agrees at 0.9888,
+    enough to reorder near neighbours; use it only if a host forces the size, and re-index.
     """
 
     onnx_model_id: str | None = None
     """Recorded with every vector this produces. None means "same as model_id".
 
-    Sharing the identifier is a claim, and the parity check is what earns it:
-    the float32 export agrees with PyTorch to 1.00000 on every probe, so the
-    two are the same embedder in every way the index can observe. That is what
-    lets ingestion run on the GPUs here and the container serve those vectors
-    from CPU without re-embedding anything.
-
-    Set it explicitly to something distinct when the graph is *not* equivalent
-    — int8 is the live example. The startup assertion then refuses the mismatch
-    instead of letting it degrade quietly, which is the old two-embedder bug.
+    Sharing the identifier is safe for the float32 export, which matches PyTorch exactly, so
+    vectors embedded on a GPU can be served from CPU. Set a distinct value for a graph that
+    is not equivalent (int8), and the startup check will refuse the mismatch.
     """
 
     onnx_threads: int = 0
-    """0 leaves ONNX Runtime's default. On a two-core host, oversubscribing
-    threads makes latency worse."""
+    """0 leaves ONNX Runtime's default. Oversubscribing threads on a two-core host is slower."""
 
     @model_validator(mode="after")
     def _default_onnx_id(self) -> EmbeddingSettings:
@@ -187,15 +143,10 @@ class DatabaseSettings(BaseModel):
     migrate_on_startup: bool = True
     """Whether the API creates its own tables when it boots.
 
-    Convenient locally, where the database is a user process owned by the same
-    person and the conversation table would otherwise only exist on a machine
-    that had run an ingest. Wrong in production for two reasons: the serving
-    role should hold no DDL rights at all, so the attempt either fails or proves
-    the role is over-privileged; and every replica racing to create the same
-    tables is a deadlock waiting for a second instance.
-
-    Set MYSCHOLAR_DATABASE__MIGRATE_ON_STARTUP=false there and run
-    `myscholar db migrate` once, as an admin, before deploying.
+    Convenient locally. In production the serving role should hold no DDL rights, and
+    replicas racing to create the same tables can deadlock: set
+    MYSCHOLAR_DATABASE__MIGRATE_ON_STARTUP=false and run ``myscholar db migrate`` once, as
+    an admin, before deploying.
     """
 
 
@@ -204,13 +155,7 @@ class RetrievalSettings(BaseModel):
     """Candidates fetched per branch before fusion."""
 
     context_blocks: int = 8
-    """How many context blocks reach the generator.
-
-    Named for what it does. It was `rerank_k` — the number surviving a
-    cross-encoder — but the cross-encoder was measured to make retrieval worse
-    on this corpus and has been removed, so the name described a stage that no
-    longer exists.
-    """
+    """How many context blocks reach the generator."""
 
     window: int = 2
     """Chunks of context pulled either side of a hit during parent expansion."""
@@ -220,17 +165,14 @@ class RetrievalSettings(BaseModel):
 
     dense_weight: float = 1.0
     lexical_weight: float = 1.0
-    """Equal to the dense weight, which was measured rather than assumed.
+    """Equal to the dense weight, as measured on the retrieval test set.
 
-    The initial 0.4 encoded a prior that meaning matters more than term
-    overlap. Swept over the retrieval test set, that prior was wrong for this
-    corpus: 0.4 scored MRR 0.887 while 1.0 scored 0.901, and 0.1-0.2 were worse
-    than disabling the branch entirely. A corpus this dense in identifiers
-    (FCS-MPCC, NSGA-II, T-Type VSI) rewards exact term matching more than
-    general-purpose advice suggests.
+    0.4 scored MRR 0.887 and 1.0 scored 0.901; 0.1-0.2 were worse than disabling the branch.
+    The corpus is dense in identifiers (FCS-MPCC, NSGA-II, T-Type VSI), which favours exact
+    term matching.
     """
     rrf_k: int = 60
-    """Reciprocal rank fusion constant. 60 is the value from the original paper."""
+    """Reciprocal rank fusion constant, the value from the original paper."""
 
 
 class ReasoningSettings(BaseModel):
@@ -242,19 +184,13 @@ class ReasoningSettings(BaseModel):
     deadline_seconds: float = 90.0
     """Wall clock for one question.
 
-    45s was too tight: a worst-case path is three generations plus grounding
-    checks, and a 14b model takes 8-10s per generation, so the deadline tripped
-    on answers that were already valid.
+    45s cut off answers that were already valid with the local ``qwen3:14b`` generator,
+    which takes 8-10s per generation.
     """
 
 
 class PersonSettings(BaseModel):
-    """Whose work this is.
-
-    Configurable rather than hardcoded, because the prompts, the canned
-    replies and the widget copy all name the person, and "this researcher"
-    reads like a template nobody finished filling in.
-    """
+    """Whose work this is. The prompts, canned replies and widget copy all name the person."""
 
     name: str = "Muhammad Haseeb Arshad"
     short_name: str = "Haseeb"
@@ -264,37 +200,26 @@ class PersonSettings(BaseModel):
 class RegistrySettings(BaseModel):
     """Where bibliographic facts are resolved from.
 
-    A DOI found on a paper's first page is matched by regex against the
-    literal text, so it cannot be invented. Resolving it replaces every other
-    bibliographic field with the record the publisher deposited, which removes
-    both the review step and the errors that survived it.
+    A DOI is matched by regex against a paper's first page, so it cannot be invented.
+    Resolving it replaces every other bibliographic field with the publisher's record.
     """
 
     enabled: bool = True
-    """Turn off to fall back to extraction plus the review file.
-
-    Kept switchable because it makes ingestion depend on a network service,
-    and a corpus must remain buildable offline.
-    """
+    """Turn off to fall back to extraction plus the review file, so a corpus builds offline."""
 
     mailto: str = "haseeb.arshad.ee@gmail.com"
-    """Contact address sent to Crossref, which routes to its polite pool.
+    """Contact address sent to Crossref, which routes requests to its polite pool.
 
-    Not authentication. Crossref serves anonymous traffic from a slower,
-    rate-limited pool, so omitting this looks like the service being flaky.
+    Not authentication. Anonymous traffic goes to a slower, rate-limited pool.
     """
 
     base_url: str = "https://api.crossref.org"
     timeout_seconds: float = 20.0
     publications_url: str = "https://haseeb-arshad.me/research"
-    """The page listing which papers are actually his.
+    """The page listing which papers are his.
 
-    Deliberately his own page rather than an author profile. OpenAlex's
-    profile for this name is merged with other people called Arshad and
-    credits him with a cangrelor neurointervention review and a 1989
-    air-conditioning paper; ORCID is clean but lists only half the corpus.
-    A page he maintains is the only source that is both correct and complete —
-    checked against the index, the two agree exactly, 20 for 20.
+    His own page, because OpenAlex's profile for this name merges other authors and ORCID
+    lists only half the corpus. It agrees with the index, 20 for 20.
     """
 
 
@@ -313,28 +238,16 @@ class ApiSettings(BaseModel):
     )
     """Browser origins permitted to call the API.
 
-    Exact origins, never a wildcard. Several localhost ports are listed
-    because a dev server lands wherever the port is free — hardcoding one and
-    then starting the site on another produced a preflight 400 and a widget
-    reporting "could not reach the assistant", with the API perfectly healthy.
-
-    Worth restating that CORS is a browser-only control: it stops a page on
-    another origin, and stops nothing from curl. The real gate in production is
-    the shared secret the Next.js proxy injects.
+    Exact origins, never a wildcard. Several localhost ports are listed because a dev server
+    takes whichever port is free. CORS only restricts browsers; ``shared_secret`` is the
+    access control.
     """
 
     shared_secret: SecretStr | None = None
     """Required on every /v1 request when set. Empty in development.
 
-    This is the control that actually restricts who reaches the endpoint. It is
-    held by the Next.js route handler, which runs on a server, so it never
-    enters a browser bundle — and it must not, since a secret shipped to the
-    client is decoration.
-
-    It authenticates *the site*, not the visitor, which is the right granularity
-    here: anyone may ask questions through the page, nobody may point a load
-    generator at a free-tier container directly. Generate with
-    `openssl rand -hex 32`.
+    Held by the Next.js route handler on the server, so it never reaches a browser bundle.
+    It authenticates the site, not the visitor. Generate with ``openssl rand -hex 32``.
     """
 
 

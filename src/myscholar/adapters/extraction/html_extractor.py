@@ -1,17 +1,8 @@
 """Extracting a web page into the same shape as a PDF.
 
-The portfolio site is the other half of what a visitor might ask about — the
-CV, the projects, the roles. None of it is in any paper, so without this the
-assistant correctly but unhelpfully refuses every biographical question.
-
-Fetched from the live site rather than read from the source repository, on the
-grounds that the published page is what a visitor actually sees, needs no
-credentials, and re-runs whenever the site changes. That only works because the
-pages are server-rendered; a client-rendered site would need a browser.
-
-Deliberately hand-rolled rather than pulling in a parser. The requirement is
-narrow — headings, paragraphs and list items from one known site — and the
-standard library's HTMLParser covers it in about a hundred lines.
+The portfolio site holds the CV, projects and roles, which no paper covers. Pages
+are fetched from the live, server-rendered site and parsed with the standard
+library's HTMLParser.
 """
 
 from __future__ import annotations
@@ -33,19 +24,13 @@ from myscholar.ports.extractor import (
     ExtractionError,
 )
 
-#: Elements whose text is chrome rather than content. Navigation and footers
-#: repeat on every page, so indexing them makes every page match every query
-#: about the site's own structure.
+#: Page chrome. Navigation and footers repeat on every page, so indexing them
+#: would make every page match queries about the site's structure.
 _SKIP = frozenset({"script", "style", "nav", "footer", "header", "noscript", "svg", "form"})
 
-#: Only h1 and h2 begin a section. Deeper headings become content within the
-#: one they sit under.
-#:
-#: Treating every heading as a section boundary shredded the CV: "Education"
-#: became an empty section and each degree beneath it became its own, so
-#: "MSc, Electrical Engineering: Control & Systems" was classified as a methods
-#: section. Grouping by the level that actually delimits content keeps the
-#: degrees inside Education, where a question about them will find them.
+#: Only h1 and h2 begin a section; deeper headings are content within it.
+#: Splitting at every heading left "Education" empty and made each degree its
+#: own section.
 _SECTION_HEADINGS = frozenset({"h1", "h2"})
 _SUB_HEADINGS = frozenset({"h3", "h4", "h5", "h6"})
 _HEADINGS = _SECTION_HEADINGS | _SUB_HEADINGS
@@ -53,29 +38,18 @@ _BLOCKS = frozenset({"p", "li", "td", "dd", "dt", "blockquote", "figcaption"})
 
 #: Boilerplate that survives the structural filter.
 _NOISE = re.compile(
-    # The copyright sign is matched separately: it is not a word character, so
-    # the trailing \b never fired after it and "© 2026" was let through. Only
-    # ever visible in a footer, which is skipped by tag — but the rule was
-    # silently doing nothing.
+    # © is matched separately: it is not a word character, so a trailing \b
+    # would never match after it.
     r"^\s*(©"
     r"|(skip to (main )?content|menu|close|toggle|back to top|copyright"
     r"|all rights reserved|cookie|accept|home)\b)",
     re.IGNORECASE,
 )
 
-#: Decoration that is genuinely contentless: the ordinals a styled list prints
-#: beside each entry ("01", "02"), and bare link labels.
-#:
-#: This replaced a 24-character minimum, which was written for prose pages and
-#: is actively wrong for a CV. Measured on /cv, the length rule discarded 99 of
-#: 200 blocks — every date range, every funder, every award amount, and the
-#: entire skills list down to "Python", "PyTorch" and "NSGA-II". The page
-#: looked indexed and answered biographical questions plausibly, which is what
-#: kept it hidden.
-#:
-#: Short is not the same as empty. On a CV the short strings *are* the data,
-#: and the structural filters above — skipped tags, then this — are what
-#: separate content from chrome.
+#: Contentless decoration: list ordinals ("01", "02") and bare link labels.
+#: Other short strings are kept, because on a CV they are the data: a
+#: 24-character minimum discarded 99 of 200 blocks on /cv, including dates,
+#: funders and the skills list.
 _CHROME = re.compile(r"^(\d{1,3}|doi|pdf|link|url|[ivxlc]+)$", re.IGNORECASE)
 
 
@@ -91,8 +65,7 @@ class _Reader(HTMLParser):
     blocks: list[ExtractedBlock] = field(default_factory=list)
     title: str = ""
     page_title: str = ""
-    """From the <title> element — a real title, unlike an h1 that is often a
-    tagline sentence."""
+    """From the <title> element; an h1 is often a tagline sentence."""
 
     def __post_init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -137,9 +110,7 @@ class _Reader(HTMLParser):
             return
 
         if tag in _SECTION_HEADINGS:
-            # The first h1 is the page's own heading, not a section within it —
-            # unless a section heading has already been seen, in which case the
-            # page has an unusual structure and it is better treated as one.
+            # The first h1 is the page title, unless a section heading came before it.
             if tag == "h1" and not self.title and not self._seen_section_heading:
                 self.title = text
                 return
@@ -148,35 +119,24 @@ class _Reader(HTMLParser):
                 ExtractedBlock(kind=ChunkKind.PROSE, text=text, page=1, heading=text)
             )
         elif tag in _SUB_HEADINGS:
-            # Content, not a boundary. Kept because it names what follows —
-            # a degree, a role, a project — which the surrounding prose often
-            # does not repeat.
+            # Kept as content: it names what follows (a degree, role or project).
             self.blocks.append(ExtractedBlock(kind=ChunkKind.PROSE, text=text, page=1))
         elif is_content(text):
             self.blocks.append(ExtractedBlock(kind=ChunkKind.PROSE, text=text, page=1))
 
 
-#: A block that is nothing but a date or a date range.
-#:
-#: The CV lists awards, roles and degrees with the date *first* and each part
-#: on its own line, so the extracted blocks arrive as
+#: A block that is nothing but a date or a date range. The CV puts the date
+#: first, with each part of an entry on its own line:
 #:
 #:     "2023-2025" / "Alberta Innovates Scholarship" / "University of Alberta"
-#:     "2022-23, 2025-26" / "Alberta Graduate Excellence Scholarship" / ...
 #:
-#: Concatenated, the boundaries vanish: "...held for two years. 2022-23,
-#: 2025-26 Alberta Graduate Excellence Scholarship...". Asked for his most
-#: recent award at the University of Alberta, the assistant read the 2025-26
-#: range as belonging to the entry before it and named the wrong scholarship —
-#: fluently, and with a valid citation to a passage that really does contain
-#: both strings.
+#: Concatenated into a chunk, a date reads as part of the previous entry.
 _DATE_ONLY = re.compile(
     r"^\s*((since|from|until)\s+)?"
-    # Repeatable, so "Jan-Dec 2022" and "Sep-Dec 2025" match as well as
-    # "Jun 2025". A month range shares one year, printed once at the end.
+    # Repeatable, so a month range sharing one year ("Jan-Dec 2022") matches.
     r"((jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*[\-–—/]?\s*)*"  # noqa: RUF001
     r"(19|20)\d{2}"
-    # En and em dashes are what the CV actually uses between years.
+    # The CV separates years with en and em dashes.
     r"([\s\-–—/,]+((jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*)?"  # noqa: RUF001
     r"((19|20)?\d{2}|present|now|date))*"
     r"\s*$",
@@ -185,16 +145,9 @@ _DATE_ONLY = re.compile(
 
 
 def group_dated_entries(blocks: list[ExtractedBlock]) -> list[ExtractedBlock]:
-    """Fold each date-led run of blocks into one block.
+    """Fold each date-led run of blocks into one block that opens with its date.
 
-    A list where the date comes first is only readable while the line breaks
-    survive. Once the parts are concatenated into a chunk, the reader has to
-    guess which date belongs to which entry, and a model guesses wrong at the
-    boundaries.
-
-    Grouping restores the association explicitly: one block per entry, opening
-    with its own date. Blocks before the first date are left alone, so prose
-    sections are untouched.
+    Blocks before the first date are left alone, so prose sections are untouched.
     """
     grouped: list[ExtractedBlock] = []
     entry: list[ExtractedBlock] = []
@@ -205,11 +158,8 @@ def group_dated_entries(blocks: list[ExtractedBlock]) -> list[ExtractedBlock]:
         head, *rest = entry
         parts = [head.text.strip().rstrip(".,"), *(b.text.strip() for b in rest)]
         text = " — ".join(p for p in parts if p)
-        # Terminated, because entries are concatenated into a chunk with only a
-        # space between them. Without a full stop the reader sees
-        # "...(ISIE) 2023-2025 - Alberta Innovates..." and attaches the date to
-        # the entry before it — which is exactly how the wrong scholarship got
-        # named as his most recent.
+        # Terminated, because a chunk joins entries with only a space; without a
+        # full stop the next entry's date reads as part of this one.
         grouped.append(replace(head, text=text if text.endswith(".") else text + "."))
         entry.clear()
 
@@ -264,9 +214,8 @@ class HtmlExtractor(DocumentExtractor):
             )
             raise ExtractionError(msg)
 
-        # Hashed on the extracted text, not the raw HTML: build ids and asset
-        # hashes change on every deploy, and hashing those would re-ingest an
-        # unchanged page every time.
+        # Hashed on the extracted text: build ids and asset hashes in the HTML
+        # change on every deploy.
         digest = hashlib.sha256(
             "\n".join(b.text for b in reader.blocks).encode("utf-8")
         ).hexdigest()
@@ -284,14 +233,10 @@ class HtmlExtractor(DocumentExtractor):
 def _page_title(document_title: str, heading: str, url: str) -> str:
     """A short, recognisable name for the page.
 
-    The <title> element is preferred over the h1: a portfolio h1 is frequently
-    a tagline sentence, and using one produced a document titled "I work on
-    electric drives. Finding faults before they spread, and keeping control
-    when the model is wrong." — which then appeared as the source of every
-    citation to that page.
+    Prefers <title> over the h1, which on a portfolio is often a tagline sentence.
     """
     if document_title:
-        # Strip a site-name suffix: "CV — Haseeb Arshad" becomes "CV".
+        # Strip a site-name suffix: "CV | Site Name" becomes "CV".
         head = re.split(r"\s+[|\u00b7\u2014\u2013\u2022-]\s+", document_title)[0].strip()
         if head:
             return head
